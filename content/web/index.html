@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>咕咕 · 家长页</title>
+<style>
+body{font-family:-apple-system,"PingFang SC",Helvetica,Arial,sans-serif;margin:0;background:#f6f1e8;color:#2b2420}
+header{background:#3a2b24;color:#f6d27a;padding:14px 18px;font-size:18px}
+main{max-width:720px;margin:0 auto;padding:12px}
+section{background:#fff;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h2{font-size:15px;margin:0 0 10px;color:#6b4a30}
+label{display:block;font-size:13px;color:#555;margin:8px 0 2px}
+input,select{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:14px}
+button{background:#d9413b;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-size:14px;margin-top:10px}
+button.secondary{background:#8c6442}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.muted{color:#888;font-size:12px}.row{display:flex;gap:10px}.row>*{flex:1}
+.call{cursor:pointer}.call:hover{background:#fdf6ea}
+</style></head><body>
+<header>咕咕 · 家长页 <span class="muted" id="status" style="color:#ccc"></span></header>
+<main>
+<section><h2>通话记录</h2><div id="calls" class="muted">加载中…</div>
+<button class="secondary" onclick="location.href='/api/export'">导出全部记录</button></section>
+<section id="detail" style="display:none"><h2 id="detailTitle">通话</h2><div id="turns"></div></section>
+<section><h2>设置</h2>
+<div class="row"><div><label>孩子的名字</label><input id="child_name"></div><div><label>年龄（月）</label><input id="child_age_months" type="number"></div></div>
+<div class="row"><div><label>语言 1</label><select id="lang1"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div>
+<div><label>语言 2</label><select id="lang2"><option value="">（无）</option><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div>
+<div><label>语言 3</label><select id="lang3"><option value="">（无）</option><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
+<div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一通电话最长（分钟）</label><input id="max_call_min" type="number"></div></div>
+<button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
+<section><h2>网络与密钥（只写不显示）</h2>
+<div class="row"><div><label>Wi-Fi 名称</label><input id="wifi_ssid"></div><div><label>Wi-Fi 密码</label><input id="wifi_pass" type="password"></div></div>
+<label>MiniMax API Key</label><input id="minimax_api_key" type="password">
+<button onclick="saveSecrets()">保存并重连</button> <span id="secretMsg" class="muted"></span>
+<p class="muted">保存后设备会在下次通话前使用新设置；Wi-Fi 更换后请重启设备。</p></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+async function j(u,o){const r=await fetch(u,o);return r.json()}
+async function load(){
+  try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`}catch(e){}
+  try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang1','lang2','lang3','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
+  try{const calls=await j('/api/calls');if(!calls.length){$('calls').textContent='还没有通话。';return}
+    calls.reverse();const rows=calls.map(c=>`<tr class="call" onclick="showCall('${c.file}','${c.id}')"><td>${new Date(c.started_ms).toLocaleString()}</td><td>${c.turns} 轮</td><td class="muted">${c.summary?(c.summary.seconds+' 秒'):''}</td></tr>`).join('');
+    $('calls').innerHTML=`<table>${rows}</table>`}catch(e){$('calls').textContent='读取失败'}
+}
+async function showCall(file,id){const turns=await j('/api/call?file='+encodeURIComponent(file));$('detail').style.display='block';$('detailTitle').textContent='通话 '+id;
+  $('turns').innerHTML=turns.map(t=>`<div style="margin:8px 0"><div><b>孩子</b>（${t.lang}）：${t.transcript}</div><div><b>咕咕</b>：${t.reply}</div><div class="muted">首次出声 ${t.ms.first_play} ms · 识别 ${t.ms.asr} ms · 首字 ${t.ms.first_token} ms · 结束 ${t.ms.done} ms</div></div>`).join('')||'<span class="muted">空</span>';
+  $('detail').scrollIntoView()}
+async function saveSettings(){const b={};for(const k of ['child_name','lang1','lang2','lang3'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
+  const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});$('saveMsg').textContent=r.ok?'已保存':'失败'}
+async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++;$(k).value=''}$('secretMsg').textContent=`已保存 ${n} 项`}
+load();
+</script></body></html>

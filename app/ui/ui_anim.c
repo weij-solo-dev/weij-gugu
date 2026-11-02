@@ -1,0 +1,171 @@
+// ui_anim.c — the expression animation table: beak sync while speaking, blink and breathe when idle,
+// one-shot actions (nod, wave, puff, coo, whistle), the listening ring. Runs on LVGL timers inside the
+// UI task; other modules only poke the small API in ui.h.
+//
+// Everything that moves often is small: the beak (12 Hz while speaking) and the eyelids (a blink) are
+// patches drawn over the pre-scaled base sprite, so one frame repaints a few hundred pixels. The whole
+// pigeon is repainted only on an emotion change, the two-frame breathe (one base pixel every 1.2 s)
+// and the one-shot actions; the listening ring is static, a small dot pulses instead.
+#define LOG_TAG "ui"
+#include "ui_internal.h"
+#include "board/board.h"
+#include "foundation/log.h"
+#include <stdlib.h>
+
+static lv_obj_t *s_ring, *s_dot;
+static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
+static bool s_mouth_open, s_idle = true, s_blinking, s_breathe_low;
+static uint32_t s_wave_until, s_puff_until;
+static lv_timer_t *s_blink_timer, *s_mouth_timer, *s_breathe_timer, *s_dot_timer;
+static uint8_t s_level;
+
+static int rest_y(void) { return GUGU_BASE_Y + (s_breathe_low ? UI_SPRITE_SCALE : 0); }
+
+static void refresh_sprite(void)
+{
+    uint32_t now = lv_tick_get();
+    const lv_image_dsc_t *base;
+    const ui_patch_t *beak = NULL, *eyes = NULL;
+    if (s_puff_until && now < s_puff_until) base = s_mouth_open ? &spr_gugu_puff_open : &spr_gugu_puff;
+    else if (s_wave_until && now < s_wave_until) base = s_mouth_open ? &spr_gugu_wave_open : &spr_gugu_wave;
+    else {
+        base = ui_emotion_sprites[s_emotion];
+        if (s_mouth_open) {
+            if (ui_beak_patch[s_emotion].img) beak = &ui_beak_patch[s_emotion];
+            else base = ui_emotion_sprites_open[s_emotion];        // no patch for this face: swap the sprite
+        }
+        if (s_blinking && ui_blink_patch.img && ui_blink_fits[s_emotion]) eyes = &ui_blink_patch;
+    }
+    ui_show_base(base);
+    ui_show_beak(beak);
+    ui_show_eyes(eyes);
+}
+
+void ui_anim_emotion_changed(ui_emotion_t e) { s_emotion = e; refresh_sprite(); }
+
+// ---- mouth: open when loud, 12 Hz decision so the beak flaps with syllables ----
+static void mouth_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    bool open = s_level > 28 && ((lv_tick_get() / 83) & 1);   // alternate frames while loud
+    if (open != s_mouth_open) { s_mouth_open = open; refresh_sprite(); }
+    if (s_wave_until && lv_tick_get() >= s_wave_until) { s_wave_until = 0; refresh_sprite(); }
+    if (s_puff_until && lv_tick_get() >= s_puff_until) { s_puff_until = 0; refresh_sprite(); }
+}
+
+void ui_set_mouth(uint8_t level) { s_level = level; }
+
+// ---- blink: only faces whose eyes match the neutral eyelid patch blink ----
+static void blink_close_cb(lv_timer_t *t);
+static void blink_open_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_blinking = false; refresh_sprite();
+    lv_timer_set_period(s_blink_timer, 2500 + (uint32_t)(rand() % 3000));
+    lv_timer_set_cb(s_blink_timer, blink_close_cb);
+}
+static void blink_close_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!s_idle || s_mouth_open || !ui_blink_fits[s_emotion] || (s_puff_until && lv_tick_get() < s_puff_until) ||
+        (s_wave_until && lv_tick_get() < s_wave_until)) return;
+    s_blinking = true; refresh_sprite();
+    lv_timer_set_period(s_blink_timer, 120);
+    lv_timer_set_cb(s_blink_timer, blink_open_cb);
+}
+
+// ---- breathe: a two-frame bob of one base pixel, like the rest of the pixel art ----
+static void breathe_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_breathe_low = !s_breathe_low;
+    lv_obj_set_y(ui_gugu_img, rest_y());
+}
+
+void ui_set_idle(bool on)
+{
+    s_idle = on;
+    if (!on && s_blinking) { s_blinking = false; refresh_sprite(); }
+}
+
+// ---- one-shot actions ----
+static void bob_exec(void *obj, int32_t v) { lv_obj_set_y(obj, rest_y() + v); }
+static void bob_done(lv_anim_t *a) { (void)a; lv_obj_set_y(ui_gugu_img, rest_y()); }
+static void bob(int32_t depth, uint32_t ms, uint32_t repeat)
+{
+    lv_anim_t n; lv_anim_init(&n);
+    lv_anim_set_var(&n, ui_gugu_img); lv_anim_set_exec_cb(&n, bob_exec);
+    lv_anim_set_values(&n, 0, depth); lv_anim_set_duration(&n, ms); lv_anim_set_playback_duration(&n, ms);
+    lv_anim_set_repeat_count(&n, repeat); lv_anim_set_completed_cb(&n, bob_done);
+    lv_anim_start(&n);
+}
+
+void ui_play_action(ui_action_t a)
+{
+    ui_lock();
+    switch (a) {
+    case UI_ACT_NOD: bob(2 * UI_SPRITE_SCALE, 140, 2); break;
+    case UI_ACT_WAVE: s_wave_until = lv_tick_get() + 900; refresh_sprite(); break;
+    case UI_ACT_PUFF: s_puff_until = lv_tick_get() + 1500; refresh_sprite(); break;
+    case UI_ACT_COO: case UI_ACT_WHISTLE: bob(UI_SPRITE_SCALE, 90, 0); break;   // a quick squash; the sound is the caller's
+    }
+    ui_unlock();
+}
+
+// ---- listening: a static ring at the rim plus a small dot that pulses at the top ----
+static void dot_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (lv_obj_has_flag(s_dot, LV_OBJ_FLAG_HIDDEN)) lv_obj_remove_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ui_set_listening(bool on)
+{
+    ui_lock();
+    if (on) {
+        lv_obj_remove_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
+        lv_timer_resume(s_dot_timer);
+    } else {
+        lv_timer_pause(s_dot_timer);
+        lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
+    }
+    ui_unlock();
+}
+
+void ui_anim_init(lv_obj_t *scr)
+{
+    s_ring = lv_arc_create(scr);
+    lv_obj_set_size(s_ring, BOARD_DISPLAY_W - 6, BOARD_DISPLAY_H - 6);
+    lv_obj_center(s_ring);
+    lv_arc_set_bg_angles(s_ring, 0, 360);
+    lv_arc_set_value(s_ring, 100);
+    lv_arc_set_range(s_ring, 0, 100);
+    lv_obj_remove_style(s_ring, NULL, LV_PART_KNOB);
+    lv_obj_remove_flag(s_ring, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(s_ring, 6, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_ring, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(s_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_ring, lv_color_hex(0xF6D27A), LV_PART_INDICATOR);
+    lv_obj_add_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
+
+    s_dot = lv_obj_create(scr);
+    lv_obj_set_size(s_dot, 5 * UI_SPRITE_SCALE, 5 * UI_SPRITE_SCALE);
+    lv_obj_set_pos(s_dot, (BOARD_DISPLAY_W - 5 * UI_SPRITE_SCALE) / 2, 4 * UI_SPRITE_SCALE);
+    lv_obj_set_style_radius(s_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_dot, lv_color_hex(0xF6D27A), 0);
+    lv_obj_set_style_bg_opa(s_dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_dot, 0, 0);
+    lv_obj_set_style_pad_all(s_dot, 0, 0);
+    lv_obj_remove_flag(s_dot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
+
+    s_blink_timer = lv_timer_create(blink_close_cb, 3000, NULL);
+    s_mouth_timer = lv_timer_create(mouth_timer_cb, 40, NULL);
+    s_breathe_timer = lv_timer_create(breathe_cb, 1200, NULL);
+    s_dot_timer = lv_timer_create(dot_cb, 300, NULL);
+    lv_timer_pause(s_dot_timer);
+    refresh_sprite();
+}

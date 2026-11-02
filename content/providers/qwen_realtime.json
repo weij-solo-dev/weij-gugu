@@ -1,0 +1,17 @@
+{
+  "id": "qwen_realtime",
+  "name": "阿里百炼 · 实时",
+  "order": 3,
+  "console_url": "https://bailian.console.aliyun.com/",
+  "regions": ["domestic", "overseas"],
+  "credentials": [ { "key": "api_key", "secret": true } ],
+  "capabilities": { "asr_stream": true, "tts_bidi": false, "s2s": true, "image": false },
+  "asr": {
+    "api": "openai_realtime",
+    "url": { "domestic": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-asr-flash-realtime",
+             "overseas": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=qwen3-asr-flash-realtime" },
+    "model": "qwen3-asr-flash-realtime",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "prices_cny": { "asr_per_hour": 1.2 }
+}

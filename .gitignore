@@ -1,0 +1,26 @@
+# secrets
+.env
+.env.*
+*.secrets
+secrets.env
+# ESP-IDF
+build/
+host/build/
+test/build/
+sdkconfig
+sdkconfig.old
+managed_components/
+host/managed_components/
+test/managed_components/
+# generated
+__pycache__/
+*.pyc
+.DS_Store
+# simulator runtime data
+host/data/
+test/fixtures/live_*
+# generated TTS stand-ins (regenerate with tools/eval/make_fixtures.py speech)
+test/fixtures/speech/*.wav
+
+# release bundles (tools/release/make_bundle.sh)
+dist/

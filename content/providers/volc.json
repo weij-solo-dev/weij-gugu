@@ -1,0 +1,31 @@
+{
+  "id": "volc",
+  "name": "火山引擎 · 豆包",
+  "order": 4,
+  "console_url": "https://console.volcengine.com/speech/",
+  "regions": ["domestic"],
+  "credentials": [ { "key": "api_key", "secret": true }, { "key": "ark_api_key", "secret": true } ],
+  "capabilities": { "asr_stream": true, "tts_bidi": true, "s2s": false, "image": false },
+  "asr": {
+    "api": "volc_sauc_v3",
+    "url": { "domestic": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream" },
+    "model": "bigmodel",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "chat": {
+    "api": "openai_chat",
+    "url": { "domestic": "https://ark.cn-beijing.volces.com/api/v3/chat/completions" },
+    "model": "doubao-seed-2-0-pro-260215",
+    "extra_body": { "low": { "thinking": { "type": "disabled" } }, "medium": {}, "high": {} },
+    "credential_map": { "apiKey": "ark_api_key" }
+  },
+  "tts": {
+    "api": "volc_tts_bidirection_v3",
+    "url": { "domestic": "wss://openspeech.bytedance.com/api/v3/tts/bidirection" },
+    "model": "seed-tts-2.0",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "default_voice": { "*": "zh_female_shuangkuaisisi_uranus_bigtts" },
+  "voices": { "*": [ { "id": "zh_female_shuangkuaisisi_uranus_bigtts", "name": "爽快思思（中 / 粤方言 / 英）" } ] },
+  "prices_cny": { "asr_per_hour": 1.0, "tts_per_10k_chars": 3.0, "chat_in_per_m": 0.8, "chat_out_per_m": 2.0 }
+}

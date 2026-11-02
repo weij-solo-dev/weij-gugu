@@ -1,0 +1,99 @@
+# gugu · 咕咕
+
+**住在小圆窗里的一只旅行信鸽。**
+
+咕咕是一款面向 3–5 岁孩子的电子宠物：一只拟人化的信鸽，住在孩子窗台上的鸽子屋里，由 M5Stack
+StopWatch 扮演。那是一块 52 毫米的圆形 AMOLED 小板子，自带麦克风、喇叭、运动传感器和电池。
+咕咕隔几天出一趟门，在路上每天寄一张明信片回家，孩子随时可以打电话给它，它回家时带一件小纪念品和
+一段故事。孩子说英文、普通话或粤语，咕咕就用孩子的语言、同一个温暖略沙哑的声音回答。
+
+[English → README.md](README.md)
+
+> 状态：**原型 v1.0 验收中。** 完整的按住说话对话已在 StopWatch 真机上经家庭 Wi-Fi 对接 MiniMax 跑通三语
+> （首音 P50 2.7 秒，目标 2 秒），主机模拟器同样可跑。完整的计划与决策日志见 [`PLAN.md`](PLAN.md)。
+
+## 它和别的不一样的地方
+
+- **天生放置。** 像旅行青蛙一样，乐趣在等待和惊喜里。没有任务、打卡、数值和等级。咕咕不会死，也不催人。
+- **一个声音，三种语言。** 孩子按住按键说话，咕咕用口语粤语、普通话或英文回答，同一个声音、同一个性格。
+- **会长大的故事。** 咕咕有一页种子设定（送它小拖箱的奶奶、每个城市的动物朋友），还有一层慢慢生长的设定：
+  它说出口的就成真，一周长一两条，永不自相矛盾。
+- **记得孩子。** 名字、朋友、害怕的东西、新学会的事，几天后自然提起。
+- **家长看得见，不要账号。** 每通电话的转写、每张明信片、每条记忆都在设备里；连上热点打开网页就能看、
+  能导出、能删除。
+
+## 怎么做的
+
+整个产品就是 **固件 + 服务商 API**。没有服务器、代理、账号和 App。
+
+```text
+ StopWatch（ESP32-S3，ESP-IDF C）──TLS──▶ MiniMax · 阿里通义 · 火山引擎
+   ├─ 按住说话的电话：ASR → LLM → 表情标签 → TTS，首音 ≤ 2 秒
+   ├─ 它的生活：旅行日历、明信片、纪念品、三本记忆，全在 LittleFS
+   ├─ 466×466 圆屏上的像素风小家，13 个表情由模型驱动
+   └─ 家长模式：设备自带热点 + 强制门户 + 网页
+```
+
+- **硬件：** M5Stack StopWatch（SKU C152）：ESP32-S3R8、16 MB Flash、8 MB PSRAM、466×466 AMOLED、
+  ES8311 编解码、BMI270、RX8130 RTC、M5PM1 电源管理、450 mAh。
+- **固件：** ESP-IDF v5.5，C 语言，LVGL。一个 `app.c` 组装所有扁平模块，依赖只能单向向下；
+  架构约束见 [`CLAUDE.md`](CLAUDE.md)（英文）。
+- **服务商（自带密钥）：** 一套统一的服务商协议，MiniMax 优先，阿里百炼（通义、通义实时）与火山引擎为备选，
+  按角色（识别 / 对话 / 合成 / 端到端语音 / 图片）各自选择，配置全部声明在预设文件里。
+- **不用 agent 框架的心智：** 四个固定循环（对话轮、挂断后提取、每日生活 tick、每周反思），三本小记忆
+  直接放在提示词里。没有 agent 框架，没有向量库。
+
+## 仓库结构
+
+```text
+app/            固件：app.c + 每个模块一个目录（board、net、store、audio、ui、provider、world、
+                mind、engine、call、instinct、life、parent）+ foundation/
+host/           同一套核心在 Mac / Linux 上的主机构建，带终端前端
+test/           单元测试与测试素材（语音样本、服务商回放、标签黄金用例）
+content/        提示词、服务商预设、地点包、音效、家长网页 → 打包进 LittleFS 镜像
+assets/         美术源文件与像素画生成器；assets/samples/ 是当前的评审样例
+tools/          依赖检查、回放测试、资源转换、一次性评测脚本
+PLAN.md         计划文档与日志
+```
+
+## 构建
+
+真机（ESP-IDF v5.5，macOS 或 Linux）：
+
+```bash
+. ~/esp/esp-idf/export.sh
+idf.py set-target esp32s3 && idf.py build          # 固件 + content 分区镜像
+idf.py -p /dev/cu.usbmodem83401 flash              # 然后通过 USB 控制台：
+python3 tools/dev/serial_cmd.py "wifi <ssid> <password>" "key minimax <api key>" "replay /content/test/zh_01.wav"
+```
+
+没装 ESP-IDF 的 Mac 用烧录包：在开发机上跑 `tools/release/make_bundle.sh` 生成 `dist/gugu-<版本>.zip`，
+解压后 `./flash.sh` 一键烧录（只需 Python 3；保留 Wi-Fi、密钥和数据），再 `./console.sh "stat"`。
+
+模拟器与测试（纯 CMake；需要 SDL2、libcurl、OpenSSL，并先 `idf.py reconfigure` 一次以下载 LVGL）：
+
+```bash
+cmake -S host -B host/build && cmake --build host/build -j8
+./host/build/gugu_tests                                           # 单元测试
+GUGU_MINIMAX_API_KEY=… ./host/build/gugu_host                     # 窗口里的咕咕；B/Y 键，鼠标当触摸
+GUGU_MINIMAX_API_KEY=… ./host/build/gugu_host --replay test/fixtures/speech/zh_01.wav --turns 3 --quit-after 120000
+python3 tools/dev/replay_report.py host/data                      # 延迟 / 费用报表
+```
+
+模块规则与完整工具清单见 [`CLAUDE.md`](CLAUDE.md)。
+
+## 路线图
+
+| 里程碑 | 目标 |
+|---|---|
+| M0 | 工具链、仓库脚手架、带单元测试的主机构建 —— 已完成 |
+| M1 | 在主机构建上对 MiniMax 跑通完整一轮按住说话；标签、提示词、三语；回放报表 —— 已完成 |
+| M2 | 真机：多条 TLS 长连接并发、预热、keep-alive 复用；RAM 与延迟数据 —— 已完成（复用已验证，通话中内部 RAM 稳态约 104 KB，瞬时最低 22 KB） |
+| M3 | 同一核心在真机上跑通一轮，带串口测试控制台 —— 已完成（真机三语 10 轮） |
+| M4 | 壳层：本能行为、动画表、本地音效、按键 —— 已完成 |
+| M5 | 备选服务商、配置切换、费用账本、家长页最小版 —— 已完成（百炼厂商已编译，未真实调用） |
+| M6 | 验收：首音 ≤ 2 秒、三语同一音色、标签命中率、资源余量 —— 真机数据见 PLAN.md：首音 P50 2.67 秒 / P90 3.99 秒（目标 2 / 3），标签 10/10 合法，余量稳态达标但瞬时偏低；音色盲听待做 |
+
+## 许可证
+
+待项目所有者决定。

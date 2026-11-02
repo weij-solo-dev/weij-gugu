@@ -1,0 +1,8 @@
+## gugu application component — managed dependencies (CLAUDE.md rule 15; each justified in PLAN.md).
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl: "~9.5.0"                       # UI: scenes, animation, image scaling, TJPGD for postcards
+  joltwallet/littlefs: "^1.20"              # content (read-only) and data (writable) partitions
+  espressif/esp_lcd_co5300: "^2.1.0"        # the 466x466 AMOLED panel driver (QSPI)
+  espressif/esp_codec_dev: "~1.6.2"         # ES8311 codec + I2S data path
+  espressif/esp_websocket_client: "^1.5"    # vendor bidirectional TTS / realtime ASR / S2S

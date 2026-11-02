@@ -1,0 +1,17 @@
+# Module dependency allow-list (CLAUDE.md rules 2–4). `tools/check_deps.py` enforces it.
+# <module>: <modules whose public header it may include>. foundation headers are included directly.
+foundation :
+board      : foundation
+net        : foundation
+store      : foundation
+audio      : foundation board store
+ui         : foundation board store
+provider   : foundation net store
+world      : foundation net store
+mind       : foundation store world provider
+engine     : foundation provider mind net
+call       : foundation engine mind audio ui store world provider
+instinct   : foundation board audio ui store world
+life       : foundation store world mind provider board
+parent     : foundation store board
+console    : foundation store provider net call audio board parent

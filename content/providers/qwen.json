@@ -1,0 +1,27 @@
+{
+  "id": "qwen",
+  "name": "阿里百炼 · 通义",
+  "order": 2,
+  "console_url": "https://bailian.console.aliyun.com/",
+  "regions": ["domestic", "overseas"],
+  "credentials": [ { "key": "api_key", "secret": true } ],
+  "capabilities": { "asr_stream": false, "tts_bidi": true, "s2s": false, "image": false },
+  "chat": {
+    "api": "openai_chat",
+    "url": { "domestic": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+             "overseas": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions" },
+    "model": "qwen-plus",
+    "extra_body": { "low": { "enable_thinking": false }, "medium": {}, "high": {} },
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "tts": {
+    "api": "cosyvoice_ws",
+    "url": { "domestic": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+             "overseas": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference" },
+    "model": "cosyvoice-v3-flash",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "default_voice": { "*": "longanhuan_v3" },
+  "voices": { "*": [ { "id": "longanhuan_v3", "name": "龙安欢（普通话 / 粤语 / 英文）" } ] },
+  "prices_cny": { "tts_per_10k_chars": 1.0, "chat_in_per_m": 0.8, "chat_out_per_m": 2.0, "chat_cache_read_per_m": 0.16 }
+}
