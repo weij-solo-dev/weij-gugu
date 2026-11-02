@@ -5,9 +5,10 @@
 #   ./gugu.sh --port /dev/cu.usbmodemXXXX  when more than one serial device is attached
 #
 # Nothing has to be installed beforehand except the Xcode command line tools (git, python3, a C compiler).
-# On the first run the script clones ESP-IDF v5.5.6 and installs its toolchain and Python environment.
-# Everything it creates lives under .derived_data/ next to this file: the IDF checkout, the tools, the
-# build directory and sdkconfig. Delete the repository and the whole environment goes with it; nothing is
+# On the first run the script clones ESP-IDF v5.5.6 and installs its toolchain, cmake, ninja and Python
+# environment (install.sh alone leaves cmake and ninja to Homebrew on macOS; this script installs them too, so
+# a Mac without Homebrew works and every Mac builds with the same versions). Everything it creates lives under
+# .derived_data/ next to this file: the IDF checkout, the tools, the build directory and sdkconfig. Delete the repository and the whole environment goes with it; nothing is
 # written to $HOME. First run: ~5 GB on disk, 5–10 minutes depending on the line (measured 5.5 min: clone
 # 1 min, tools 4.5 min, build 40 s, flash 20 s). Later runs: an incremental build and a flash, ~40 s in all. Flashing writes the bootloader, partition table, app and content image only, so Wi-Fi,
 # API keys and recorded calls on the device are kept.
@@ -77,7 +78,8 @@ ensure_idf() {
         git clone --branch "$IDF_VERSION" --depth 1 --recursive --shallow-submodules \
             "${GUGU_IDF_GIT:-https://github.com/espressif/esp-idf.git}" "$IDF_DIR"
     fi
-    local stamp="$DD/.tools-installed-$IDF_VERSION-$TARGET"
+    # The stamp names what is installed; renaming it re-runs this block on an older checkout (install.sh is idempotent).
+    local stamp="$DD/.tools-installed-$IDF_VERSION-$TARGET-cmake-ninja"
     if [ ! -f "$stamp" ]; then
         say "installing the $TARGET toolchain, cmake, ninja and IDF's Python environment into .derived_data/espressif (~4 GB, about 5 minutes)..."
         if [ "${GUGU_MIRROR:-0}" = 1 ]; then
@@ -85,13 +87,19 @@ ensure_idf() {
             export PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
         fi
         "$IDF_DIR/install.sh" "$TARGET"
-        touch "$stamp"
+        # cmake and ninja are "on_request" tools on macOS/Linux in IDF's tools.json: install.sh skips them and
+        # expects Homebrew/apt to provide them. Ask for them explicitly so .derived_data is self-contained.
+        python3 "$IDF_DIR/tools/idf_tools.py" install cmake ninja
+        rm -f "$DD"/.tools-installed-*; touch "$stamp"
     fi
     set +eu
     # shellcheck disable=SC1091
     . "$IDF_DIR/export.sh" >/dev/null
     set -eu
-    command -v idf.py >/dev/null || die "idf.py is not on PATH after sourcing export.sh"
+    local t
+    for t in idf.py cmake ninja; do
+        command -v "$t" >/dev/null || die "$t is not on PATH after sourcing export.sh: delete $stamp and rerun ./gugu.sh"
+    done
 }
 
 # ---- 3. build, 4. flash, 5. a glance at the boot log --------------------------------------------------

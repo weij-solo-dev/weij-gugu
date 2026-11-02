@@ -200,7 +200,7 @@ table above and to `app/DEPS`, add it to `app/CMakeLists.txt`, and wire it in `a
 
 **One command builds and flashes from a fresh clone on any Mac:** `./gugu.sh`. It finds the StopWatch
 (Espressif USB-Serial/JTAG, VID 303A PID 1001; `--port` when several devices are attached), and on the
-first run clones ESP-IDF **v5.5.6** and installs its toolchain and Python environment under
+first run clones ESP-IDF **v5.5.6** and installs its toolchain, cmake, ninja and Python environment under
 `.derived_data/` next to the script (`esp-idf/`, `espressif/` = `IDF_TOOLS_PATH`, `build/`, `sdkconfig`).
 Nothing goes to `$HOME`; deleting the repository deletes the environment (~5 GB; first run ~10 min, later runs ~40 s). Flashing writes bootloader,
 partition table, app and the `content` image only, so NVS (Wi-Fi, keys) and the `data` partition survive.
