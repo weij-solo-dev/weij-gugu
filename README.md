@@ -67,18 +67,20 @@ PLAN.md         planning document and dated log (Chinese)
 
 ## Building
 
-Device (ESP-IDF v5.5, macOS or Linux):
+Device, from a fresh clone on any Mac (only the Xcode command line tools are needed):
 
 ```bash
-. ~/esp/esp-idf/export.sh
-idf.py set-target esp32s3 && idf.py build          # firmware + content partition image
-idf.py -p /dev/cu.usbmodem83401 flash              # then over the USB console:
-python3 tools/dev/serial_cmd.py "wifi <ssid> <password>" "key minimax <api key>" "replay /content/test/zh_01.wav"
+./gugu.sh                                          # finds the StopWatch, builds, flashes, shows the boot log
 ```
 
-A Mac without ESP-IDF flashes from a bundle made on the build machine: `tools/release/make_bundle.sh`
-produces `dist/gugu-<version>.zip`; unzip it anywhere and run `./flash.sh` (needs only Python 3; keeps
-Wi-Fi, keys and data), then `./console.sh "stat"`.
+The first run clones ESP-IDF v5.5.6 and its toolchain into `.derived_data/` inside the repository (~5 GB on disk,
+about 10 minutes); nothing is installed elsewhere, and deleting the repository removes the environment. Flashing
+keeps the Wi-Fi credentials, API keys and recorded calls already on the device. Then, over the USB console:
+
+```bash
+.derived_data/espressif/python_env/*/bin/python tools/dev/serial_cmd.py --port /dev/cu.usbmodem* \
+    "wifi <ssid> <password>" "key minimax <api key>" "replay /content/test/zh_01.wav"
+```
 
 Simulator and tests (plain CMake; needs SDL2, libcurl, OpenSSL, and one `idf.py reconfigure` so LVGL is downloaded):
 

@@ -58,17 +58,19 @@ PLAN.md         计划文档与日志
 
 ## 构建
 
-真机（ESP-IDF v5.5，macOS 或 Linux）：
+真机，任何一台 Mac 克隆后即可（只需 Xcode 命令行工具）：
 
 ```bash
-. ~/esp/esp-idf/export.sh
-idf.py set-target esp32s3 && idf.py build          # 固件 + content 分区镜像
-idf.py -p /dev/cu.usbmodem83401 flash              # 然后通过 USB 控制台：
-python3 tools/dev/serial_cmd.py "wifi <ssid> <password>" "key minimax <api key>" "replay /content/test/zh_01.wav"
+./gugu.sh                                          # 找到 StopWatch，编译，烧录，打印启动日志
 ```
 
-没装 ESP-IDF 的 Mac 用烧录包：在开发机上跑 `tools/release/make_bundle.sh` 生成 `dist/gugu-<版本>.zip`，
-解压后 `./flash.sh` 一键烧录（只需 Python 3；保留 Wi-Fi、密钥和数据），再 `./console.sh "stat"`。
+首次运行会把 ESP-IDF v5.5.6 和工具链装进仓库内的 `.derived_data/`（磁盘约 5 GB，约 10 分钟），不往别处写任何东西，
+删掉仓库即删掉环境。烧录保留设备上已有的 Wi-Fi、密钥和通话记录。之后通过 USB 控制台：
+
+```bash
+.derived_data/espressif/python_env/*/bin/python tools/dev/serial_cmd.py --port /dev/cu.usbmodem* \
+    "wifi <ssid> <密码>" "key minimax <api key>" "replay /content/test/zh_01.wav"
+```
 
 模拟器与测试（纯 CMake；需要 SDL2、libcurl、OpenSSL，并先 `idf.py reconfigure` 一次以下载 LVGL）：
 

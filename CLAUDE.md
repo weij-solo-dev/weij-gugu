@@ -198,20 +198,25 @@ table above and to `app/DEPS`, add it to `app/CMakeLists.txt`, and wire it in `a
 
 ## Build / Verify
 
-Toolchain: ESP-IDF **v5.5.6** at `~/esp/esp-idf` (`. ~/esp/esp-idf/export.sh`). Target `esp32s3`.
-The StopWatch enumerates as Espressif USB-Serial/JTAG (`/dev/cu.usbmodem*`, VID 303a PID 1001).
-The application component is `app/`, not `main/`: the root `CMakeLists.txt` adds it through
-`EXTRA_COMPONENT_DIRS`, and `app/CMakeLists.txt` lists its IDF dependencies explicitly in `REQUIRES`.
+**One command builds and flashes from a fresh clone on any Mac:** `./gugu.sh`. It finds the StopWatch
+(Espressif USB-Serial/JTAG, VID 303A PID 1001; `--port` when several devices are attached), and on the
+first run clones ESP-IDF **v5.5.6** and installs its toolchain and Python environment under
+`.derived_data/` next to the script (`esp-idf/`, `espressif/` = `IDF_TOOLS_PATH`, `build/`, `sdkconfig`).
+Nothing goes to `$HOME`; deleting the repository deletes the environment (~5 GB; first run ~10 min, later runs ~40 s). Flashing writes bootloader,
+partition table, app and the `content` image only, so NVS (Wi-Fi, keys) and the `data` partition survive.
+Target `esp32s3`. The application component is `app/`, not `main/`: the root `CMakeLists.txt` adds it
+through `EXTRA_COMPONENT_DIRS`, and `app/CMakeLists.txt` lists its IDF dependencies explicitly in `REQUIRES`.
 After adding or renaming source files run `idf.py reconfigure` (the glob is evaluated at configure time).
 
+To drive `idf.py` by hand, use the same environment and paths the script uses:
+
 ```bash
-. ~/esp/esp-idf/export.sh
-idf.py set-target esp32s3
-idf.py build                                  # firmware + the `content` partition image (from content/)
-idf.py -p /dev/cu.usbmodem83401 flash         # app, bootloader, partition table, content image
+export IDF_TOOLS_PATH="$PWD/.derived_data/espressif"; . .derived_data/esp-idf/export.sh
+idf.py -B .derived_data/build -DSDKCONFIG=.derived_data/sdkconfig build          # firmware + content image
+idf.py -B .derived_data/build -p /dev/cu.usbmodem83401 flash
 python3 tools/check_deps.py                   # module dependency rules (rules 2–4)
-python3 tools/dev/monitor.py --reset --seconds 30 --grep app:,call:   # non-interactive serial log
-python3 tools/dev/serial_cmd.py --reset "stat" "ls /content/prompts"   # drive the device console (needs pyserial, e.g. ~/.venvs/esptool/bin/python3)
+python tools/dev/monitor.py --port /dev/cu.usbmodem83401 --reset --seconds 30 --grep app:,call:   # IDF's python has pyserial
+python tools/dev/serial_cmd.py --port /dev/cu.usbmodem83401 --times "stat" "ls /content/prompts"  # drive the device console
 ```
 
 Host simulator and unit tests are a plain CMake project (not the IDF Linux target: macOS needs SDL on
@@ -227,11 +232,6 @@ GUGU_LIVE=1 ./host/build/gugu_tests                       # + live vendor tests 
 ./host/build/gugu_host --replay test/fixtures/x.wav --turns 3 --quit-after 120000   # one call, N turns, exit
 python3 tools/dev/replay_report.py host/data              # P50/P90 of asr / first_token / first_tts / first_play / done
 ```
-
-A machine without ESP-IDF flashes from a bundle: `tools/release/make_bundle.sh` builds and packs
-`dist/gugu-<version>.zip` (images + offsets from `flasher_args.json`, `flash.sh` / `console.sh` / `monitor.sh`,
-the serial tools); `flash.sh` bootstraps esptool into a private virtualenv and keeps NVS and the data
-partition unless `--erase` is given.
 
 Secrets on the host come from the environment (`GUGU_MINIMAX_API_KEY`, …), conventionally sourced
 from `~/.config/gugu/secrets.env` (never in the repo). On the device they live in NVS and are set over

@@ -22,5 +22,5 @@ test/fixtures/live_*
 # generated TTS stand-ins (regenerate with tools/eval/make_fixtures.py speech)
 test/fixtures/speech/*.wav
 
-# release bundles (tools/release/make_bundle.sh)
-dist/
+# everything gugu.sh installs or builds (ESP-IDF, toolchain, build dir, sdkconfig)
+.derived_data/
