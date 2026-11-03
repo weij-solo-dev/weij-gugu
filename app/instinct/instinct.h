@@ -18,6 +18,8 @@ void instinct_refuse(const char *why);      // the blue key when a call cannot s
 // While the answer stays no for PUZZLED_AFTER, a thought bubble with a settings gear sits at Gugu's upper right and
 // Gugu, worried, looks at you and then hard at the bubble, again and again (two quick stamps each time its eyes go
 // back to it): the gaze tells you where to look. When the answer turns yes, the bubble goes, a happy hop, back to normal.
-typedef bool (*instinct_ready_fn)(char *why, size_t cap, void *user);
+typedef enum { INSTINCT_READY = 0, INSTINCT_NEED_SETUP, INSTINCT_WIFI_DOWN, INSTINCT_SERVICE_DOWN } instinct_ready_t;   // the bubble's icon: gear, Wi-Fi crossed out, ⚠
+typedef instinct_ready_t (*instinct_ready_fn)(char *why, size_t cap, void *user);
 void instinct_set_ready_probe(instinct_ready_fn fn, void *user);
-void instinct_set_ready_override(int ready);  // -1 asks the probe; 0 / 1 force the answer (console, tests)
+void instinct_set_ready_override(int ready);  // -1 asks the probe; an instinct_ready_t forces the answer (console, tests)
+void instinct_set_bubble_cb(void (*tapped)(void *user), void *user);   // the bubble was tapped: the app opens pairing mode

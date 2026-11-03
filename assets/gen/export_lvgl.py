@@ -94,7 +94,7 @@ def main():
         images.append((f'spr_win_{tod}', pg.window(tod), True))
     images.append(('spr_acc_sun_hat', pg.acc_sun_hat(), True))
     images.append(('spr_acc_camera', pg.acc_camera(), True))
-    images.append(('spr_bubble_gear', pg.bubble_gear(), True))
+    for icon in ('setup', 'wifi', 'service'): images.append((f'spr_bubble_{icon}', pg.bubble(icon), True))
     glasses, hat_y, camera_y = [], [], []
     for e in EMOTIONS:
         pg.gugu(e); g = pg.LAST_GEOM

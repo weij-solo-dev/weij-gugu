@@ -245,29 +245,50 @@ def rot_ellipse(c, ecx, ecy, a, b, ang, col):
             u, v = dx * ca + dy * sa, -dx * sa + dy * ca
             if (u / a) ** 2 + (v / b) ** 2 <= 1.0: c.put(x, y, col)
 
-def bubble_gear():
-    """The thought bubble Gugu points at while nothing is set up: a white cloud with a settings gear, two little
-    puffs trailing down-left toward its head (2026-11-03, owner: "右上角出现一个云泡泡，里面有个配置 icon")."""
+def bubble(icon='setup'):
+    """The thought bubble Gugu looks at while a call could not start: a white cloud, two little puffs trailing down-left
+    toward its head, and one icon (2026-11-03, owner: a bubble with a settings icon; then "需要有多种，比如配置未完成、
+    wifi 异常、服务异常"): 'setup' a gear, 'wifi' the Wi-Fi fan crossed out in red, 'service' a yellow warning triangle."""
     P = PAL
     W, H = 30, 26
     c = Canvas(W, H)
-    white, ink, gear = P['eyew'], P['line'], P['grey2']
+    white, ink, grey = P['eyew'], P['line'], P['grey2']
     blobs = [(14.0, 9.0, 8.5, 7.0), (21.5, 8.5, 6.5, 6.0), (9.5, 10.5, 5.5, 4.8), (17.0, 13.0, 8.0, 4.5), (22.0, 4.5, 4.0, 3.5), (12.5, 4.5, 4.5, 3.8)]
     inside = lambda x, y: any(((x + 0.5 - bx) / rx_) ** 2 + ((y + 0.5 - by_) / ry_) ** 2 <= 1.0 for (bx, by_, rx_, ry_) in blobs)
     puff_px = {(x, y) for (x, y) in ((4, 18), (5, 18), (3, 19), (4, 19), (5, 19), (6, 19), (3, 20), (4, 20), (5, 20), (6, 20), (4, 21), (5, 21))}   # a round 4×4 puff
     puff_px |= {(1, 23), (2, 23), (1, 24), (2, 24)}         # and a 2×2 one, trailing down-left toward the head
-    in_puff = lambda x, y: (x, y) in puff_px
     for y in range(H):
         for x in range(W):
-            if inside(x, y) or in_puff(x, y): c.put(x, y, white)
+            if inside(x, y) or (x, y) in puff_px: c.put(x, y, white)
     c.outline_of({white}, ink)
-    gx, gy = 16.0, 9.5                                       # the gear: a ring with eight teeth and a hole
-    for y in range(H):
-        for x in range(W):
-            dx, dy = x + 0.5 - gx, y + 0.5 - gy
-            r = math.hypot(dx, dy); t = (math.degrees(math.atan2(dy, dx)) + 360 + 22.5) % 45
-            if r <= 1.6: continue
-            if r <= 3.9 or (r <= 5.4 and abs(t - 22.5) <= 9.5): c.put(x, y, gear)
+    gx, gy = 16.0, 9.5                                       # the icon's centre
+    if icon == 'setup':                                      # a gear: a ring with eight teeth and a hole
+        for y in range(H):
+            for x in range(W):
+                dx, dy = x + 0.5 - gx, y + 0.5 - gy
+                r = math.hypot(dx, dy); t = (math.degrees(math.atan2(dy, dx)) + 360 + 22.5) % 45
+                if r <= 1.6: continue
+                if r <= 3.9 or (r <= 5.4 and abs(t - 22.5) <= 9.5): c.put(x, y, grey)
+    elif icon == 'wifi':                                     # the Wi-Fi fan (a dot and three arcs), crossed out
+        ox, oy = 16.0, 14.0
+        for y in range(H):
+            for x in range(W):
+                dx, dy = x + 0.5 - ox, y + 0.5 - oy
+                r = math.hypot(dx, dy); ang = math.degrees(math.atan2(dy, dx))
+                if -138 <= ang <= -42 and any(abs(r - R) <= 0.62 for R in (3.4, 6.2, 9.0)): c.put(x, y, grey)
+        c.rect(15, 12, 2, 2, grey)
+        for i in range(12):                                  # a red slash, two pixels wide
+            c.put(10 + i, 3 + i, P['red']); c.put(11 + i, 3 + i, P['red'])
+    elif icon == 'service':                                  # a warning triangle with a "!"
+        tri = set()
+        for y in range(3, 16):
+            hw = (y - 3) * 0.55 + 0.6
+            for x in range(W):
+                if abs(x + 0.5 - 16.0) <= hw: tri.add((x, y))
+        for (x, y) in tri: c.put(x, y, P['glow'])
+        for (x, y) in tri:
+            if any((x + dx, y + dy) not in tri for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))): c.put(x, y, ink)
+        c.rect(15, 7, 2, 5, ink); c.rect(15, 13, 2, 1, ink)
     return c
 
 def lens_mask(x0, y0, w, h):

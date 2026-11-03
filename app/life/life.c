@@ -18,11 +18,12 @@
 #include "cJSON.h"
 #include <sys/stat.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-enum { JOB_PLAN = 1, JOB_TICK, JOB_DIARY, JOB_RECAP, JOB_ART };
+enum { JOB_PLAN = 1, JOB_TICK, JOB_DIARY, JOB_RECAP, JOB_ART, JOB_CHECK };
 struct job {
     int kind;
     char kind_hint[16], place_hint[64], depart[11];
@@ -298,6 +299,48 @@ static esp_err_t do_tick(struct job *j)
     return err;
 }
 
+// ---- the service check: a few tokens to see whether the chat vendor answers (the bubble's "service" icon) ----
+static atomic_bool s_check_pending;
+static life_check_cb s_check_cb; static void *s_check_user;
+static struct job s_check_job = { .kind = JOB_CHECK };
+
+static void do_check(void)
+{
+    if (!atomic_exchange(&s_check_pending, false)) return;
+    life_check_cb cb = s_check_cb; void *user = s_check_user;
+    char why[120] = ""; int kind = PERR_NONE; bool ok = false;
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_CHAT);
+    if (!v) { snprintf(why, sizeof why, "no chat vendor assigned"); kind = PERR_OTHER; }
+    else {
+        struct collect c = { 0 }; strbuf_init(&c.text);
+        chat_events_t ev = { c_delta, c_done, c_error };
+        chat_block_t sys = { "Reply with the single word: ok", false };
+        chat_message_t m = { "user", "ping" };
+        chat_request_t cr = { .system = &sys, .system_count = 1, .messages = &m, .message_count = 1,
+                              .effort = CHAT_EFFORT_LOW, .max_tokens = 8, .temperature = 0.0f };
+        int64_t t0 = clock_us();
+        chat_session_t *s = NULL;
+        esp_err_t err = v->chat_open(&ev, &c, &s);
+        if (err == ESP_OK) { err = v->chat_send(s, &cr); v->chat_close(s); }
+        long long ms = (long long)((clock_us() - t0) / 1000);
+        if (c.failed) { kind = c.err.kind; snprintf(why, sizeof why, "%.60s (http %d, code %d) after %lld ms", c.err.message, c.err.http_status, c.err.api_code, ms); }
+        else if (err != ESP_OK) { kind = PERR_NETWORK; snprintf(why, sizeof why, "%s after %lld ms", esp_err_to_name(err), ms); }
+        else { ok = true; snprintf(why, sizeof why, "answered in %lld ms", ms); }
+        strbuf_free(&c.text);
+    }
+    LOGI("service check: %s (%s)", ok ? "ok" : "failed", why);
+    if (cb) cb(ok, kind, why, user);
+}
+
+void life_check_service(life_check_cb done, void *user)
+{
+    s_check_user = user; s_check_cb = done;
+    if (atomic_exchange(&s_check_pending, true)) return;      // one is queued already
+    if (!s_worker) { do_check(); return; }
+    struct job *pj = &s_check_job;
+    queue_send(s_q, &pj, 0);                                   // a full queue is fine: the worker looks at the flag after each job
+}
+
 static void run_job(struct job *j)
 {
     switch (j->kind) {
@@ -331,7 +374,11 @@ static void life_task(void *arg)
     int64_t boot = clock_us(); bool boot_tick = false;
     for (;;) {
         struct job *j;
-        if (queue_recv(s_q, &j, 60 * 1000)) { run_job(j); signal_set(s_done); continue; }
+        if (queue_recv(s_q, &j, 60 * 1000)) {
+            if (j->kind == JOB_CHECK) do_check(); else { run_job(j); signal_set(s_done); }
+            do_check();                           // one asked for while a long job ran
+            continue;
+        }
         if (!store_setting_int("auto_plan", 1)) continue;
         time_t now = world_now(); struct tm tm; localtime_r(&now, &tm);
         bool nightly = tm.tm_hour == store_setting_int("plan_hour", 3);

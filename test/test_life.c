@@ -253,8 +253,28 @@ TEST(test_life_art_fake)
     world_trip_clear(); provider_fake_image_clear();
 }
 
+static bool s_chk_ok; static int s_chk_kind; static char s_chk_why[120]; static int s_chk_calls;
+static void chk_done(bool ok, int kind, const char *why, void *user) { (void)user; s_chk_ok = ok; s_chk_kind = kind; snprintf(s_chk_why, sizeof s_chk_why, "%s", why); s_chk_calls++; }
+
+TEST(test_life_service_check)
+{
+    fresh();
+    s_chk_calls = 0;
+    life_check_service(chk_done, NULL);                          // tests run it at once (no worker)
+    CHECK_EQ_INT(s_chk_calls, 1); CHECK(s_chk_ok); CHECK(strstr(s_chk_why, "answered") != NULL);
+    provider_fake_script_queue("!error 401");
+    life_check_service(chk_done, NULL);
+    CHECK_EQ_INT(s_chk_calls, 2); CHECK(!s_chk_ok); CHECK_EQ_INT(s_chk_kind, PERR_AUTH); CHECK(strstr(s_chk_why, "http 401") != NULL);
+    provider_fake_script_queue("!error 429");
+    life_check_service(chk_done, NULL);
+    CHECK(!s_chk_ok); CHECK_EQ_INT(s_chk_kind, PERR_QUOTA);
+    life_check_service(chk_done, NULL);                          // the queue is used up: answers again
+    CHECK(s_chk_ok);
+}
+
 void test_life(void)
 {
+    RUN(test_life_service_check);
     RUN(test_life_plan_trip_fake);
     RUN(test_life_story_chain);
     RUN(test_life_art_fake);

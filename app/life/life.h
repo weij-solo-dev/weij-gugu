@@ -25,3 +25,8 @@ esp_err_t life_diary_now(char *why, size_t why_cap);
 esp_err_t life_recap_now(char *why, size_t why_cap);
 // The pictures for the current card (backdrop, up to three props, the friend): one image call each, kept under data/art/<trip>/.
 esp_err_t life_art_now(char *why, size_t why_cap);
+// Is the chat vendor answering? One tiny request (a few tokens) queued on the worker behind whatever it is doing;
+// `done` runs on the worker with ok, a provider_error_kind_t (PERR_AUTH: the key, PERR_QUOTA: the balance, …) and one
+// line. A second request while one is pending only replaces the callback. Before life_init (tests) it runs at once.
+typedef void (*life_check_cb)(bool ok, int kind, const char *why, void *user);
+void life_check_service(life_check_cb done, void *user);

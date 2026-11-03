@@ -66,7 +66,7 @@ void ui_scene_init_accessory(void)   // after the pigeon exists: the overlay is 
 {
     s_acc_img = mk(ui_gugu_img);
     s_bubble_img = mk(lv_obj_get_parent(ui_gugu_img));
-    lv_image_set_src(s_bubble_img, &spr_bubble_gear);
+    lv_image_set_src(s_bubble_img, &spr_bubble_setup);
 }
 
 // ---- the gear bubble: up at Gugu's upper right while nothing is set up, bobbing a pixel every 600 ms ----
@@ -79,9 +79,15 @@ static void bubble_bob(lv_timer_t *t)
     lv_obj_set_pos(s_bubble_img, BUBBLE_X * UI_SPRITE_SCALE + 1, (BUBBLE_Y - (s_bubble_up ? 1 : 0)) * UI_SPRITE_SCALE + 1);
 }
 
-void ui_show_bubble(bool on)
+static ui_bubble_t s_bubble;
+void ui_show_bubble(ui_bubble_t b)
 {
     ui_lock();
+    bool on = b != UI_BUBBLE_NONE;
+    if (s_bubble_img && on && b != s_bubble) {
+        lv_image_set_src(s_bubble_img, b == UI_BUBBLE_WIFI ? &spr_bubble_wifi : b == UI_BUBBLE_SERVICE ? &spr_bubble_service : &spr_bubble_setup);
+    }
+    if (on) s_bubble = b;
     if (s_bubble_img) {
         if (on && lv_obj_has_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN)) {
             s_bubble_up = true; bubble_bob(NULL);
@@ -95,6 +101,16 @@ void ui_show_bubble(bool on)
         }
     }
     ui_unlock();
+}
+
+bool ui_bubble_hit(int x, int y)          // the whole sprite, a little generous for small fingers
+{
+    ui_lock();
+    bool hit = s_bubble_img && !lv_obj_has_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN) &&
+               x >= (BUBBLE_X - 2) * UI_SPRITE_SCALE && x < (BUBBLE_X + (int)spr_bubble_setup.header.w + 2) * UI_SPRITE_SCALE &&
+               y >= (BUBBLE_Y - 3) * UI_SPRITE_SCALE && y < (BUBBLE_Y + (int)spr_bubble_setup.header.h) * UI_SPRITE_SCALE;
+    ui_unlock();
+    return hit;
 }
 
 // ---- generated sprites ----

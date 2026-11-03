@@ -22,6 +22,7 @@
 #include "foundation/atomic_file.h"
 #include "foundation/logcap.h"
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,7 +35,11 @@
 #endif
 
 static engine_t *s_engine;
+static atomic_bool s_service_ok = true, s_check_due = true;   // the chat vendor's health (see on_service_checked)
+static char s_service_why[120];
+static int64_t s_last_check;
 static bool can_dial(char *why, size_t cap);
+static instinct_ready_t readiness(char *why, size_t cap);
 
 // Pairing mode (匹配模式): the yellow key held 3 s brings the hotspot and its page up, held 3 s again takes them down.
 static void toggle_pairing_mode(void)
@@ -55,7 +60,11 @@ static void on_board_event(const board_event_t *ev, void *user)
         store_event("key %s down", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow");
         if (ev->a == BOARD_KEY_BLUE) {
             char why[64];
-            if (call_state() == CALL_IDLE && !can_dial(why, sizeof why)) { store_event("call refused: %s", why); instinct_refuse(why); break; }
+            if (call_state() == CALL_IDLE && !can_dial(why, sizeof why)) {
+                store_event("call refused: %s", why); instinct_refuse(why);
+                if (readiness(why, sizeof why) == INSTINCT_SERVICE_DOWN) atomic_store(&s_check_due, true);   // the press is a retry: check again now
+                break;
+            }
             call_key(CALL_KEY_BLUE, true, 0);
         }
         break;
@@ -83,8 +92,19 @@ static void on_call_state(call_state_t s, void *user)
 }
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
-static void on_call_trouble(const char *why, void *user) { (void)user; instinct_refuse(why); }   // a failed or late turn: a buzz, a head shake, a sad face
-static bool ready_probe(char *why, size_t cap, void *user) { (void)user; return can_dial(why, cap); }   // instinct's puzzled face
+static void on_call_trouble(const char *why, void *user) { (void)user; instinct_refuse(why); atomic_store(&s_check_due, true); }   // a failed or late turn: a buzz, a head shake, a sad face; is the service down?
+static instinct_ready_t ready_probe(char *why, size_t cap, void *user) { (void)user; return readiness(why, cap); }   // the bubble and its icon
+static void on_bubble_tap(void *user) { (void)user; if (!parent_is_active()) { store_event("bubble tapped"); toggle_pairing_mode(); } }   // the bubble opens pairing mode
+
+// The chat vendor's health, from the tiny check in life: down after a failed check, up after a good one. Checked once
+// online after boot, after the page saves settings, after a failed turn or a refused press while down, and every
+// minute while down.
+static void on_service_checked(bool ok, int kind, const char *why, void *user)
+{
+    (void)user; (void)kind;
+    snprintf(s_service_why, sizeof s_service_why, "%s", why);
+    if (atomic_exchange(&s_service_ok, ok) != ok) store_event("service %s: %s", ok ? "back" : "trouble", why);
+}
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
 static int on_test_audio(char *json, size_t cap, void *user)
 {
@@ -106,12 +126,14 @@ static void on_apply(bool wifi_changed, void *user)   // the page saved secrets:
         net_wifi_join(ssid, pass);
     }
     store_event("settings applied from the page (wifi %s)", wifi_changed ? "rejoined" : "unchanged");
+    atomic_store(&s_check_due, true);              // new keys: is the service answering now?
 }
 
-// Can a call start right now? Checked before dialling so the child gets an answer at once instead of a dial tone and twenty seconds of silence.
-static bool can_dial(char *why, size_t cap)
+// Can a call start right now, and if not, why: setup unfinished (no Wi-Fi configured, a vendor or key missing), Wi-Fi
+// down (configured, not joined), or the service down (the last check failed). Checked before dialling so the child
+// gets an answer at once instead of a dial tone and twenty seconds of silence; the reason picks the bubble's icon.
+static bool keys_ok(char *why, size_t cap)
 {
-    if (!net_is_online()) { snprintf(why, cap, "offline"); return false; }
     const char *roles[] = { "chat", "asr", "tts" }; provider_role_t ids[] = { PROVIDER_ROLE_CHAT, PROVIDER_ROLE_ASR, PROVIDER_ROLE_TTS };
     for (int i = 0; i < 3; i++) {
         const provider_vtable_t *v = provider_for(ids[i]);
@@ -119,6 +141,31 @@ static bool can_dial(char *why, size_t cap)
         if (strcmp(v->id, "fake")) { const char *k = provider_credential(v->id, "api_key"); if (!k || !*k) { snprintf(why, cap, "no %s key for %s", roles[i], v->id); return false; } }
     }
     return true;
+}
+
+static instinct_ready_t readiness(char *why, size_t cap)
+{
+    if (!keys_ok(why, cap)) return INSTINCT_NEED_SETUP;
+    if (!net_is_online()) {
+        char ssid[64];
+        if (store_secret_get("wifi_ssid", ssid, sizeof ssid) != ESP_OK || !ssid[0]) { snprintf(why, cap, "no wifi configured"); return INSTINCT_NEED_SETUP; }
+        snprintf(why, cap, "offline"); return INSTINCT_WIFI_DOWN;
+    }
+    if (!atomic_load(&s_service_ok)) { snprintf(why, cap, "service: %s", s_service_why); return INSTINCT_SERVICE_DOWN; }
+    return INSTINCT_READY;
+}
+
+static bool can_dial(char *why, size_t cap) { return readiness(why, cap) == INSTINCT_READY; }
+
+static void service_tick(void)   // once a second from the main loop: start a check when one is due
+{
+    char why[96];
+    if (!net_is_online() || !keys_ok(why, sizeof why) || call_state() != CALL_IDLE) return;
+    int64_t now = clock_us();
+    bool due = atomic_load(&s_check_due) || (!atomic_load(&s_service_ok) && now - s_last_check > 60 * 1000000LL);
+    if (!due || now - s_last_check < 5 * 1000000LL) return;   // not twice within 5 s
+    atomic_store(&s_check_due, false); s_last_check = now;
+    life_check_service(on_service_checked, NULL);
 }
 
 #ifdef GUGU_HOST
@@ -189,6 +236,7 @@ void app_main(void)
     provider_init(presets);
     load_credentials();
     instinct_set_ready_probe(ready_probe, NULL);   // vendors are known from here on: instinct may ask whether a call could start
+    instinct_set_bubble_cb(on_bubble_tap, NULL);
     const char *asr = store_setting_str("provider_asr", "minimax"), *chat = store_setting_str("provider_chat", "minimax"), *tts = store_setting_str("provider_tts", "minimax");
 #ifdef GUGU_HOST
     if (getenv("GUGU_PROVIDERS")) asr = chat = tts = getenv("GUGU_PROVIDERS");   // e.g. fake: offline stability runs
@@ -213,6 +261,10 @@ void app_main(void)
     call_set_state_listener(on_call_state, NULL);
     if (getenv("GUGU_YELLOW_HOLD")) { board_event_t ev = { .kind = BOARD_EV_KEY_HOLD, .a = BOARD_KEY_YELLOW, .b = BOARD_HOLD_MS }; on_board_event(&ev, NULL); }   // host: the pairing card, for a screenshot
     if (getenv("GUGU_TOD")) instinct_set_tod_override(atoi(getenv("GUGU_TOD")));   // host screenshots: 0 night, 1 sunrise, 2 day, 3 dusk
+    if (getenv("GUGU_READY")) {                    // host screenshots: the bubble's reason (yes, setup, wifi, service)
+        const char *r = getenv("GUGU_READY");
+        instinct_set_ready_override(!strcmp(r, "yes") ? INSTINCT_READY : !strcmp(r, "wifi") ? INSTINCT_WIFI_DOWN : !strcmp(r, "service") ? INSTINCT_SERVICE_DOWN : INSTINCT_NEED_SETUP);
+    }
 #ifdef GUGU_HOST
     if (getenv("GUGU_TAP")) task_spawn("gugu_tap", scripted_taps, NULL, 16384, 1, 0);   // host screenshots: "x,y,ms;x,y,ms" touches
 #endif
@@ -255,9 +307,11 @@ void app_main(void)
         exit(ok == total ? 0 : 2);
     }
 #endif
-    for (unsigned beat = 1;; beat++) {
-        clock_sleep_ms(10000);
-        if (beat % 3 == 0) store_logs_flush();   // the captured log reaches flash every 30 s
+    for (unsigned sec = 1;; sec++) {
+        clock_sleep_ms(1000);
+        service_tick();
+        if (sec % 10) continue;
+        if (sec % 30 == 0) store_logs_flush();   // the captured log reaches flash every 30 s
         LOGI("heartbeat: internal free %u B (min %u B), big free %u B, vbat %d mV%s, call %s",
              (unsigned)mem_avail_internal(), (unsigned)mem_min_avail_internal(), (unsigned)mem_avail_big(),
              board_battery_mv(), board_is_charging() ? " charging" : "", call_state_name(call_state()));

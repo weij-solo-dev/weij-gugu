@@ -29,7 +29,9 @@ typedef enum { UI_ACT_NOD, UI_ACT_WAVE, UI_ACT_COO, UI_ACT_WHISTLE, UI_ACT_PUFF,
 void ui_play_action(ui_action_t a);          // short one-shot animation on top of the current emotion
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
-void ui_show_bubble(bool on);                // the thought bubble with the settings gear at Gugu's upper right, bobbing gently (nothing set up)
+typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠
+void ui_show_bubble(ui_bubble_t b);          // the thought bubble at Gugu's upper right, bobbing gently (a call could not start)
+bool ui_bubble_hit(int x, int y);            // a touch on the bubble while it is up
 void ui_set_idle(bool on);                   // blink + breathe when nobody is talking to Gugu
 // Shaken: Gugu rolls into a ball and bounces off the round window's rim (a vibration per hit) until stopped.
 void ui_bounce_start(void);

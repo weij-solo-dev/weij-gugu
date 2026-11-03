@@ -33,6 +33,8 @@ static int64_t s_shake_last;                 // the ball keeps bouncing while sh
 #define GAZE_YOU_MS       1200               // eyes on you …
 #define GAZE_BUBBLE_MS    2600               // … then on the bubble
 static instinct_ready_fn s_ready_fn; static void *s_ready_user;
+static void (*s_bubble_cb)(void *user); static void *s_bubble_user;
+static instinct_ready_t s_reason;            // why it is not ready, while puzzled: the bubble's icon
 static atomic_int s_ready_override = -1;
 static int64_t s_unready_since, s_gaze_next;
 static bool s_puzzled;
@@ -137,37 +139,48 @@ static void show(const world_state_t *st)
 static void mood(ui_emotion_t e, int ms) { ui_set_emotion(e); s_mood_until = clock_us() + (int64_t)ms * 1000; }
 
 void instinct_set_ready_probe(instinct_ready_fn fn, void *user) { s_ready_user = user; s_ready_fn = fn; }
-void instinct_set_ready_override(int ready) { atomic_store(&s_ready_override, ready < 0 ? -1 : ready ? 1 : 0); s_unready_since = 0; }
+void instinct_set_ready_override(int ready) { atomic_store(&s_ready_override, ready < 0 || ready > INSTINCT_SERVICE_DOWN ? -1 : ready); s_unready_since = 0; }
+void instinct_set_bubble_cb(void (*tapped)(void *user), void *user) { s_bubble_user = user; s_bubble_cb = tapped; }
 
-static bool ready_now(char *why, size_t cap)
+static instinct_ready_t ready_now(char *why, size_t cap)
 {
     int o = atomic_load(&s_ready_override);
-    if (o >= 0) { snprintf(why, cap, "override"); return o == 1; }
+    if (o >= 0) { snprintf(why, cap, "override"); return (instinct_ready_t)o; }
     why[0] = '\0';
-    return !s_ready_fn || s_ready_fn(why, cap, s_ready_user);
+    return s_ready_fn ? s_ready_fn(why, cap, s_ready_user) : INSTINCT_READY;
 }
+
+static ui_bubble_t bubble_of(instinct_ready_t r)
+{
+    return r == INSTINCT_WIFI_DOWN ? UI_BUBBLE_WIFI : r == INSTINCT_SERVICE_DOWN ? UI_BUBBLE_SERVICE : UI_BUBBLE_SETUP;
+}
+static const char *reason_name(instinct_ready_t r) { return r == INSTINCT_WIFI_DOWN ? "wifi" : r == INSTINCT_SERVICE_DOWN ? "service" : "setup"; }
 
 static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && !s_shake_last; }   // no call, no timed mood, not a ball
 
 // Once a second: enter the puzzled rest after PUZZLED_AFTER of "not ready", leave it the moment it is ready.
 static void readiness_tick(void)
 {
-    char why[64]; bool ready = ready_now(why, sizeof why);
+    char why[96]; instinct_ready_t r = ready_now(why, sizeof why);
     int64_t now = clock_us();
-    if (!ready) {
+    if (r != INSTINCT_READY) {
         if (!s_unready_since) s_unready_since = now;
         if (!s_puzzled && now - s_unready_since >= PUZZLED_AFTER_US) {
-            s_puzzled = true; atomic_store(&s_rest, UI_EMO_URGE); s_gaze_next = now + GAZE_BUBBLE_MS * 1000LL;
-            store_event("puzzled: %s", why);
-            LOGI("puzzled: %s", why);
+            s_puzzled = true; s_reason = r; atomic_store(&s_rest, UI_EMO_URGE); s_gaze_next = now + GAZE_BUBBLE_MS * 1000LL;
+            store_event("puzzled (%s): %s", reason_name(r), why);
+            LOGI("puzzled (%s): %s", reason_name(r), why);
             if (resting()) ui_set_emotion(UI_EMO_URGE);
+        } else if (s_puzzled && r != s_reason) {             // e.g. Wi-Fi now set but not joining: the icon follows
+            s_reason = r;
+            store_event("bubble now %s: %s", reason_name(r), why);
+            LOGI("bubble now %s: %s", reason_name(r), why);
         }
         return;
     }
     s_unready_since = 0;
     if (!s_puzzled) return;
     s_puzzled = false; atomic_store(&s_rest, UI_EMO_NEUTRAL);
-    ui_show_bubble(false);
+    ui_show_bubble(UI_BUBBLE_NONE);
     store_event("ready again");
     LOGI("ready again");
     if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
@@ -228,8 +241,8 @@ void instinct_refuse(const char *why)
     ui_play_action(UI_ACT_SHAKE_HEAD);
     mood(UI_EMO_SAD, 2500);
     LOGW("refused: %s", why ? why : "");
-    char w[64];
-    if (!s_puzzled && !ready_now(w, sizeof w)) s_unready_since = clock_us() - PUZZLED_AFTER_US;   // known now: puzzled as soon as the sad face is over
+    char w[96];
+    if (!s_puzzled && ready_now(w, sizeof w) != INSTINCT_READY) s_unready_since = clock_us() - PUZZLED_AFTER_US;   // known now: puzzled as soon as the sad face is over
 }
 
 static void shake_tick(void)
@@ -255,7 +268,7 @@ static void urge_tick(void)
 {
     if (!s_puzzled) return;
     bool show = !atomic_load(&s_busy) && !s_shake_last;
-    ui_show_bubble(show);
+    ui_show_bubble(show ? bubble_of(s_reason) : UI_BUBBLE_NONE);
     int64_t now = clock_us();
     if (!resting()) { s_gaze_next = now + 800000; return; }        // a timed mood is on: pick the gaze up after it
     if (now < s_gaze_next) return;
@@ -313,6 +326,13 @@ void instinct_touched(int x, int y)
     if (atomic_load(&s_busy)) return;
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
+    if (s_puzzled && ui_bubble_hit(x, y)) {                 // the bubble: straight to pairing mode, where it gets fixed
+        s_last_touch = now;
+        board_vibrate(30); audio_sfx_play("pop");
+        LOGI("bubble tapped (%s)", reason_name(s_reason));
+        if (s_bubble_cb) s_bubble_cb(s_bubble_user);
+        return;
+    }
     int hit = ui_scene_hit(x, y);
     if (hit >= 0) {
         s_last_touch = now;

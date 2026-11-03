@@ -55,6 +55,12 @@ static esp_err_t f_chat_send(chat_session_t *s, const chat_request_t *req)
 {
     const char *env = getenv("GUGU_FAKE_REPLY");
     const char *r = s_qi < s_qn ? s_queue[s_qi++] : env ? env : s_chat_reply;
+    if (!strncmp(r, "!error ", 7)) {                         // tests: the vendor answers with this HTTP error
+        int http = atoi(r + 7);
+        provider_error_t e; provider_error_set(&e, provider_classify_http(http), http, 0, "fake vendor error");
+        s->ev.on_error(&e, s->user);
+        return ESP_FAIL;
+    }
     size_t n = strlen(r);
     for (size_t i = 0; i < n && !s->cancelled;) {           // deltas of 1–3 UTF-8 characters
         size_t k = 0;
