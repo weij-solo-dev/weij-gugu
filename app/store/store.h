@@ -28,3 +28,6 @@ esp_err_t   store_call_end(store_call_t *c, const char *summary_json);    // wri
 
 // ---- cost ledger: ledger/<yyyy-mm>.jsonl ----
 esp_err_t   store_ledger_add(const char *json_line);
+
+// ---- event log: logs/events.log, one timestamped line per key press, call state, failure; kept under ~64 KB (the parent page shows the tail) ----
+void        store_event(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

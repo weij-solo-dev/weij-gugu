@@ -16,7 +16,7 @@ static board_listener_t s_listener;
 static void *s_listener_user;
 static atomic_bool s_touch_down;
 static atomic_int s_tx, s_ty;
-static bool s_key_down[BOARD_KEY_COUNT];
+static bool s_key_down[BOARD_KEY_COUNT], s_key_held[BOARD_KEY_COUNT];
 static int64_t s_key_t[BOARD_KEY_COUNT];
 static SDL_mutex *s_fb_mutex;
 
@@ -110,7 +110,7 @@ void board_host_sdl_event(const SDL_Event *e)
         else if (e->key.keysym.sym == SDLK_s) emit(BOARD_EV_SHAKE, 160, 0);
         if (e->key.keysym.sym == SDLK_p && !e->key.repeat) emit(BOARD_EV_PICKUP, 0, 0);
         int k = key_of(e->key.keysym.sym);
-        if (k >= 0 && !e->key.repeat && !s_key_down[k]) { s_key_down[k] = true; s_key_t[k] = clock_us(); emit(BOARD_EV_KEY_DOWN, k, 0); }
+        if (k >= 0 && !e->key.repeat && !s_key_down[k]) { s_key_down[k] = true; s_key_held[k] = false; s_key_t[k] = clock_us(); emit(BOARD_EV_KEY_DOWN, k, 0); }
         break;
     }
     case SDL_KEYUP: {
@@ -125,6 +125,8 @@ void board_host_sdl_event(const SDL_Event *e)
 
 void board_host_present(SDL_Renderer *r, SDL_Texture *t)
 {
+    for (int k = 0; k < BOARD_KEY_COUNT; k++)   // the long press fires while the key is still down, like the device's sampler
+        if (s_key_down[k] && !s_key_held[k] && clock_us() - s_key_t[k] >= (int64_t)BOARD_HOLD_MS * 1000) { s_key_held[k] = true; emit(BOARD_EV_KEY_HOLD, k, BOARD_HOLD_MS); }
     if (!atomic_exchange(&s_dirty, false)) return;
     SDL_LockMutex(s_fb_mutex);
     SDL_UpdateTexture(t, NULL, s_fb, BOARD_DISPLAY_W * 2);

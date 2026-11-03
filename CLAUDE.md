@@ -12,13 +12,13 @@ that lives on an M5Stack StopWatch (ESP32-S3R8, 466×466 round AMOLED, mic, spea
 planned by `life`, kept by `world`) sends it to a real place for one to three nights (a delivery, a holiday or a
 visit); the screen follows where it is and the real time of day there; it mails a postcard home every day and brings
 back one souvenir per trip. The child can call it any time (blue key, push-to-talk; the yellow key is for play, and
-held for three seconds it toggles parent mode). The child speaks English, Mandarin or Cantonese; Gugu answers in the
+held for three seconds it toggles pairing mode). The child speaks English, Mandarin or Cantonese; Gugu answers in the
 child's language with one voice.
 
 **The application is the firmware.** There is no backend, proxy, account or app. The device talks
 to the AI vendors directly over TLS with the family's own API keys, and keeps every byte of state
-(settings, memory, transcripts, postcards) on its own flash. The parent configures it through a
-hotspot and a web page served by the device.
+(settings, memory, transcripts, postcards) on its own flash. The parent configures it in pairing mode: a
+hotspot and a web page served by the device (the yellow key held three seconds, on and off).
 
 Two documents sit beside this one:
 
@@ -88,8 +88,8 @@ base        foundation   small headerful components, included directly (no umbre
 | `call` | `call.h`: IDLE → CONNECTING → WAITING ⇄ LISTENING → THINKING → SPEAKING → ENDED, cancellation, per-stage timeouts, quiet hours, time cap, "no signal" fallback | `foundation` `engine` `mind` `audio` `ui` `store` `world` |
 | `instinct` | `instinct.h`: idle animations, blink/breathe/doze, scene choice from world state (the trip's generated backdrop and sprites when they exist, built-in ones otherwise, at the time of day there), the object list and layout for a trip (friend on the right, props on the left), what a touch does (object → its behaviour + vibration + a sound; Gugu → coo), a time-of-day override for screenshots | `foundation` `board` `audio` `ui` `store` `world` `art` |
 | `life` | `life.h`: the worker that plans the next trip card on the journey so far (`life_plan_trip`), writes the diary of each day away and the recap once home (`life_diary_now`, `life_recap_now`), generates the trip's pictures through the image role (`life_art_now`: backdrop, ≤3 props, the friend; one `.art` or `.fail` per piece, ledger line per picture), and the daily tick that runs them in order (`life_tick`, nightly and once after boot; planning keyed by date); wake reasons, postcards and the weekly reflection later | `foundation` `store` `world` `mind` `provider` `board` `art` |
-| `parent` | `parent.h`: softAP with random numeric password, captive portal, JSON API, embedded static page | `foundation` `store` `board` |
-| `console` | `console.h`: the serial test console (USB-Serial/JTAG on the device, stdin on the host): provisioning (`wifi`, `key`, `set`), `call`/`hang`/`replay [early]`, real-microphone checks (`hold`, `mic`), the trip and the journey (`trip [new|clear|json]`, `clock`, `tick`, `diary`, `recap`, `journey`), the pictures (`art [gen|retry]`, `tod`), the child's hands (`press yellow|shake|pickup`), `parent`, `stat`, `mem`, `ls`/`cat`, `sfx`, `vol`, `sleep` | `foundation` `store` `provider` `net` `call` `audio` `board` `parent` `world` `life` `mind` `art` `instinct` |
+| `parent` | `parent.h`: pairing mode: softAP with a random numeric password, the JSON API (status, settings, secrets read/write, Wi-Fi scan, calls, trip, memories, events) and the embedded page | `foundation` `store` `board` `net` |
+| `console` | `console.h`: the serial test console (USB-Serial/JTAG on the device, stdin on the host): provisioning (`wifi`, `key`, `set`), `call`/`hang`/`replay [early]`, real-microphone checks (`hold`, `mic`), the trip and the journey (`trip [new|clear|json]`, `clock`, `tick`, `diary`, `recap`, `journey`), the pictures (`art [gen|retry]`, `tod`), the child's hands (`press yellow|shake|pickup`), `parent` (pairing mode), `scan`, `events`, `stat`, `mem`, `ls`/`cat`, `sfx`, `vol`, `sleep` | `foundation` `store` `provider` `net` `call` `audio` `board` `parent` `world` `life` `mind` `art` `instinct` |
 
 Every module in the table is in the tree; `world` and `life` arrived with v1.1 (the trip card and its planner) and
 still grow (postcards, festivals, weather, wake reasons).
@@ -144,8 +144,8 @@ say so out loud, do not slip it in.
 
 ### Configuration and content
 
-- Secrets and Wi-Fi: encrypted NVS, written only by `parent` (or by the provisioning tool during
-  development). Everything else the parent sets: `settings.json` in LittleFS.
+- Secrets and Wi-Fi: encrypted NVS, written by `parent` (the pairing page, which also shows them to the owner) or the
+  console during development. Everything else the parent sets: `settings.json` in LittleFS.
 - **No database.** Flash holds two LittleFS partitions, `content` (read-only image built from
   `content/`) and `data` (writable), plus encrypted NVS for Wi-Fi and API keys. Records are JSON
   documents (memory books, settings) and append-only JSONL (calls, diary, ledger) under `data/`,

@@ -11,6 +11,8 @@ esp_err_t net_init(void);
 bool net_is_online(void);                        // Wi-Fi up with an IP (host: always true)
 esp_err_t net_wifi_connect(const char *ssid, const char *pass, uint32_t timeout_ms);   // device; host no-op
 esp_err_t net_time_sync(const char *ntp_host);   // SNTP against this host whenever Wi-Fi is up (device; host no-op)
+typedef struct { char ssid[33]; int rssi; bool secure; } net_wifi_ap_t;
+int net_wifi_scan(net_wifi_ap_t *out, int cap);     // blocking (~2 s): nearby networks, strongest first, no duplicates; host: a made-up list
 
 // ---- HTTP ----
 typedef struct net_http net_http_t;

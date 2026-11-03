@@ -45,6 +45,7 @@ static void refresh_sprite(void)
 
 static void jitter_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 2 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 20)) / 32767); }
 static void sway_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 6 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 2)) / 32767); }
+static void headshake_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 4 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 3)) / 32767); }   // three swings: no, no, no
 static void x_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, GUGU_BASE_X); }
 static void wobble(lv_anim_exec_xcb_t exec, uint32_t ms)
 {
@@ -177,6 +178,7 @@ void ui_play_action(ui_action_t a)
     case UI_ACT_PECK: bob(3 * UI_SPRITE_SCALE, 110, 1); break;                    // two quick dips
     case UI_ACT_JUMP: hop(10 * UI_SPRITE_SCALE, 320); break;
     case UI_ACT_FLY: fly(1400); break;
+    case UI_ACT_SHAKE_HEAD: wobble(headshake_exec, 700); break;
     }
     ui_unlock();
 }
@@ -209,6 +211,7 @@ static lv_timer_t *s_ball_timer; static float s_bx, s_by, s_bvx, s_bvy;
 #define BALL_R   (24 * UI_SPRITE_SCALE)         // half the puffed sprite, roughly
 #define WIN_R    (BOARD_DISPLAY_W / 2)
 
+static int32_t s_spin;                       // tenths of a degree; the ball rolls as it flies
 static void ball_cb(lv_timer_t *t)
 {
     (void)t;
@@ -217,10 +220,12 @@ static void ball_cb(lv_timer_t *t)
     if (d > lim) {                               // reflect the velocity about the rim's normal, nudge back inside
         float nx = dx / d, ny = dy / d, dot = s_bvx * nx + s_bvy * ny;
         s_bvx -= 2 * dot * nx; s_bvy -= 2 * dot * ny;
-        s_bx = WIN_R + nx * (lim - 1); s_by = WIN_R + ny * (lim - 1);
-        s_bvx *= 0.96f; s_bvy *= 0.96f;
-        board_vibrate(18);
+        s_bx = WIN_R + nx * (lim - 2); s_by = WIN_R + ny * (lim - 2);
+        s_bvx *= 0.985f; s_bvy *= 0.985f;        // it keeps its pace: the hits are the point
+        board_vibrate(35);
     }
+    s_spin = (s_spin + (int32_t)(s_bvx * 6)) % 3600; if (s_spin < 0) s_spin += 3600;
+    lv_image_set_rotation(ui_gugu_img, s_spin);
     lv_obj_set_pos(ui_gugu_img, (int)s_bx - BALL_R, (int)s_by - BALL_R);
 }
 
@@ -230,8 +235,9 @@ void ui_bounce_start(void)
     if (!s_ball) {
         s_ball = true;
         s_puff_until = 0xFFFFFFFFu; refresh_sprite();
-        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R; s_bvx = 9; s_bvy = -11;
-        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, 25, NULL);
+        lv_image_set_pivot(ui_gugu_img, BALL_R, BALL_R);
+        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R; s_bvx = 22; s_bvy = -28;
+        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, 16, NULL);
         lv_timer_resume(s_ball_timer);
     }
     ui_unlock();
@@ -242,10 +248,10 @@ void ui_bounce_kick(int intensity)
     ui_lock();
     if (s_ball) {
         float k = 1.0f + intensity / 255.0f, sp = sqrtf(s_bvx * s_bvx + s_bvy * s_bvy);
-        if (sp < 1) { s_bvx = 9; s_bvy = -11; sp = 14; }
-        float target = 12 * k; if (target > 22) target = 22;
+        if (sp < 1) { s_bvx = 22; s_bvy = -28; sp = 35; }
+        float target = 28 * k; if (target > 48) target = 48;   // up to ~3000 px/s: a blur with a buzz at every wall
         s_bvx = s_bvx / sp * target; s_bvy = s_bvy / sp * target;
-        s_bvx += (lv_rand(0, 6) - 3); s_bvy += (lv_rand(0, 6) - 3);
+        s_bvx += (lv_rand(0, 14) - 7); s_bvy += (lv_rand(0, 14) - 7);
     }
     ui_unlock();
 }
@@ -258,6 +264,7 @@ bool ui_bounce_stop(void)
         s_ball = false;
         lv_timer_pause(s_ball_timer);
         s_puff_until = 0;
+        lv_image_set_rotation(ui_gugu_img, 0); lv_image_set_pivot(ui_gugu_img, 0, 0);
         lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y());
         refresh_sprite();
     }

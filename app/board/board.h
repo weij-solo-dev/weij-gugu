@@ -14,6 +14,7 @@
 #include "esp_err.h"
 
 #define BOARD_DISPLAY_W 466
+#define BOARD_HOLD_MS   3000    // a long press, reported while the finger is still on the key
 #define BOARD_DISPLAY_H 466
 
 typedef enum {
@@ -25,6 +26,7 @@ typedef enum {
 typedef enum {
     BOARD_EV_KEY_DOWN,      // a = board_key_t
     BOARD_EV_KEY_UP,        // a = board_key_t, b = held ms
+    BOARD_EV_KEY_HOLD,      // a = board_key_t, b = ms: fired once while the key is still down, at BOARD_HOLD_MS
     BOARD_EV_TOUCH_DOWN,    // a = x, b = y
     BOARD_EV_TOUCH_UP,      // a = x, b = y
     BOARD_EV_PICKUP,        // IMU: the device left the table (a lasting tilt after calm)

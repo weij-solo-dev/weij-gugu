@@ -8,7 +8,7 @@ void board_touch_poll(void);
 
 static const gpio_num_t s_key_gpio[BOARD_KEY_COUNT] = { BOARD_KEY_BLUE_GPIO, BOARD_KEY_YELLOW_GPIO };
 static uint8_t s_hist[BOARD_KEY_COUNT];      // last 8 samples, 1 = pressed
-static bool s_down[BOARD_KEY_COUNT];
+static bool s_down[BOARD_KEY_COUNT], s_held[BOARD_KEY_COUNT];
 static int64_t s_down_t[BOARD_KEY_COUNT];
 static esp_timer_handle_t s_timer;
 static unsigned s_tick;
@@ -21,8 +21,12 @@ static void tick(void *arg)
         s_hist[k] = (uint8_t)((s_hist[k] << 1) | (pressed ? 1 : 0));
         uint8_t last3 = s_hist[k] & 0x07;
         if (!s_down[k] && last3 == 0x07) {
-            s_down[k] = true; s_down_t[k] = now;
+            s_down[k] = true; s_held[k] = false; s_down_t[k] = now;
             board_event_t ev = { .kind = BOARD_EV_KEY_DOWN, .a = k, .b = 0, .t_us = now };
+            board_emit(&ev);
+        } else if (s_down[k] && !s_held[k] && now - s_down_t[k] >= (int64_t)BOARD_HOLD_MS * 1000) {
+            s_held[k] = true;
+            board_event_t ev = { .kind = BOARD_EV_KEY_HOLD, .a = k, .b = BOARD_HOLD_MS, .t_us = now };
             board_emit(&ev);
         } else if (s_down[k] && last3 == 0x00) {
             s_down[k] = false;

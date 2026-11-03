@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>咕咕 · 家长页</title>
+<title>咕咕 · 匹配</title>
 <style>
 body{font-family:-apple-system,"PingFang SC",Helvetica,Arial,sans-serif;margin:0;background:#f6f1e8;color:#2b2420}
 header{background:#3a2b24;color:#f6d27a;padding:14px 18px;font-size:18px}
@@ -15,8 +15,9 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 .muted{color:#888;font-size:12px}.row{display:flex;gap:10px}.row>*{flex:1}
 .call{cursor:pointer}.call:hover{background:#fdf6ea}
 </style></head><body>
-<header>咕咕 · 家长页 <span class="muted" id="status" style="color:#ccc"></span></header>
+<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-03</span></header>
 <main>
+<section><h2>设备状态</h2><div id="devstatus" class="muted">加载中…</div><button class="secondary" onclick="testSound()">测试扬声器（咕一声）</button> <span id="soundMsg" class="muted"></span></section>
 <section><h2>这一趟</h2><div id="trip" class="muted">加载中…</div><button class="secondary" id="tripDel" style="display:none" onclick="deleteTrip()">删除这张趟卡（咕咕就不去了）</button></section>
 <section><h2>记忆</h2><div class="muted" style="margin-bottom:6px">旅程志</div><div id="journey" class="muted">加载中…</div><div class="muted" style="margin:10px 0 6px">关于孩子</div><div id="about_child" class="muted"></div><div class="muted" style="margin:10px 0 6px">它后来知道的（生长正典）</div><div id="canon_grown" class="muted"></div></section>
 <section><h2>通话记录</h2><div id="calls" class="muted">加载中…</div>
@@ -29,17 +30,26 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 <div><label>语言 3</label><select id="lang3"><option value="">（无）</option><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
 <div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一通电话最长（分钟）</label><input id="max_call_min" type="number"></div></div>
 <button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
-<section><h2>网络与密钥（只写不显示）</h2>
+<section><h2>网络与密钥</h2>
+<label>附近的 Wi-Fi <a href="#" class="muted" onclick="scanWifi();return false" id="scanLink">（扫描中…）</a></label>
+<select id="wifi_pick" onchange="if(this.value)$('wifi_ssid').value=this.value"><option value="">— 选一个，或在下面手输 —</option></select>
 <div class="row"><div><label>Wi-Fi 名称</label><input id="wifi_ssid"></div><div><label>Wi-Fi 密码</label><input id="wifi_pass" type="password"></div></div>
 <label>MiniMax API Key</label><input id="minimax_api_key" type="password">
+<label><input type="checkbox" id="showSecrets" onchange="toggleSecrets()" style="width:auto"> 显示密码和密钥</label>
 <button onclick="saveSecrets()">保存并重连</button> <span id="secretMsg" class="muted"></span>
 <p class="muted">保存后设备会在下次通话前使用新设置；Wi-Fi 更换后请重启设备。</p></section>
+<section><h2>事件记录</h2><pre id="events" class="muted" style="white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto">加载中…</pre></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 async function load(){
-  try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`}catch(e){}
+  try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
+    const ok=v=>v?'<b style="color:#2a7">✓</b>':'<b style="color:#d33">✗</b>';
+    $('devstatus').innerHTML=`固件 ${s.version||'?'} · 音频 ${ok(s.audio)} · 音量 ${s.volume??'?'} · Wi-Fi 已配置 ${ok(s.wifi_configured)} · 已联网 ${ok(s.online)} · 密钥已配置 ${ok(s.key_configured)}`}catch(e){$('devstatus').textContent='读取失败'}
+  try{const sec=await j('/api/secrets');for(const k of ['wifi_ssid','wifi_pass','minimax_api_key'])if(sec[k]!==undefined)$(k).value=sec[k]}catch(e){}
+  try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
+  scanWifi();
   try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang1','lang2','lang3','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
   try{const t=await j('/api/trip');if(!t){$('trip').textContent='还没有计划中的出门。'}else{const kind={deliver:'送信',vacation:'度假',visit:'探亲'}[t.kind]||t.kind;
     $('trip').innerHTML=`<div><b>${kind}</b> · ${t.place.name}（${t.place.country}）· ${t.depart_date} 出发，住 ${t.nights} 晚，${t.return_date} 回家</div><div style="margin:6px 0">${t.reason}${t.recipient?'<br>收件人：'+t.recipient:''}${t.letter?'<br>信里写：'+t.letter:''}</div><div><b>它会讲的事</b><ul>${(t.facts||[]).map(f=>`<li>${f}</li>`).join('')}</ul></div><div><b>每天</b><ol>${(t.days||[]).map(d=>`<li>${d}</li>`).join('')}</ol></div><div class="muted">朋友：${(t.friend||{}).name||''}（${(t.friend||{}).animal||''}）· 纪念品：${t.souvenir||''} · 生成于 ${t.generated_at||''}</div>`;
@@ -56,9 +66,12 @@ async function showCall(file,id){const turns=await j('/api/call?file='+encodeURI
   $('turns').innerHTML=turns.map(t=>`<div style="margin:8px 0"><div><b>孩子</b>（${t.lang}）：${t.transcript}</div><div><b>咕咕</b>：${t.reply}</div><div class="muted">首次出声 ${t.ms.first_play} ms · 识别 ${t.ms.asr} ms · 首字 ${t.ms.first_token} ms · 结束 ${t.ms.done} ms</div></div>`).join('')||'<span class="muted">空</span>';
   $('detail').scrollIntoView()}
 async function forget(book,key){if(!confirm('删除后咕咕就忘了这件事。确定？'))return;await j('/api/memory/forget',{method:'POST',body:JSON.stringify({book,key})});load()}
+async function testSound(){const r=await j('/api/test/sound',{method:'POST'});$('soundMsg').textContent=r.ok?'已播放，听到咕一声了吗？':'失败'}
 async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
 async function saveSettings(){const b={};for(const k of ['child_name','lang1','lang2','lang3'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
   const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});$('saveMsg').textContent=r.ok?'已保存':'失败'}
-async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++;$(k).value=''}$('secretMsg').textContent=`已保存 ${n} 项`}
+async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++}$('secretMsg').textContent=`已保存 ${n} 项`}
+function toggleSecrets(){const t=$('showSecrets').checked?'text':'password';$('wifi_pass').type=t;$('minimax_api_key').type=t}
+async function scanWifi(){$('scanLink').textContent='（扫描中…）';try{const aps=await j('/api/wifi/scan');const sel=$('wifi_pick');sel.innerHTML='<option value="">— 选一个，或在下面手输 —</option>'+aps.map(a=>`<option value="${a.ssid}">${a.ssid}　${a.rssi} dBm${a.secure?' 🔒':''}</option>`).join('');$('scanLink').textContent=`（重新扫描，找到 ${aps.length} 个）`}catch(e){$('scanLink').textContent='（扫描失败，点此重试）'}}
 load();
 </script></body></html>

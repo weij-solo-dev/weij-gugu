@@ -171,6 +171,15 @@ void instinct_picked_up(void)
     LOGI("picked up");
 }
 
+void instinct_refuse(const char *why)
+{
+    board_vibrate(90);
+    audio_sfx_play("nosignal");
+    ui_play_action(UI_ACT_SHAKE_HEAD);
+    mood(UI_EMO_SAD, 2500);
+    LOGW("refused: %s", why ? why : "");
+}
+
 static void shake_tick(void)
 {
     if (!s_shake_last || clock_us() - s_shake_last < 1200000) return;

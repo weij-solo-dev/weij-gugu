@@ -42,10 +42,18 @@ const char *call_state_name(call_state_t s)
 
 // The ring is on whenever the key is held and the microphone is being recorded: while the line is still
 // opening (the audio goes to the pre-roll) as well as while listening.
+// While the key is held Gugu listens with its face (head up, curious); the rim ring is off unless the parent
+// turns it on (setting listen_ring), because a lit ring is more interface than a three-year-old needs.
+static bool s_ring_setting_read, s_ring_on;
 static void update_ring(void)
 {
     call_state_t st = (call_state_t)atomic_load(&s_state);
-    ui_set_listening(atomic_load(&s_blue_down) && (st == CALL_CONNECTING || st == CALL_LISTENING));
+    bool listening = atomic_load(&s_blue_down) && (st == CALL_CONNECTING || st == CALL_LISTENING);
+    if (!s_ring_setting_read) { s_ring_on = store_setting_int("listen_ring", 0) != 0; s_ring_setting_read = true; }
+    if (s_ring_on) ui_set_listening(listening);
+    static bool was;
+    if (listening && !was) { ui_set_emotion(UI_EMO_CURIOUS); ui_play_action(UI_ACT_NOD); }
+    was = listening;
 }
 
 static void set_state(call_state_t s)
@@ -204,6 +212,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         LOGW("engine error at %s: %s", ev->u.error.stage, ev->u.error.err.message);
         atomic_fetch_add(&s_turns_failed, 1);
         atomic_store(&s_turn_active, false);
+        store_event("turn failed at %s: %s (http %d)", ev->u.error.stage, ev->u.error.err.message, ev->u.error.err.http_status);
         audio_sfx_play("nosignal");
         if (call_state() == CALL_CONNECTING) call_hangup();
         else if (call_state() == CALL_THINKING || call_state() == CALL_SPEAKING) set_state(CALL_WAITING);

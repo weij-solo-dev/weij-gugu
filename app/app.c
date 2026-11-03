@@ -19,6 +19,7 @@
 #include "life/life.h"
 #include "parent/parent.h"
 #include "foundation/task.h"
+#include "foundation/atomic_file.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,25 +33,38 @@
 #endif
 
 static engine_t *s_engine;
+static bool can_dial(char *why, size_t cap);
 
-#define PARENT_HOLD_MS 3000   // the yellow key held this long toggles parent mode
-
-static void toggle_parent_mode(void)
+// Pairing mode (匹配模式): the yellow key held 3 s brings the hotspot and its page up, held 3 s again takes them down.
+static void toggle_pairing_mode(void)
 {
-    if (parent_is_active()) { parent_exit(); ui_hide_notice(); LOGI("parent mode off"); return; }
-    if (parent_enter() != ESP_OK) return;
+    if (parent_is_active()) { parent_exit(); ui_hide_notice(); LOGI("pairing mode off"); store_event("pairing off"); return; }
+    if (parent_enter() != ESP_OK) { store_event("pairing failed"); return; }
+    store_event("pairing on: %s", parent_hotspot_ssid());
     char body[160];
     snprintf(body, sizeof body, "Wi-Fi  %s\nPassword  %s\n%s\n\nhold yellow 3 s to leave", parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url());
-    ui_show_notice("PARENT MODE", body);
+    ui_show_notice("PAIRING MODE", body);
 }
 
 static void on_board_event(const board_event_t *ev, void *user)
 {
     (void)user;
     switch (ev->kind) {
-    case BOARD_EV_KEY_DOWN: if (ev->a == BOARD_KEY_BLUE) call_key(CALL_KEY_BLUE, true, 0); break;
+    case BOARD_EV_KEY_DOWN:
+        store_event("key %s down", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow");
+        if (ev->a == BOARD_KEY_BLUE) {
+            char why[64];
+            if (call_state() == CALL_IDLE && !can_dial(why, sizeof why)) { store_event("call refused: %s", why); instinct_refuse(why); break; }
+            call_key(CALL_KEY_BLUE, true, 0);
+        }
+        break;
+    case BOARD_EV_KEY_HOLD:
+        store_event("key %s held %d ms", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow", ev->b);
+        if (ev->a == BOARD_KEY_YELLOW) toggle_pairing_mode();      // fires while the key is still down
+        break;
     case BOARD_EV_KEY_UP:
-        if (ev->a == BOARD_KEY_YELLOW) { if (ev->b >= PARENT_HOLD_MS) toggle_parent_mode(); else instinct_yellow_tap(); }   // the yellow key is play, never voice
+        store_event("key %s up after %d ms", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow", ev->b);
+        if (ev->a == BOARD_KEY_YELLOW) { if (ev->b < BOARD_HOLD_MS) instinct_yellow_tap(); }   // the yellow key is play, never voice; a long press already did its job
         else call_key(CALL_KEY_BLUE, false, ev->b);
         break;
     case BOARD_EV_TOUCH_DOWN: instinct_touched(ev->a, ev->b); break;
@@ -63,10 +77,25 @@ static void on_board_event(const board_event_t *ev, void *user)
 static void on_call_state(call_state_t s, void *user)
 {
     (void)user;
+    store_event("call %s", call_state_name(s));
     instinct_set_busy(s != CALL_IDLE && s != CALL_ENDED);
 }
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
+static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
+
+// Can a call start right now? Checked before dialling so the child gets an answer at once instead of a dial tone and twenty seconds of silence.
+static bool can_dial(char *why, size_t cap)
+{
+    if (!net_is_online()) { snprintf(why, cap, "offline"); return false; }
+    const char *roles[] = { "chat", "asr", "tts" }; provider_role_t ids[] = { PROVIDER_ROLE_CHAT, PROVIDER_ROLE_ASR, PROVIDER_ROLE_TTS };
+    for (int i = 0; i < 3; i++) {
+        const provider_vtable_t *v = provider_for(ids[i]);
+        if (!v) { snprintf(why, cap, "no %s vendor", roles[i]); return false; }
+        if (strcmp(v->id, "fake")) { const char *k = provider_credential(v->id, "api_key"); if (!k || !*k) { snprintf(why, cap, "no %s key for %s", roles[i], v->id); return false; } }
+    }
+    return true;
+}
 
 #ifdef GUGU_HOST
 static void on_board_event(const board_event_t *ev, void *user);
@@ -76,9 +105,15 @@ static void scripted_taps(void *arg)   // GUGU_TAP="x,y,ms;x,y,ms": touches at t
     char *list = strdup(getenv("GUGU_TAP")); int64_t t0 = clock_us();
     for (char *tok = strtok(list, ";"); tok; tok = strtok(NULL, ";")) {
         int x = 0, y = 0, ms = 0;
-        bool yellow = tok[0] == 'Y' && tok[1] == '@', shake = tok[0] == 'S' && tok[1] == '@', pickup = tok[0] == 'P' && tok[1] == '@';
-        if (yellow || shake || pickup) ms = atoi(tok + 2); else if (sscanf(tok, "%d,%d,%d", &x, &y, &ms) != 3) continue;
+        bool yellow = tok[0] == 'Y' && tok[1] == '@', shake = tok[0] == 'S' && tok[1] == '@', pickup = tok[0] == 'P' && tok[1] == '@', blue = tok[0] == 'B' && tok[1] == '@';
+        if (yellow || shake || pickup || blue) ms = atoi(tok + 2); else if (sscanf(tok, "%d,%d,%d", &x, &y, &ms) != 3) continue;
         while (clock_us() - t0 < (int64_t)ms * 1000) clock_sleep_ms(10);
+        if (blue) {   // a one-second press of the phone key
+            board_event_t d = { .kind = BOARD_EV_KEY_DOWN, .a = BOARD_KEY_BLUE }; on_board_event(&d, NULL);
+            clock_sleep_ms(1000);
+            board_event_t u = { .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_BLUE, .b = 1000 }; on_board_event(&u, NULL);
+            continue;
+        }
         board_event_t ev = yellow ? (board_event_t){ .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_YELLOW, .b = 120 } : shake ? (board_event_t){ .kind = BOARD_EV_SHAKE, .a = 160 }
                         : pickup ? (board_event_t){ .kind = BOARD_EV_PICKUP } : (board_event_t){ .kind = BOARD_EV_TOUCH_DOWN, .a = x, .b = y };
         on_board_event(&ev, NULL);
@@ -111,7 +146,8 @@ void app_main(void)
 
     store_init(DATA_DIR, CONTENT_DIR);
     world_init(DATA_DIR);
-    ESP_ERROR_CHECK(audio_init());
+    esp_err_t audio_err = audio_init();          // a silent device is still a device: keep going, record it
+    if (audio_err != ESP_OK) LOGE("audio init failed: %s", esp_err_to_name(audio_err));
     audio_set_volume((uint8_t)store_setting_int("volume", 80));
     instinct_init();                       // the right scene is up before the network comes
 
@@ -144,11 +180,11 @@ void app_main(void)
                          .lang_hint = LANG_UNKNOWN, .where = NULL };   // NULL: the mind takes "where" from the world
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .user = NULL };
+    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .user = NULL };
     parent_set_hooks(&ph);
     life_init();
     call_set_state_listener(on_call_state, NULL);
-    if (getenv("GUGU_YELLOW_HOLD")) { board_event_t ev = { .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_YELLOW, .b = PARENT_HOLD_MS }; on_board_event(&ev, NULL); }   // host: the parent card, for a screenshot
+    if (getenv("GUGU_YELLOW_HOLD")) { board_event_t ev = { .kind = BOARD_EV_KEY_HOLD, .a = BOARD_KEY_YELLOW, .b = BOARD_HOLD_MS }; on_board_event(&ev, NULL); }   // host: the pairing card, for a screenshot
     if (getenv("GUGU_TOD")) instinct_set_tod_override(atoi(getenv("GUGU_TOD")));   // host screenshots: 0 night, 1 sunrise, 2 day, 3 dusk
 #ifdef GUGU_HOST
     if (getenv("GUGU_TAP")) task_spawn("gugu_tap", scripted_taps, NULL, 16384, 1, 0);   // host screenshots: "x,y,ms;x,y,ms" touches
@@ -156,6 +192,15 @@ void app_main(void)
     board_set_listener(on_board_event, NULL);
     console_init();
     LOGI("ready: asr=%s chat=%s tts=%s", asr, chat, tts);
+    {   // what the pairing page and a report need to know about this boot
+        char v[256]; bool have_key = store_secret_get("minimax_api_key", v, sizeof v) == ESP_OK && v[0], have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // a short buffer reads as "unset": size it for a real key
+        char boot[240], path[200];
+        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-03\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d}",
+                 audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80));
+        snprintf(path, sizeof path, "%s/logs/boot.json", DATA_DIR);
+        atomic_file_write(path, boot, strlen(boot));
+        store_event("boot: audio %s, wifi %s, key %s, online %s", audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+    }
 
 #ifdef GUGU_HOST
     const char *replay = getenv("GUGU_REPLAY_WAV"), *replay_list = getenv("GUGU_REPLAY_WAVS");

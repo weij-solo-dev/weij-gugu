@@ -16,6 +16,7 @@ const char *parent_hotspot_url(void);       // the page address on the hotspot, 
 typedef struct {
     void (*trip_delete)(void *user);
     void (*memory_forget)(const char *book, const char *key, void *user);   // book: journey (key = trip id) | about_child | canon_grown (key = index)
+    void (*test_sound)(void *user);                                        // the page's "test the speaker" button
     void *user;
 } parent_hooks_t;
 void parent_set_hooks(const parent_hooks_t *h);

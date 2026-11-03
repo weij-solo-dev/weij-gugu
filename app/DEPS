@@ -14,5 +14,5 @@ engine     : foundation provider mind net
 call       : foundation engine mind audio ui store world provider
 instinct   : foundation board audio ui store world art
 life       : foundation store world mind provider board art
-parent     : foundation store board
+parent     : foundation store board net
 console    : foundation store provider net call audio board parent world life mind art instinct

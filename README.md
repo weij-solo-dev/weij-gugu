@@ -36,8 +36,8 @@ warm, slightly husky voice.
   Gugu may only retell what the card says. Parents can read and delete the card.
 - **It remembers the child.** Names, friends, fears, new skills, brought up naturally days later.
 - **Parents see everything, without an account.** Every call transcript, postcard and memory is on
-  the device; holding the yellow key for three seconds opens a hotspot and shows its name and password
-  on the screen, and a web page lets a parent read, export or delete everything.
+  the device; holding the yellow key for three seconds enters pairing mode: a hotspot whose name and password
+  show on the screen, and a web page where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
 
 ## How it is built
 
@@ -49,7 +49,7 @@ The whole product is **firmware plus the AI vendors' APIs**. There is no server,
    ├─ the pet's life: model-planned trip cards, real-time calendar and sun, postcards, souvenirs, memory books, all on LittleFS
    ├─ pixel-art home and generated places on a 466×466 round display, 19 expressions driven by the model
    ├─ pictures per trip: image-01 → JPEG decoded and shrunk on the ESP32 → 116-grid palette art, four times of day
-   └─ parent mode: hotspot + web page served by the device: calls, the trip card, the three memory books
+   └─ pairing mode: hotspot + web page served by the device: Wi-Fi picker, keys, calls, the trip card, the memory books, the event log
 ```
 
 - **Hardware:** M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB PSRAM, 466×466 AMOLED,

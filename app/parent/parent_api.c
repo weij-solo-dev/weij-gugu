@@ -7,6 +7,7 @@
 #include "foundation/atomic_file.h"
 #include "store/store.h"
 #include "board/board.h"
+#include "net/net.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
@@ -69,11 +70,23 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         if (!s) return reply(out, out_len, "<h1>gugu</h1><p>content/web/index.html missing</p>"), *ctype = CT_HTML, 200;
         *out = strdup(s); *out_len = n; mem_release(s); *ctype = CT_HTML; return 200;
     }
-    if (get && !strcmp(path, "/api/status")) {
-        char s[320];
-        snprintf(s, sizeof s, "{\"device\":\"gugu\",\"battery_mv\":%d,\"charging\":%s,\"internal_free\":%u,\"big_free\":%u}",
-                 board_battery_mv(), board_is_charging() ? "true" : "false", (unsigned)mem_avail_internal(), (unsigned)mem_avail_big());
-        return reply(out, out_len, s);
+    if (get && !strcmp(path, "/api/status")) {           // live numbers plus what app.c recorded at boot (logs/boot.json: version, audio, wifi, key)
+        snprintf(p, sizeof p, "%s/logs/boot.json", store_data_dir());
+        size_t bn; char *boot = file_read_all(p, &bn);
+        cJSON *j = boot ? cJSON_Parse(boot) : NULL; mem_release(boot);
+        if (!j) j = cJSON_CreateObject();
+        cJSON_AddStringToObject(j, "device", "gugu");
+        cJSON_AddNumberToObject(j, "battery_mv", board_battery_mv());
+        cJSON_AddBoolToObject(j, "charging", board_is_charging());
+        cJSON_AddBoolToObject(j, "online", net_is_online());
+        cJSON_AddNumberToObject(j, "internal_free", (double)mem_avail_internal());
+        cJSON_AddNumberToObject(j, "big_free", (double)mem_avail_big());
+        char *txt = cJSON_PrintUnformatted(j); cJSON_Delete(j);
+        *out = strdup(txt ? txt : "{}"); *out_len = strlen(*out); cJSON_free(txt); return 200;
+    }
+    if (post && !strcmp(path, "/api/test/sound")) {      // the owner taps "test the speaker"
+        if (s_hooks.test_sound) s_hooks.test_sound(s_hooks.user);
+        return reply(out, out_len, s_hooks.test_sound ? "{\"ok\":true}" : "{\"ok\":false}");
     }
     if (get && !strcmp(path, "/api/calls")) {
         snprintf(p, sizeof p, "%s/calls/index.jsonl", store_data_dir());
@@ -101,7 +114,31 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         cJSON_Delete(j);
         return reply(out, out_len, "{\"ok\":true}");
     }
-    if (post && !strcmp(path, "/api/secret")) {            // {"key":"wifi_ssid","value":"..."} — never echoed back
+    if (get && !strcmp(path, "/api/events")) {             // the last lines of the event log, for a report
+        snprintf(p, sizeof p, "%s/logs/events.log", store_data_dir());
+        size_t n; char *s = file_read_all(p, &n);
+        if (!s) return reply(out, out_len, ""), *ctype = CT_TEXT, 200;
+        const char *tail = n > 6000 ? s + n - 6000 : s;
+        *out = strdup(tail); *out_len = strlen(tail); mem_release(s); *ctype = CT_TEXT; return 200;
+    }
+    if (get && !strcmp(path, "/api/wifi/scan")) {          // nearby networks for the pairing page's picker
+        net_wifi_ap_t aps[16]; int n = net_wifi_scan(aps, 16);
+        strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '[');
+        for (int i = 0; i < n; i++) { strbuf_printf(&b, "%s{\"ssid\":\"", i ? "," : ""); strbuf_append_json_escaped(&b, aps[i].ssid); strbuf_printf(&b, "\",\"rssi\":%d,\"secure\":%s}", aps[i].rssi, aps[i].secure ? "true" : "false"); }
+        strbuf_putc(&b, ']');
+        *out = strdup(b.s ? b.s : "[]"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+    }
+    if (get && !strcmp(path, "/api/secrets")) {            // the owner's own Wi-Fi and keys, shown on the owner's own page (the hotspot is the lock)
+        static const char *const keys[] = { "wifi_ssid", "wifi_pass", "minimax_api_key", "qwen_api_key", "volc_api_key", NULL };
+        strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '{');
+        for (int i = 0; keys[i]; i++) {
+            char v[256]; if (store_secret_get(keys[i], v, sizeof v) != ESP_OK) v[0] = '\0';
+            strbuf_printf(&b, "%s\"%s\":\"", i ? "," : "", keys[i]); strbuf_append_json_escaped(&b, v); strbuf_putc(&b, '"');
+        }
+        strbuf_putc(&b, '}');
+        *out = strdup(b.s ? b.s : "{}"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+    }
+    if (post && !strcmp(path, "/api/secret")) {            // {"key":"wifi_ssid","value":"..."}
         cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
         const char *k = cJSON_GetStringValue(cJSON_GetObjectItem(j, "key")), *v = cJSON_GetStringValue(cJSON_GetObjectItem(j, "value"));
         if (!k || !v) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"key and value required\"}"), 400; }

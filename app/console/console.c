@@ -240,6 +240,27 @@ static int cmd_press(int argc, char **argv)   // press yellow [n] | press shake 
     return 0;
 }
 
+static int cmd_scan(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    net_wifi_ap_t aps[16]; int n = net_wifi_scan(aps, 16);
+    for (int i = 0; i < n; i++) printf("  %-32s %4d dBm %s\n", aps[i].ssid, aps[i].rssi, aps[i].secure ? "locked" : "open");
+    printf("%d networks\n", n);
+    return 0;
+}
+static int cmd_events(int argc, char **argv)
+{
+    int want = argc > 1 ? atoi(argv[1]) : 30;
+    char p[200]; snprintf(p, sizeof p, "%s/logs/events.log", store_data_dir());
+    size_t n; char *s = file_read_all(p, &n);
+    if (!s) { printf("no events yet\n"); return 0; }
+    int lines = 0; const char *start = s + n;
+    while (start > s && lines <= want) { start--; if (*start == '\n') lines++; }
+    if (*start == '\n') start++;
+    fputs(start, stdout); mem_release(s);
+    return 0;
+}
+
 static int cmd_tod(int argc, char **argv)
 {
     static const char *const N[] = { "night", "sunrise", "day", "dusk" };
@@ -264,9 +285,9 @@ static int cmd_journey(int argc, char **argv)
 
 static int cmd_parent(int argc, char **argv)
 {
-    if (argc > 1 && !strcmp(argv[1], "off")) { parent_exit(); printf("parent mode off\n"); return 0; }
+    if (argc > 1 && !strcmp(argv[1], "off")) { parent_exit(); printf("pairing mode off\n"); return 0; }
     esp_err_t err = parent_enter();
-    printf("parent mode %s: hotspot %s password %s page %s\n", esp_err_to_name(err), parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url());
+    printf("pairing mode %s: hotspot %s password %s page %s\n", esp_err_to_name(err), parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url());
     return err == ESP_OK ? 0 : 1;
 }
 
@@ -290,7 +311,7 @@ static const cmd_t CMDS[] = {
     { "mem", "heap regions: free, largest block, low-water mark", cmd_mem },
     { "ls", "ls [dir]", cmd_ls },
     { "cat", "cat <path>", cmd_cat },
-    { "parent", "parent [off] — hotspot + web page for the parent", cmd_parent },
+    { "parent", "parent [off] — pairing mode: the hotspot and the page (yellow key held 3 s does the same)", cmd_parent },
     { "trip", "trip [new [kind] [place] [nights] | clear | json] — the trip card and where Gugu is", cmd_trip },
     { "clock", "clock [+hours|-hours|reset] — shift the clock to walk through a trip", cmd_clock },
     { "tick", "run the daily life tick now (diary, recap, then a trip when one is due)", cmd_tick },
@@ -300,6 +321,8 @@ static const cmd_t CMDS[] = {
     { "art", "art [gen|retry] — the generated pictures of the current trip (backdrop, props, friend)", cmd_art },
     { "tod", "tod night|sunrise|day|dusk|auto — force the time of day the scene shows", cmd_tod },
     { "press", "press yellow [n] | shake [n] | pickup — the child's hands, from the console", cmd_press },
+    { "scan", "nearby Wi-Fi networks (what the pairing page offers)", cmd_scan },
+    { "events", "events [n] — the last n lines of the persistent event log (keys, call states, failures)", cmd_events },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
     { "vol", "vol <0-100>", cmd_vol },
 };

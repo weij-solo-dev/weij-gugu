@@ -76,7 +76,7 @@ esp_err_t parent_enter(void)
     if (s_ap_netif && esp_netif_get_ip_info(s_ap_netif, &ip) == ESP_OK) snprintf(s_url, sizeof s_url, "http://" IPSTR, IP2STR(&ip.ip));
     else snprintf(s_url, sizeof s_url, "http://192.168.4.1");
     s_active = true;
-    LOGI("hotspot %s up (password shown on the device only)", s_ssid);
+    LOGI("pairing mode: hotspot %s up (password shown on the device only)", s_ssid);
     return ESP_OK;
 }
 

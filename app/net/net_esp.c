@@ -100,6 +100,35 @@ esp_err_t net_wifi_connect(const char *ssid, const char *pass, uint32_t timeout_
     return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
+int net_wifi_scan(net_wifi_ap_t *out, int cap)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_wifi_get_mode(&mode);
+    if (mode == WIFI_MODE_NULL) return 0;
+    esp_wifi_start();                                   // harmless when already started; needed when STA never connected
+    wifi_scan_config_t sc = { .show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE };
+    esp_err_t err = esp_wifi_scan_start(&sc, true);
+    if (err != ESP_OK) { LOGW("wifi scan: %s", esp_err_to_name(err)); return 0; }
+    uint16_t n = 0; esp_wifi_scan_get_ap_num(&n);
+    if (n > 32) n = 32;
+    wifi_ap_record_t *recs = calloc(n ? n : 1, sizeof *recs);
+    if (!recs) return 0;
+    esp_wifi_scan_get_ap_records(&n, recs);
+    int count = 0;
+    for (int i = 0; i < n && count < cap; i++) {        // the records come strongest first; keep one entry per name
+        if (!recs[i].ssid[0]) continue;
+        bool dup = false;
+        for (int k = 0; k < count; k++) if (!strcmp(out[k].ssid, (const char *)recs[i].ssid)) dup = true;
+        if (dup) continue;
+        snprintf(out[count].ssid, sizeof out[count].ssid, "%s", (const char *)recs[i].ssid);
+        out[count].rssi = recs[i].rssi; out[count].secure = recs[i].authmode != WIFI_AUTH_OPEN;
+        count++;
+    }
+    free(recs);
+    LOGI("wifi scan: %d networks", count);
+    return count;
+}
+
 // ----------------------------------------------------------------- HTTP ----
 struct net_http {
     esp_http_client_handle_t h;

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <time.h>
 #include <sys/stat.h>
 
@@ -115,6 +116,23 @@ esp_err_t store_call_end(store_call_t *c, const char *summary_json)
     snprintf(row, sizeof row, "{\"id\":\"%s\",\"file\":\"%s\",\"turns\":%d,\"started_ms\":%lld,\"summary\":%s}\n",
              c->id, c->path + strlen(s_data) + 1, c->turns, (long long)c->started_ms, summary_json ? summary_json : "null");
     return file_append(path, row, strlen(row)) ? ESP_OK : ESP_FAIL;
+}
+
+void store_event(const char *fmt, ...)
+{
+    char line[200]; int n = 0;
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    n = snprintf(line, sizeof line, "%02d-%02d %02d:%02d:%02d ", (tm.tm_mon + 1) % 100, tm.tm_mday % 100, tm.tm_hour % 100, tm.tm_min % 100, tm.tm_sec % 100);
+    va_list ap; va_start(ap, fmt); n += vsnprintf(line + n, sizeof line - (size_t)n - 1, fmt, ap); va_end(ap);
+    if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
+    line[n++] = '\n'; line[n] = '\0';
+    char path[200]; snprintf(path, sizeof path, "%s/logs/events.log", s_data);
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size > 64 * 1024) {      // keep the tail: rotate once
+        char old[200]; snprintf(old, sizeof old, "%s/logs/events.1.log", s_data);
+        remove(old); rename(path, old);
+    }
+    file_append(path, line, (size_t)n);
 }
 
 esp_err_t store_ledger_add(const char *json_line)

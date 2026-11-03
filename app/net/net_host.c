@@ -2,6 +2,7 @@
 // a small RFC 6455 WebSocket client over OpenSSL for wss://. Same net.h surface as the device.
 #define LOG_TAG "net"
 #include "net/net.h"
+#include <stdio.h>
 #include "foundation/log.h"
 #include "foundation/clock.h"
 #include "foundation/mem.h"
@@ -180,3 +181,11 @@ void net_http_close(net_http_t *c)
 
 // ------------------------------------------------------------ WebSocket ----
 // (implemented in net_host_ws.c; declared here so the file set stays flat)
+
+int net_wifi_scan(net_wifi_ap_t *out, int cap)   // the simulator has no radio: a believable list for the page
+{
+    const char *names[] = { "Home-WiFi", "Home-WiFi-5G", "Neighbour", "CoffeeShop" }; int rssi[] = { -42, -48, -70, -82 };
+    int n = 0;
+    for (int i = 0; i < 4 && n < cap; i++) { snprintf(out[n].ssid, sizeof out[n].ssid, "%s", names[i]); out[n].rssi = rssi[i]; out[n].secure = i != 3; n++; }
+    return n;
+}
