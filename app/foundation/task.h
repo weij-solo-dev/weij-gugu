@@ -11,6 +11,8 @@ typedef void (*task_fn_t)(void *arg);
 // task_spawn_internal is the same thing, kept for call sites that want to state the requirement.
 bool task_spawn(const char *name, task_fn_t fn, void *arg, uint32_t stack_bytes, int priority, int core);
 bool task_spawn_internal(const char *name, task_fn_t fn, void *arg, uint32_t stack_bytes, int priority, int core);
+// Every task spawned here that is still running: its stack size and the least it has ever had free (console `mem`).
+void task_print_stacks(void);
 
 typedef struct gugu_mutex *mutex_t;
 mutex_t mutex_create(void);                 // recursive

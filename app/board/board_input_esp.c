@@ -1,8 +1,13 @@
-// board_input.c — the two side keys (debounced) and the touch poll, on one 10 ms timer.
+// board_input.c — the two side keys (debounced) and the touch poll, every 10 ms on a task of their own. Listeners run
+// on it: a key press writes the event log, plays a sound, starts a call or the hotspot. That used to run in an
+// esp_timer callback, on the timer task's 3.5 KB stack (PLAN.md 踩坑 35).
 #define LOG_TAG "board"
 #include "board_internal.h"
 #include "foundation/log.h"
+#include "foundation/task.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 void board_touch_poll(void);
 
@@ -10,10 +15,9 @@ static const gpio_num_t s_key_gpio[BOARD_KEY_COUNT] = { BOARD_KEY_BLUE_GPIO, BOA
 static uint8_t s_hist[BOARD_KEY_COUNT];      // last 8 samples, 1 = pressed
 static bool s_down[BOARD_KEY_COUNT], s_held[BOARD_KEY_COUNT];
 static int64_t s_down_t[BOARD_KEY_COUNT];
-static esp_timer_handle_t s_timer;
 static unsigned s_tick;
 
-static void tick(void *arg)
+static void tick(void)
 {
     int64_t now = esp_timer_get_time();
     for (int k = 0; k < BOARD_KEY_COUNT; k++) {
@@ -37,6 +41,13 @@ static void tick(void *arg)
     if ((++s_tick & 1) == 0) board_touch_poll();
 }
 
+static void input_task(void *arg)
+{
+    (void)arg;
+    TickType_t last = xTaskGetTickCount();
+    for (;;) { vTaskDelayUntil(&last, pdMS_TO_TICKS(10)); tick(); }
+}
+
 esp_err_t board_input_init(void)
 {
     gpio_config_t io = {
@@ -47,9 +58,7 @@ esp_err_t board_input_init(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&io), LOG_TAG, "key gpio");
-    const esp_timer_create_args_t args = { .callback = tick, .name = "gugu_board_input" };
-    ESP_RETURN_ON_ERROR(esp_timer_create(&args, &s_timer), LOG_TAG, "timer");
-    return esp_timer_start_periodic(s_timer, 10 * 1000);
+    return task_spawn("gugu_board_input", input_task, NULL, 8192, 5, 0) ? ESP_OK : ESP_FAIL;
 }
 
 bool board_key_is_down(board_key_t key)

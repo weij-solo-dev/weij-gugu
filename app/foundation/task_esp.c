@@ -1,5 +1,6 @@
 #include "foundation/task.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,20 +19,61 @@ static TickType_t to_ticks(uint32_t ms)
 // plain `return` executes RETW with A0 = 0 and the chip panics with IllegalInstruction. The host build
 // (pthreads) is happy with a returning function, and short-lived tasks such as the connection pre-warms
 // are written that way, so every task runs through this trampoline, which deletes the task on return.
-struct trampoline { task_fn_t fn; void *arg; };
+//
+// The trampoline also keeps the running tasks in a table, for the stacks' low-water marks (`mem`). A task enters it
+// itself and leaves it before it is deleted, both under the lock the report holds, so a report never reads a task
+// that is gone.
+struct trampoline { task_fn_t fn; void *arg; uint32_t stack; };
+#define TASK_TABLE 32
+static struct { TaskHandle_t h; uint32_t stack; } s_tasks[TASK_TABLE];
+static SemaphoreHandle_t s_tasks_lock;
+
+static void table_set(TaskHandle_t h, uint32_t stack, bool add)
+{
+    xSemaphoreTake(s_tasks_lock, portMAX_DELAY);
+    for (int i = 0; i < TASK_TABLE; i++) {
+        if (add ? s_tasks[i].h == NULL : s_tasks[i].h == h) { s_tasks[i].h = add ? h : NULL; s_tasks[i].stack = stack; break; }
+    }
+    xSemaphoreGive(s_tasks_lock);
+}
+
 static void task_trampoline(void *p)
 {
     struct trampoline t = *(struct trampoline *)p;
     free(p);
+    table_set(xTaskGetCurrentTaskHandle(), t.stack, true);
     t.fn(t.arg);
+    table_set(xTaskGetCurrentTaskHandle(), 0, false);
     vTaskDelete(NULL);
+}
+
+void task_print_stacks(void)
+{
+    if (!s_tasks_lock) return;
+    struct { char name[16]; uint32_t stack, low; } rows[TASK_TABLE]; int n = 0; char sz[12];
+    xSemaphoreTake(s_tasks_lock, portMAX_DELAY);
+    for (int i = 0; i < TASK_TABLE; i++) {
+        if (!s_tasks[i].h) continue;
+        snprintf(rows[n].name, sizeof rows[n].name, "%s", pcTaskGetName(s_tasks[i].h));
+        rows[n].stack = s_tasks[i].stack; rows[n].low = (uint32_t)uxTaskGetStackHighWaterMark(s_tasks[i].h);   // bytes on ESP-IDF
+        n++;
+    }
+    xSemaphoreGive(s_tasks_lock);
+    static const char *const SYSTEM[] = { "main", "esp_timer", "sys_evt", "tiT", "wifi" };   // IDF's own, never deleted
+    for (size_t k = 0; k < sizeof SYSTEM / sizeof SYSTEM[0] && n < TASK_TABLE; k++) {
+        TaskHandle_t h = xTaskGetHandle(SYSTEM[k]);
+        if (!h) continue;
+        snprintf(rows[n].name, sizeof rows[n].name, "%s", SYSTEM[k]); rows[n].stack = 0; rows[n].low = (uint32_t)uxTaskGetStackHighWaterMark(h); n++;
+    }
+    for (int i = 0; i < n; i++) printf("task %-16s stack %5s B, least free %5u B%s\n", rows[i].name, rows[i].stack ? (snprintf(sz, sizeof sz, "%u", (unsigned)rows[i].stack), sz) : "idf", (unsigned)rows[i].low, rows[i].low < 768 ? "  <-- tight" : "");
 }
 
 bool task_spawn_internal(const char *name, task_fn_t fn, void *arg, uint32_t stack_bytes, int priority, int core)
 {
+    if (!s_tasks_lock) s_tasks_lock = xSemaphoreCreateMutex();   // the first spawn is from app_main, before any other
     struct trampoline *t = malloc(sizeof *t);
     if (!t) return false;
-    t->fn = fn; t->arg = arg;
+    t->fn = fn; t->arg = arg; t->stack = stack_bytes;
     BaseType_t ok = xTaskCreatePinnedToCore(task_trampoline, name, stack_bytes, t, priority, NULL, core == 1 ? 1 : 0);
     if (ok != pdPASS) free(t);
     return ok == pdPASS;

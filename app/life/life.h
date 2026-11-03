@@ -26,11 +26,14 @@ esp_err_t life_diary_now(char *why, size_t why_cap);
 esp_err_t life_recap_now(char *why, size_t why_cap);
 // The pictures for the current card (backdrop, up to three props, the friend): one image call each, kept under data/art/<trip>/.
 esp_err_t life_art_now(char *why, size_t why_cap);
-// Is the chat vendor answering? One tiny request (a few tokens) queued on the worker behind whatever it is doing;
-// `done` runs on the worker with ok, a provider_error_kind_t (PERR_AUTH: the key, PERR_QUOTA: the balance, …) and one
-// line. A second request while one is pending only replaces the callback. Before life_init (tests) it runs at once.
+// Are the vendors answering? `roles` picks who is asked, in this order, stopping at the first that fails: the chat (a few
+// tokens), the voice (one word spoken), the recognizer (half a second of silence; an empty transcript is a good answer).
+// Queued on the worker behind whatever it is doing; `done` runs on the worker with ok, a provider_error_kind_t (PERR_AUTH:
+// the key, PERR_QUOTA: the balance, …) and one line naming the role. A request while one is pending adds its roles and
+// replaces the callback. Before life_init (tests) it runs at once.
+enum { LIFE_CHECK_CHAT = 1, LIFE_CHECK_TTS = 2, LIFE_CHECK_ASR = 4 };
 typedef void (*life_check_cb)(bool ok, int kind, const char *why, void *user);
-void life_check_service(life_check_cb done, void *user);
+void life_check_service(unsigned roles, life_check_cb done, void *user);
 
 // ---- the bubble's lines: text → speech saved as a WAV under data/voice/, made on the worker, asynchronous ----
 typedef struct {

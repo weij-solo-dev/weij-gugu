@@ -231,9 +231,8 @@ static void readiness_tick(void)
     if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
 }
 
-// The pigeon whistle: Gugu answers one (a whistle back and a wave), flies a loop for a couple in a row,
-// and after five or more in quick succession gets dizzy, then cross for a moment, then is fine again.
-// At night it only stirs in its sleep.
+// Feeding, the yellow key's third use: an item falls beside Gugu's feet, Gugu pecks it up and reacts (its own two
+// reactions per item), full after five in a minute. Day and night alike: at night it eats and dozes off again.
 static void feed_abort(void)
 {
     if (s_feed_food < 0 && !s_feed_queue) return;
@@ -245,7 +244,7 @@ static void feed_start(int64_t now)
 {
     int roll = (int)(rng() % 100), food = 0;
     for (int acc = 0; food < FOOD_N - 1; food++) { acc += FOOD[food].weight; if (roll < acc) break; }
-    int oldest = s_eaten[s_eaten_i % FEED_FULL_N];          // the fifth-last bite: within a minute means full
+    int64_t oldest = s_eaten[s_eaten_i % FEED_FULL_N];      // the fifth-last bite: within a minute means full
     s_feed_full = oldest && now - oldest < FEED_FULL_US;
     ui_feed_drop(food, (rng() & 1) ? 20 : 79);            // beside the feet, left or right
     board_vibrate(15);
@@ -342,13 +341,7 @@ void instinct_yellow_tap(void)
     if (bubble_press(now)) return;                            // 1. a bubble: the same as tapping it
     int i = ui_scene_next_visible(s_prop_last);               // 2. the trip's props, each press the next
     if (i >= 0) { s_prop_last = i; poke_object(i); return; }
-    world_state_t st; world_state(&st);
-    if (tod_of(&st) == WORLD_TOD_NIGHT) {                     // asleep: it only stirs
-        audio_sfx_play("coo"); ui_play_action(UI_ACT_NOD); mood(UI_EMO_SLEEPY, 2500);
-        LOGI("yellow at night: stirs");
-        return;
-    }
-    if (s_shake_last) return;                                 // a ball does not eat
+    if (s_shake_last) return;                                 // a ball does not eat (at night it eats too, then dozes off again)
     if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // 3. the feed key: one more is coming
     feed_start(now);
 }
@@ -379,10 +372,14 @@ void instinct_refuse(const char *why)
     board_vibrate(90);
     audio_sfx_play("nosignal");
     ui_play_action(UI_ACT_SHAKE_HEAD);
-    mood(UI_EMO_SAD, 2500);
     LOGW("refused: %s", why ? why : "");
     char w[96];
-    if (!s_puzzled && ready_now(w, sizeof w) != INSTINCT_READY) s_unready_since = clock_us() - PUZZLED_AFTER_US;   // known now: puzzled as soon as the sad face is over
+    if (ready_now(w, sizeof w) != INSTINCT_READY) {             // the reason is known: no tears, the bubble says it within a second
+        if (!s_puzzled) s_unready_since = clock_us() - PUZZLED_AFTER_US;
+        s_mood_until = 0; s_gaze_next = 0;                      // eyes on the bubble at once
+        return;
+    }
+    mood(UI_EMO_SAD, 2500);
 }
 
 static void shake_tick(void)
@@ -474,7 +471,7 @@ static void idea_schedule(int64_t now)   // every second: time to ask for a ligh
 static void urge_tick(void)
 {
     if (!s_puzzled) return;
-    bool show = !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_shake_last;
+    bool show = !atomic_load(&s_busy) && !s_shake_last;        // an open line does not hide a problem: a turn that just failed shows it here
     ui_show_bubble(show ? bubble_of(s_reason) : UI_BUBBLE_NONE);
     int64_t now = clock_us();
     if (!resting()) { s_gaze_next = now + 800000; return; }        // a timed mood is on: pick the gaze up after it

@@ -109,3 +109,5 @@ bool signal_wait(signal_t s, uint32_t timeout_ms)
     pthread_mutex_unlock(&s->m);
     return true;
 }
+
+void task_print_stacks(void) { }                         // host threads have generous stacks: nothing to watch

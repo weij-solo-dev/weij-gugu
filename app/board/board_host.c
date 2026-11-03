@@ -81,6 +81,8 @@ int board_battery_mv(void) { return 3900; }
 bool board_is_charging(void) { return true; }
 void board_vibrate(uint16_t ms) { LOGI("bzzt %u ms", ms); }
 const char *board_reset_reason(void) { return "power-on"; }
+bool board_crash_report(char *what, size_t what_cap, char *bt, size_t bt_cap) { (void)what; (void)what_cap; (void)bt; (void)bt_cap; return false; }
+void board_firmware_id(char *out, size_t cap) { snprintf(out, cap, "host"); }
 void *board_i2c_bus(void) { return NULL; }
 
 // ---- called from the SDL main thread ----

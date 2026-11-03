@@ -2,6 +2,10 @@
 #define LOG_TAG "board"
 #include "board_internal.h"
 #include "esp_system.h"
+#include "esp_core_dump.h"
+#include "esp_app_desc.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include "foundation/log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -54,6 +58,39 @@ const char *board_reset_reason(void)
     case ESP_RST_CPU_LOCKUP: return "cpu lockup";
     default:                 return "unknown";
     }
+}
+
+bool board_crash_report(char *what, size_t what_cap, char *bt, size_t bt_cap)
+{
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+    if (!what || !what_cap || !bt || !bt_cap || esp_core_dump_image_check() != ESP_OK) return false;
+    esp_core_dump_summary_t *d = calloc(1, sizeof *d);       // ~250 B: off the caller's stack
+    if (!d) return false;
+    bool ok = esp_core_dump_get_summary(d) == ESP_OK;
+    if (ok) {
+        char reason[80] = "";
+        if (esp_core_dump_get_panic_reason(reason, sizeof reason) != ESP_OK) reason[0] = '\0';
+        snprintf(what, what_cap, "task %.16s, %s, pc 0x%08lx, cause %lu, vaddr 0x%08lx, elf %.8s", d->exc_task, reason[0] ? reason : "exception",
+                 (unsigned long)d->exc_pc, (unsigned long)d->ex_info.exc_cause, (unsigned long)d->ex_info.exc_vaddr, (const char *)d->app_elf_sha256);
+        size_t n = 0; bt[0] = '\0';
+        for (uint32_t i = 0; i < d->exc_bt_info.depth && i < 16 && n + 12 < bt_cap; i++)
+            n += (size_t)snprintf(bt + n, bt_cap - n, "%s0x%08lx", i ? " " : "", (unsigned long)d->exc_bt_info.bt[i]);
+        if (d->exc_bt_info.corrupted && n + 12 < bt_cap) snprintf(bt + n, bt_cap - n, " (corrupted)");
+    }
+    free(d);
+    esp_core_dump_image_erase();
+    return ok;
+#else
+    (void)what; (void)what_cap; (void)bt; (void)bt_cap;
+    return false;
+#endif
+}
+
+void board_firmware_id(char *out, size_t cap)
+{
+    char sha[17] = "";
+    esp_app_get_elf_sha256(sha, sizeof sha);
+    snprintf(out, cap, "%.8s", sha);
 }
 
 void board_vibrate(uint16_t ms)

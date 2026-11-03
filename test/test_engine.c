@@ -58,4 +58,38 @@ TEST(test_engine_fake_turn)
     CHECK_EQ_INT(mind_dialog_messages(m, 12), 0);              // reset at hang-up
 }
 
-void test_engine(void) { RUN(test_engine_fake_turn); }
+void provider_fake_tts_fail(int n);
+
+// The TTS session dies in a turn (a dropped WebSocket): that turn fails, and the next one in the same call answers
+// because the engine opened a new session (it once failed every later turn too).
+TEST(test_engine_tts_recovers)
+{
+    provider_init(GUGU_REPO_ROOT "/content/providers");
+    provider_assign(PROVIDER_ROLE_ASR, "fake"); provider_assign(PROVIDER_ROLE_CHAT, "fake"); provider_assign(PROVIDER_ROLE_TTS, "fake");
+    mind_config_t mc = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满" };
+    mind_init(&mc);
+    memset(ev_count, 0, sizeof ev_count); seg_n = 0; audio_samples = 0; ready = 0; errors = 0;
+    engine_t *e = engine_cascade_create(on_ev, NULL);
+    CHECK(e != NULL);
+    CHECK(engine_start_call(e, LANG_ZH, "在家里") == ESP_OK);
+    for (int i = 0; i < 100 && !ready; i++) clock_sleep_ms(20);
+    CHECK_EQ_INT(ready, 1);
+    int16_t frame[320] = {0};
+    provider_fake_tts_fail(1);
+    for (int i = 0; i < 50; i++) engine_on_audio(e, frame, 320);
+    engine_on_release(e, NULL);
+    for (int i = 0; i < 300 && !ev_count[ENGINE_EV_TURN_DONE] && !errors; i++) clock_sleep_ms(20);
+    CHECK_EQ_INT(errors, 1); CHECK_EQ_INT(ev_count[ENGINE_EV_TURN_DONE], 0);
+    for (int i = 0; i < 50 && engine_busy(e); i++) clock_sleep_ms(20);   // the engine renews the session after the failure
+    memset(ev_count, 0, sizeof ev_count); audio_samples = 0; errors = 0;
+    for (int i = 0; i < 50; i++) engine_on_audio(e, frame, 320);
+    engine_on_release(e, NULL);
+    for (int i = 0; i < 300 && !ev_count[ENGINE_EV_TURN_DONE] && !errors; i++) clock_sleep_ms(20);
+    CHECK_EQ_INT(errors, 0); CHECK_EQ_INT(ev_count[ENGINE_EV_TURN_DONE], 1);
+    CHECK(audio_samples > 16000);
+    provider_fake_tts_fail(0);
+    engine_end_call(e);
+    clock_sleep_ms(100);
+}
+
+void test_engine(void) { RUN(test_engine_fake_turn); RUN(test_engine_tts_recovers); }

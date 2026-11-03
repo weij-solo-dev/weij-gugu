@@ -62,6 +62,11 @@ bool board_key_is_down(board_key_t key);
 
 // ---- power ----
 const char *board_reset_reason(void);    // why the chip last started: "power-on", "crash (panic)", "brownout (power dip)", …
+// A crash on the previous run left a core dump on flash: `what` gets the task, the reason and the faulting address, `bt`
+// the backtrace (PCs, decoded on a Mac against the same build's ELF); the dump is then erased so it is told once.
+// False when there is none.
+bool board_crash_report(char *what, size_t what_cap, char *bt, size_t bt_cap);
+void board_firmware_id(char *out, size_t cap);   // the running firmware's ELF SHA-256 (hex, the first 8): which ELF decodes a backtrace
 int  board_battery_mv(void);             // -1 on error
 bool board_is_charging(void);
 void board_vibrate(uint16_t ms);

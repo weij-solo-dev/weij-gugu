@@ -1,6 +1,7 @@
 #define LOG_TAG "console"
 #include "console/console.h"
 #include "foundation/log.h"
+#include "foundation/task.h"
 #include "foundation/mem.h"
 #include "foundation/clock.h"
 #include "foundation/atomic_file.h"
@@ -124,12 +125,21 @@ static int cmd_mic(int argc, char **argv)
     return 0;
 }
 
+static int cmd_crash(int argc, char **argv)
+{
+    if (argc < 2 || strcmp(argv[1], "yes")) { printf("crash yes — this reboots the device through a panic\n"); return 1; }
+    LOGW("crashing on purpose (console)");
+    clock_sleep_ms(100);
+    abort();
+}
+
 static int cmd_sleep(int argc, char **argv) { clock_sleep_ms(argc > 1 ? atoi(argv[1]) : 1000); return 0; }   // let a turn finish while the log streams
 
 static int cmd_mem(int argc, char **argv)
 {
     (void)argc; (void)argv;
     mem_print_stats();
+    task_print_stacks();
     return 0;
 }
 static int cmd_stat(int argc, char **argv)
@@ -365,8 +375,9 @@ static const cmd_t CMDS[] = {
     { "hold", "hold <ms> [wav] — hold the blue key with the real microphone; a WAV is played through the speaker meanwhile", cmd_hold },
     { "mic", "mic [seconds] — microphone level meter", cmd_mic },
     { "sleep", "sleep <ms> — wait (scripts: let a turn finish)", cmd_sleep },
+    { "crash", "crash yes — abort on purpose: the next boot must report it (core dump → event log, boot.json)", cmd_crash },
     { "stat", "memory, battery, network, call state", cmd_stat },
-    { "mem", "heap regions: free, largest block, low-water mark", cmd_mem },
+    { "mem", "heap regions (free, largest block, low-water mark) and every task's stack headroom", cmd_mem },
     { "ls", "ls [dir]", cmd_ls },
     { "cat", "cat <path>", cmd_cat },
     { "parent", "parent [off] — pairing mode: the hotspot and the page (yellow key held 3 s does the same)", cmd_parent },

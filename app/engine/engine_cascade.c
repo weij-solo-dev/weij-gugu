@@ -121,6 +121,30 @@ static void chat_delta(const char *t, size_t n, void *user)
 static void chat_done(const char *stop, const provider_usage_t *u, void *user) { cascade_t *c = user; c->u_chat = *u; c->chat_done = true; (void)stop; }
 static void chat_error(const provider_error_t *err, void *user) { cascade_t *c = user; c->chat_failed = true; c->chat_err = *err; }
 
+// ---- the TTS session ----
+// The call opens one TTS session and keeps it for every turn. When a turn loses it (the vendor closed it, a read
+// failed), it is replaced at once, and again at the start of the next turn if that failed, so one bad turn does not
+// spoil the rest of the call. Swaps happen under the lock because an abort cancels the session from another task.
+static esp_err_t tts_open_session(cascade_t *c, tts_session_t **out)
+{
+    tts_params_t tp = { .lang = mind_primary_lang(), .sample_rate = 16000, .speed = 1.0f };   // LANG_UNKNOWN → vendor auto-detect per text
+    tts_events_t te = { tts_sentence_start, tts_audio, NULL, tts_flushed, tts_error };
+    return provider_for(PROVIDER_ROLE_TTS)->tts_open(&tp, &te, c, out);
+}
+
+static bool tts_renew(cascade_t *c)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_TTS);
+    mutex_lock(c->lock); tts_session_t *old = c->tts; c->tts = NULL; mutex_unlock(c->lock);
+    if (old) v->tts_close(old);
+    int64_t t0 = clock_us();
+    tts_session_t *fresh = NULL;
+    esp_err_t r = tts_open_session(c, &fresh);
+    mutex_lock(c->lock); c->tts = r == ESP_OK ? fresh : NULL; c->tts_failed = false; mutex_unlock(c->lock);
+    LOGI("tts session renewed: %s in %lld ms", esp_err_to_name(r), (long long)((clock_us() - t0) / 1000));
+    return r == ESP_OK;
+}
+
 // ---- the turn ----
 static void fail(cascade_t *c, const char *stage, const provider_error_t *err)
 {
@@ -138,6 +162,9 @@ static void run_turn(cascade_t *c, const char *events)
     atomic_store(&c->seg_sent, 0); atomic_store(&c->seg_flushed, 0); atomic_store(&c->seg_playing, 0); c->pending_emotion = TAG_NEUTRAL;
     memset(&c->u_asr, 0, sizeof c->u_asr); memset(&c->u_chat, 0, sizeof c->u_chat); memset(&c->u_tts, 0, sizeof c->u_tts);
     c->tags_seen = 0;
+
+    // 0. a voice to answer with: the last turn may have lost it
+    if ((!c->tts || c->tts_failed) && !tts_renew(c)) { provider_error_t e; provider_error_set(&e, PERR_NETWORK, 0, 0, "tts session could not reopen"); fail(c, "tts", &e); return; }
 
     // 1. ASR
     if (!c->asr) { provider_error_t e; provider_error_set(&e, PERR_OTHER, 0, 0, "no asr session"); fail(c, "asr", &e); return; }
@@ -177,8 +204,8 @@ static void run_turn(cascade_t *c, const char *events)
         signal_wait(c->tts_flush_sig, 200);
     }
     if (atomic_load(&c->abort)) return;
-    if (c->tts_failed) { fail(c, "tts", &c->tts_err); return; }
-    if (atomic_load(&c->seg_flushed) < atomic_load(&c->seg_sent)) { provider_error_t e; provider_error_set(&e, PERR_TIMEOUT, 0, 0, "tts did not finish"); fail(c, "tts", &e); return; }
+    if (c->tts_failed) { fail(c, "tts", &c->tts_err); tts_renew(c); return; }
+    if (atomic_load(&c->seg_flushed) < atomic_load(&c->seg_sent)) { provider_error_t e; provider_error_set(&e, PERR_TIMEOUT, 0, 0, "tts did not finish"); fail(c, "tts", &e); tts_renew(c); return; }
     c->t.t4_turn_done = clock_us();
     engine_event_t done = { .kind = ENGINE_EV_TURN_DONE, .u.done = { c->t, c->u_asr, c->u_chat, c->u_tts, c->reply.s ? c->reply.s : "", c->transcript, c->reply_lang, atomic_load(&c->seg_sent), c->tags_seen } };
     emit(c, &done);
@@ -204,9 +231,9 @@ static void pw_chat(void *arg)
 static void pw_tts(void *arg)
 {
     struct prewarm *p = arg; cascade_t *c = p->c;
-    tts_params_t tp = { .lang = mind_primary_lang(), .sample_rate = 16000, .speed = 1.0f };   // LANG_UNKNOWN → vendor auto-detect per text
-    tts_events_t te = { tts_sentence_start, tts_audio, NULL, tts_flushed, tts_error };
-    p->r_tts = provider_for(PROVIDER_ROLE_TTS)->tts_open(&tp, &te, c, &c->tts);
+    tts_session_t *t = NULL;
+    p->r_tts = tts_open_session(c, &t);
+    mutex_lock(c->lock); c->tts = p->r_tts == ESP_OK ? t : NULL; c->tts_failed = false; mutex_unlock(c->lock);
     pw_finish(p);
 }
 
@@ -242,8 +269,9 @@ static void close_sessions(cascade_t *c)
     const provider_vtable_t *vasr = provider_for(PROVIDER_ROLE_ASR), *vchat = provider_for(PROVIDER_ROLE_CHAT), *vtts = provider_for(PROVIDER_ROLE_TTS);
     if (c->asr) vasr->asr_close(c->asr);
     if (c->chat) vchat->chat_close(c->chat);
-    if (c->tts) vtts->tts_close(c->tts);
-    c->asr = NULL; c->chat = NULL; c->tts = NULL;
+    mutex_lock(c->lock); tts_session_t *t = c->tts; c->tts = NULL; mutex_unlock(c->lock);
+    if (t) vtts->tts_close(t);
+    c->asr = NULL; c->chat = NULL;
     atomic_store(&c->in_call, false);
     mind_dialog_reset();
 }
@@ -291,7 +319,9 @@ static void cs_abort(engine_t *e)
     if (!atomic_load(&c->busy)) return;
     atomic_store(&c->abort, true);
     if (c->chat) provider_for(PROVIDER_ROLE_CHAT)->chat_cancel(c->chat);
+    mutex_lock(c->lock);
     if (c->tts) provider_for(PROVIDER_ROLE_TTS)->tts_cancel(c->tts);
+    mutex_unlock(c->lock);
     signal_set(c->tts_flush_sig);
 }
 static void cs_end_call(engine_t *e)

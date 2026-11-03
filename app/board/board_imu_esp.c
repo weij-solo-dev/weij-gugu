@@ -6,6 +6,7 @@
 #include "foundation/log.h"
 #include "foundation/motion.h"
 #include "foundation/clock.h"
+#include "foundation/task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bmi270.h"
@@ -45,6 +46,6 @@ esp_err_t board_imu_init(void)
     bmi270_config_t mc = { .acce_odr = BMI270_ACC_ODR_50_HZ, .acce_range = BMI270_ACC_RANGE_4_G, .gyro_odr = BMI270_GYR_ODR_25_HZ, .gyro_range = BMI270_GYR_RANGE_2000_DPS };
     err = bmi270_start(s_imu, &mc);
     if (err != ESP_OK) { LOGW("imu: start failed: %s", esp_err_to_name(err)); return ESP_OK; }
-    if (xTaskCreatePinnedToCore(imu_task, "gugu_board_imu", 4096, NULL, 2, NULL, 0) != pdPASS) LOGW("imu: no task");
+    if (!task_spawn("gugu_board_imu", imu_task, NULL, 6144, 2, 0)) LOGW("imu: no task");   // listeners run here: a shake or a pick-up plays a sound (a file read)
     return ESP_OK;
 }

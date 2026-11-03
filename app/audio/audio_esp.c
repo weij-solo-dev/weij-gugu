@@ -90,7 +90,7 @@ esp_err_t audio_init(void)
     esp_codec_dev_set_out_vol(s_dev, 75);
     esp_codec_dev_set_in_gain(s_dev, 30.0f);
 
-    if (!task_spawn("gugu_audio_out", out_task, NULL, 4096, 6, 1)) return ESP_FAIL;
+    if (!task_spawn("gugu_audio_out", out_task, NULL, 6144, 6, 1)) return ESP_FAIL;   // 4 KB left 644 B free
     if (!task_spawn("gugu_audio_in", in_task, NULL, 4096, 6, 1)) return ESP_FAIL;
     LOGI("ES8311 ready: 16 kHz mono in/out");
     return ESP_OK;

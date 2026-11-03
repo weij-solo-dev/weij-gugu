@@ -120,7 +120,7 @@ esp_err_t store_call_end(store_call_t *c, const char *summary_json)
 
 void store_event(const char *fmt, ...)
 {
-    char line[200]; int n = 0;
+    char line[256]; int n = 0;
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     n = snprintf(line, sizeof line, "%02d-%02d %02d:%02d:%02d ", (tm.tm_mon + 1) % 100, tm.tm_mday % 100, tm.tm_hour % 100, tm.tm_min % 100, tm.tm_sec % 100);
     va_list ap; va_start(ap, fmt); n += vsnprintf(line + n, sizeof line - (size_t)n - 1, fmt, ap); va_end(ap);

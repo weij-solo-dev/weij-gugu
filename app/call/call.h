@@ -17,8 +17,11 @@ typedef struct {
     lang_t lang_hint;            // LANG_UNKNOWN = let the ASR decide
     const char *where;           // block-C sentence for this call
     uint32_t answer_deadline_ms; // released and nothing heard back after this long: give up on the turn (0 = 15 s)
-    void (*on_trouble)(const char *why, void *user);   // a turn failed or timed out: the app shows it (vibration, head shake); NULL = just the no-signal sound
-    void *trouble_user;
+    // Each turn's outcome, for the app: ok, or the stage that failed ("asr", "chat", "tts", "prewarm", "connect" or
+    // "deadline") and one line. The app shows a failure (the bubble) and clears it on the next answer. NULL = a failure
+    // only plays the no-signal sound.
+    void (*on_outcome)(bool ok, const char *stage, const char *why, void *user);
+    void *outcome_user;
 } call_config_t;
 
 esp_err_t    call_init(engine_t *engine, const call_config_t *cfg);

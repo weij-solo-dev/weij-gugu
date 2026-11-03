@@ -300,44 +300,7 @@ static esp_err_t do_tick(struct job *j)
     return err;
 }
 
-// ---- the service check: a few tokens to see whether the chat vendor answers (the bubble's "service" icon) ----
-static atomic_bool s_check_pending;
-static life_check_cb s_check_cb; static void *s_check_user;
-static struct job s_check_job = { .kind = JOB_CHECK };
-
-static void do_check(void)
-{
-    if (!atomic_exchange(&s_check_pending, false)) return;
-    life_check_cb cb = s_check_cb; void *user = s_check_user;
-    char why[120] = ""; int kind = PERR_NONE; bool ok = false;
-    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_CHAT);
-    if (!v) { snprintf(why, sizeof why, "no chat vendor assigned"); kind = PERR_OTHER; }
-    else {
-        struct collect c = { 0 }; strbuf_init(&c.text);
-        chat_events_t ev = { c_delta, c_done, c_error };
-        chat_block_t sys = { "Reply with the single word: ok", false };
-        chat_message_t m = { "user", "ping" };
-        chat_request_t cr = { .system = &sys, .system_count = 1, .messages = &m, .message_count = 1,
-                              .effort = CHAT_EFFORT_LOW, .max_tokens = 8, .temperature = 0.0f };
-        int64_t t0 = clock_us();
-        chat_session_t *s = NULL;
-        esp_err_t err = v->chat_open(&ev, &c, &s);
-        if (err == ESP_OK) { err = v->chat_send(s, &cr); v->chat_close(s); }
-        long long ms = (long long)((clock_us() - t0) / 1000);
-        if (c.failed) { kind = c.err.kind; snprintf(why, sizeof why, "%.60s (http %d, code %d) after %lld ms", c.err.message, c.err.http_status, c.err.api_code, ms); }
-        else if (err != ESP_OK) { kind = PERR_NETWORK; snprintf(why, sizeof why, "%s after %lld ms", esp_err_to_name(err), ms); }
-        else { ok = true; snprintf(why, sizeof why, "answered in %lld ms", ms); }
-        strbuf_free(&c.text);
-    }
-    LOGI("service check: %s (%s)", ok ? "ok" : "failed", why);
-    if (cb) cb(ok, kind, why, user);
-}
-
-// ---- the bubble's lines ----
-static struct { atomic_bool pending; lang_t lang; life_line_cb cb; void *user; } s_line[2];   // 0: hello, 1: idea
-static struct job s_line_job = { .kind = JOB_LINE };
 static signal_t s_tts_done;
-
 struct tts_collect { int16_t *pcm; size_t n, cap; bool failed; provider_error_t err; uint32_t chars; };
 static void tc_audio(const int16_t *pcm, size_t samples, void *u)
 {
@@ -348,30 +311,134 @@ static void tc_audio(const int16_t *pcm, size_t samples, void *u)
 static void tc_flushed(const provider_usage_t *us, void *u) { struct tts_collect *t = u; t->chars += us ? us->chars : 0; signal_set(s_tts_done); }
 static void tc_error(const provider_error_t *e, void *u) { struct tts_collect *t = u; t->err = *e; t->failed = true; signal_set(s_tts_done); }
 
+// ---- the service check: is each role answering? (the bubble's "service" icon) ----
+static atomic_uint s_check_roles;
+static life_check_cb s_check_cb; static void *s_check_user;
+static struct job s_check_job = { .kind = JOB_CHECK };
+
+static bool check_chat(char *why, size_t cap, int *kind)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_CHAT);
+    if (!v) { snprintf(why, cap, "chat: no vendor assigned"); *kind = PERR_OTHER; return false; }
+    struct collect c = { 0 }; strbuf_init(&c.text);
+    chat_events_t ev = { c_delta, c_done, c_error };
+    chat_block_t sys = { "Reply with the single word: ok", false };
+    chat_message_t m = { "user", "ping" };
+    chat_request_t cr = { .system = &sys, .system_count = 1, .messages = &m, .message_count = 1,
+                          .effort = CHAT_EFFORT_LOW, .max_tokens = 8, .temperature = 0.0f };
+    int64_t t0 = clock_us();
+    chat_session_t *s = NULL;
+    esp_err_t err = v->chat_open(&ev, &c, &s);
+    if (err == ESP_OK) { err = v->chat_send(s, &cr); v->chat_close(s); }
+    long long ms = (long long)((clock_us() - t0) / 1000);
+    bool ok = false;
+    if (c.failed) { *kind = c.err.kind; snprintf(why, cap, "chat: %.60s (http %d, code %d) after %lld ms", c.err.message, c.err.http_status, c.err.api_code, ms); }
+    else if (err != ESP_OK) { *kind = PERR_NETWORK; snprintf(why, cap, "chat: %s after %lld ms", esp_err_to_name(err), ms); }
+    else { ok = true; snprintf(why, cap, "chat answered in %lld ms", ms); }
+    strbuf_free(&c.text);
+    return ok;
+}
+
+static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, struct tts_collect *t, uint32_t timeout_ms);
+
+static bool check_tts(char *why, size_t cap, int *kind)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_TTS);
+    if (!v) { snprintf(why, cap, "tts: no vendor assigned"); *kind = PERR_OTHER; return false; }
+    lang_t lang = mind_primary_lang();
+    struct tts_collect t = { 0 };
+    t.cap = 16000 * 4;
+    t.pcm = mem_alloc_big(t.cap * sizeof(int16_t));
+    if (!t.pcm) { snprintf(why, cap, "tts: no memory"); *kind = PERR_OTHER; return false; }
+    int64_t t0 = clock_us();
+    esp_err_t err = tts_speak(v, lang == LANG_EN ? "OK." : "好。", lang, &t, 15000);
+    long long ms = (long long)((clock_us() - t0) / 1000);
+    bool ok = false;
+    if (t.failed) { *kind = t.err.kind; snprintf(why, cap, "tts: %.60s (http %d, code %d) after %lld ms", t.err.message, t.err.http_status, t.err.api_code, ms); }
+    else if (err != ESP_OK) { *kind = PERR_NETWORK; snprintf(why, cap, "tts: %s after %lld ms", esp_err_to_name(err), ms); }
+    else if (t.n == 0) { *kind = PERR_OTHER; snprintf(why, cap, "tts: no audio after %lld ms", ms); }
+    else { ok = true; snprintf(why, cap, "voice answered in %lld ms", ms); }
+    mem_release(t.pcm);
+    return ok;
+}
+
+struct asr_collect { bool failed; provider_error_t err; };
+static void ac_final(const char *text, lang_t lang, const provider_usage_t *u, void *user) { (void)text; (void)lang; (void)u; (void)user; }
+static void ac_error(const provider_error_t *e, void *user) { struct asr_collect *a = user; a->err = *e; a->failed = true; }
+
+static bool check_asr(char *why, size_t cap, int *kind)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_ASR);
+    if (!v) { snprintf(why, cap, "asr: no vendor assigned"); *kind = PERR_OTHER; return false; }
+    struct asr_collect a = { 0 };
+    asr_params_t ap = { .lang_hint = mind_primary_lang(), .sample_rate = 16000 };
+    asr_events_t ae = { NULL, ac_final, ac_error };
+    int64_t t0 = clock_us();
+    asr_session_t *s = NULL;
+    esp_err_t err = v->asr_open(&ap, &ae, &a, &s);
+    if (err == ESP_OK) {
+        static const int16_t quiet[320];                      // 20 ms of silence, fed 25 times
+        for (int i = 0; i < 25 && err == ESP_OK; i++) err = v->asr_feed(s, quiet, 320);
+        if (err == ESP_OK) err = v->asr_finish(s);
+        v->asr_close(s);
+    }
+    long long ms = (long long)((clock_us() - t0) / 1000);
+    bool ok = false;
+    if (a.failed) { *kind = a.err.kind; snprintf(why, cap, "asr: %.60s (http %d, code %d) after %lld ms", a.err.message, a.err.http_status, a.err.api_code, ms); }
+    else if (err != ESP_OK) { *kind = PERR_NETWORK; snprintf(why, cap, "asr: %s after %lld ms", esp_err_to_name(err), ms); }
+    else { ok = true; snprintf(why, cap, "recognizer answered in %lld ms", ms); }
+    return ok;
+}
+
+static void do_check(void)
+{
+    unsigned roles = atomic_exchange(&s_check_roles, 0);
+    if (!roles) return;
+    life_check_cb cb = s_check_cb; void *user = s_check_user;
+    char why[120] = "", part[120]; int kind = PERR_NONE; bool ok = true;
+    if (ok && (roles & LIFE_CHECK_CHAT)) { ok = check_chat(part, sizeof part, &kind); snprintf(why, sizeof why, "%s", part); }
+    if (ok && (roles & LIFE_CHECK_TTS)) { ok = check_tts(part, sizeof part, &kind); snprintf(why, sizeof why, "%s", part); }
+    if (ok && (roles & LIFE_CHECK_ASR)) { ok = check_asr(part, sizeof part, &kind); snprintf(why, sizeof why, "%s", part); }
+    LOGI("service check (%s%s%s): %s (%s)", roles & LIFE_CHECK_CHAT ? "chat" : "", roles & LIFE_CHECK_TTS ? (roles & LIFE_CHECK_CHAT ? "+voice" : "voice") : "",
+         roles & LIFE_CHECK_ASR ? (roles & (LIFE_CHECK_CHAT | LIFE_CHECK_TTS) ? "+recognizer" : "recognizer") : "", ok ? "ok" : "failed", why);
+    if (cb) cb(ok, kind, why, user);
+}
+
+// ---- the bubble's lines ----
+static struct { atomic_bool pending; lang_t lang; life_line_cb cb; void *user; } s_line[2];   // 0: hello, 1: idea
+static struct job s_line_job = { .kind = JOB_LINE };
+
+// One utterance through the TTS role into `t` (open, text, flush, wait for the flush or an error, close).
+static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, struct tts_collect *t, uint32_t timeout_ms)
+{
+    if (!s_tts_done) s_tts_done = signal_create();
+    while (signal_wait(s_tts_done, 0)) { }                    // drop a stale latch
+    tts_events_t ev = { NULL, tc_audio, NULL, tc_flushed, tc_error };
+    tts_params_t p = { .voice_id = NULL, .lang = lang, .speed = 1.0f, .sample_rate = 16000 };
+    tts_session_t *s = NULL;
+    esp_err_t err = v->tts_open(&p, &ev, t, &s);
+    if (err == ESP_OK) {
+        err = v->tts_text(s, text, strlen(text));
+        if (err == ESP_OK) err = v->tts_flush(s);
+        if (err == ESP_OK && !signal_wait(s_tts_done, timeout_ms)) err = ESP_ERR_TIMEOUT;
+        v->tts_close(s);
+    }
+    if (err == ESP_OK && t->failed) err = ESP_FAIL;
+    return err;
+}
+
 // Speak `text` in `lang` with the TTS role and keep it as a 16 kHz mono WAV at `path` (atomically). One ledger line.
 static esp_err_t synth_to_wav(const char *what, const char *text, lang_t lang, const char *path, const provider_usage_t *chat, char *why, size_t why_cap)
 {
     const provider_vtable_t *v = provider_for(PROVIDER_ROLE_TTS);
     if (!v) { snprintf(why, why_cap, "no tts vendor assigned"); return ESP_ERR_INVALID_STATE; }
-    if (!s_tts_done) s_tts_done = signal_create();
-    while (signal_wait(s_tts_done, 0)) { }                    // drop a stale latch
     struct tts_collect t = { 0 };
     t.cap = 16000 * 40;                                       // 40 s at most
     uint8_t *buf = mem_alloc_big(WAV_HEADER_BYTES + t.cap * sizeof(int16_t));
     if (!buf) { snprintf(why, why_cap, "no memory for the clip"); return ESP_ERR_NO_MEM; }
     t.pcm = (int16_t *)(buf + WAV_HEADER_BYTES);
-    tts_events_t ev = { NULL, tc_audio, NULL, tc_flushed, tc_error };
-    tts_params_t p = { .voice_id = NULL, .lang = lang, .speed = 1.0f, .sample_rate = 16000 };
-    tts_session_t *s = NULL;
     int64_t t0 = clock_us();
-    esp_err_t err = v->tts_open(&p, &ev, &t, &s);
-    if (err == ESP_OK) {
-        err = v->tts_text(s, text, strlen(text));
-        if (err == ESP_OK) err = v->tts_flush(s);
-        if (err == ESP_OK && !signal_wait(s_tts_done, 30000)) err = ESP_ERR_TIMEOUT;
-        v->tts_close(s);
-    }
-    if (err == ESP_OK && t.failed) err = ESP_FAIL;
+    esp_err_t err = tts_speak(v, text, lang, &t, 30000);
     if (err == ESP_OK && t.n == 0) { err = ESP_ERR_INVALID_RESPONSE; snprintf(why, why_cap, "the voice came back empty"); }
     else if (err != ESP_OK) snprintf(why, why_cap, "tts: %.60s (%s)", t.failed ? t.err.message : "", esp_err_to_name(err));
     if (err == ESP_OK) {
@@ -461,10 +528,10 @@ static void request_line(int which, lang_t lang, life_line_cb done, void *user)
 void life_prepare_hello(lang_t lang, life_line_cb done, void *user) { request_line(0, lang, done, user); }
 void life_prepare_idea(lang_t lang, life_line_cb done, void *user) { request_line(1, lang, done, user); }
 
-void life_check_service(life_check_cb done, void *user)
+void life_check_service(unsigned roles, life_check_cb done, void *user)
 {
     s_check_user = user; s_check_cb = done;
-    if (atomic_exchange(&s_check_pending, true)) return;      // one is queued already
+    if (atomic_fetch_or(&s_check_roles, roles ? roles : LIFE_CHECK_CHAT)) return;   // one is queued already: it asks these too
     if (!s_worker) { do_check(); return; }
     struct job *pj = &s_check_job;
     queue_send(s_q, &pj, 0);                                   // a full queue is fine: the worker looks at the flag after each job

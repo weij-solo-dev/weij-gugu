@@ -28,7 +28,12 @@ void provider_fake_script_clear(void) { s_qn = s_qi = 0; }
 
 struct asr_session { asr_events_t ev; void *user; size_t samples; };
 struct chat_session { chat_events_t ev; void *user; bool cancelled; };
-struct tts_session { tts_events_t ev; void *user; tts_params_t p; strbuf_t text; size_t chars_total; };
+struct tts_session { tts_events_t ev; void *user; tts_params_t p; strbuf_t text; size_t chars_total; bool dead; };
+
+// Tests: the next `n` TTS sessions that speak fail the way a dropped WebSocket does: an error event, and the session
+// stays dead. GUGU_FAKE_TTS_FAIL=n does the same for the simulator.
+static int s_tts_fail = -1;
+void provider_fake_tts_fail(int n) { s_tts_fail = n; }
 
 static esp_err_t f_asr_open(const asr_params_t *p, const asr_events_t *ev, void *user, asr_session_t **out)
 {
@@ -81,12 +86,20 @@ static void f_chat_close(chat_session_t *s) { free(s); }
 
 static esp_err_t f_tts_open(const tts_params_t *p, const tts_events_t *ev, void *user, tts_session_t **out)
 {
+    if (s_tts_fail < 0) s_tts_fail = getenv("GUGU_FAKE_TTS_FAIL") ? atoi(getenv("GUGU_FAKE_TTS_FAIL")) : 0;
     struct tts_session *s = calloc(1, sizeof *s); s->ev = *ev; s->user = user; s->p = *p; strbuf_init(&s->text); *out = s; return ESP_OK;
 }
 static esp_err_t f_tts_text(tts_session_t *s, const char *utf8, size_t n) { strbuf_append(&s->text, utf8, n); return ESP_OK; }
 static size_t utf8_chars(const char *s) { size_t c = 0; for (; *s; s++) if (((unsigned char)*s & 0xC0) != 0x80) c++; return c; }
 static esp_err_t f_tts_flush(tts_session_t *s)
 {
+    if (!s->dead && s_tts_fail > 0) { s_tts_fail--; s->dead = true; }
+    if (s->dead) {
+        strbuf_clear(&s->text);
+        provider_error_t e; provider_error_set(&e, PERR_NETWORK, 0, 0, "websocket error");
+        if (s->ev.on_error) s->ev.on_error(&e, s->user);
+        return ESP_OK;                                       // the send went out; the failure arrives as an event, as on the wire
+    }
     if (s->text.len == 0) { provider_usage_t u = { 0 }; if (s->ev.on_flushed) s->ev.on_flushed(&u, s->user); return ESP_OK; }
     size_t chars = utf8_chars(s->text.s);
     s->chars_total += chars;

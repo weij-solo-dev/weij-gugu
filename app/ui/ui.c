@@ -294,7 +294,7 @@ esp_err_t ui_init(void)
     ui_scene_show_window(true);
     ui_anim_init(scr);
 
-    if (!task_spawn("gugu_ui_main", ui_task, NULL, 8192, 4, 0)) return ESP_FAIL;
+    if (!task_spawn("gugu_ui_main", ui_task, NULL, 12288, 4, 0)) return ESP_FAIL;   // LVGL draws deep: 8 KB left 612 B free (`mem`), PLAN.md 踩坑 35
     LOGI("ui ready: 2x%u B internal DMA draw buffers, %u KB of pre-scaled art in PSRAM", (unsigned)buf_bytes,
          (unsigned)((s_scene_big.dsc.data_size + 2 * s_gugu_big[s_gugu_slot].dsc.data_size) / 1024));
     return ESP_OK;

@@ -257,20 +257,32 @@ TEST(test_life_art_fake)
 static bool s_chk_ok; static int s_chk_kind; static char s_chk_why[120]; static int s_chk_calls;
 static void chk_done(bool ok, int kind, const char *why, void *user) { (void)user; s_chk_ok = ok; s_chk_kind = kind; snprintf(s_chk_why, sizeof s_chk_why, "%s", why); s_chk_calls++; }
 
+void provider_fake_tts_fail(int n);
+
 TEST(test_life_service_check)
 {
     fresh();
+    provider_assign(PROVIDER_ROLE_TTS, "fake"); provider_assign(PROVIDER_ROLE_ASR, "fake");
     s_chk_calls = 0;
-    life_check_service(chk_done, NULL);                          // tests run it at once (no worker)
-    CHECK_EQ_INT(s_chk_calls, 1); CHECK(s_chk_ok); CHECK(strstr(s_chk_why, "answered") != NULL);
+    life_check_service(LIFE_CHECK_CHAT, chk_done, NULL);         // tests run it at once (no worker)
+    CHECK_EQ_INT(s_chk_calls, 1); CHECK(s_chk_ok); CHECK(strstr(s_chk_why, "chat answered") != NULL);
     provider_fake_script_queue("!error 401");
-    life_check_service(chk_done, NULL);
+    life_check_service(LIFE_CHECK_CHAT, chk_done, NULL);
     CHECK_EQ_INT(s_chk_calls, 2); CHECK(!s_chk_ok); CHECK_EQ_INT(s_chk_kind, PERR_AUTH); CHECK(strstr(s_chk_why, "http 401") != NULL);
     provider_fake_script_queue("!error 429");
-    life_check_service(chk_done, NULL);
+    life_check_service(LIFE_CHECK_CHAT, chk_done, NULL);
     CHECK(!s_chk_ok); CHECK_EQ_INT(s_chk_kind, PERR_QUOTA);
-    life_check_service(chk_done, NULL);                          // the queue is used up: answers again
+    life_check_service(LIFE_CHECK_CHAT, chk_done, NULL);         // the queue is used up: answers again
     CHECK(s_chk_ok);
+    // the voice and the recognizer: asked when a turn lost them
+    life_check_service(LIFE_CHECK_CHAT | LIFE_CHECK_TTS | LIFE_CHECK_ASR, chk_done, NULL);
+    CHECK(s_chk_ok); CHECK(strstr(s_chk_why, "recognizer answered") != NULL);
+    provider_fake_tts_fail(1);                                   // the chat is fine, the voice is not: the check says so
+    life_check_service(LIFE_CHECK_CHAT | LIFE_CHECK_TTS, chk_done, NULL);
+    CHECK(!s_chk_ok); CHECK_EQ_INT(s_chk_kind, PERR_NETWORK); CHECK(strstr(s_chk_why, "tts: websocket error") != NULL);
+    life_check_service(LIFE_CHECK_TTS, chk_done, NULL);          // a new session speaks again
+    CHECK(s_chk_ok); CHECK(strstr(s_chk_why, "voice answered") != NULL);
+    provider_fake_tts_fail(0);
 }
 
 static life_line_t s_line; static int s_line_calls;

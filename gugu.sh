@@ -106,8 +106,17 @@ ensure_idf() {
 find_port
 say "board on $PORT"
 ensure_idf
+# sdkconfig is generated from sdkconfig.defaults once and then kept, and IDF never re-reads a default for an option
+# the file already sets: when the defaults change (a git pull), start sdkconfig over. One full rebuild (a few minutes).
+DEFAULTS_SUM="$(cksum < "$HERE/sdkconfig.defaults" | awk '{print $1}')"
+DEFAULTS_STAMP="$DD/.sdkconfig-defaults-sum"
+if [ -f "$SDKCONFIG" ] && [ "$(cat "$DEFAULTS_STAMP" 2>/dev/null)" != "$DEFAULTS_SUM" ]; then
+    say "sdkconfig.defaults changed: regenerating sdkconfig (one full rebuild, a few minutes)"
+    rm -f "$SDKCONFIG"
+fi
 say "building into .derived_data/build (incremental)"
 idf.py -B "$BUILD_DIR" -DSDKCONFIG="$SDKCONFIG" -DIDF_TARGET="$TARGET" build
+echo "$DEFAULTS_SUM" > "$DEFAULTS_STAMP"
 say "flashing $PORT: bootloader, partition table, app, content image (Wi-Fi, keys and data on the device are kept)"
 idf.py -B "$BUILD_DIR" -p "$PORT" flash
 

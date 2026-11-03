@@ -98,7 +98,24 @@ static void on_call_state(call_state_t s, void *user)
 }
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
-static void on_call_trouble(const char *why, void *user) { (void)user; instinct_refuse(why); atomic_store(&s_check_due, true); }   // a failed or late turn: a buzz, a head shake, a sad face; is the service down?
+// A failed or late turn puts the service in doubt at once: the bubble shows it (⚠, or the Wi-Fi icon when the network
+// went) until a check, or the next answer, says it is fine. The check asks the role that failed besides the chat.
+static atomic_uint s_check_roles = LIFE_CHECK_CHAT;
+static void on_call_outcome(bool ok, const char *stage, const char *why, void *user)
+{
+    (void)user;
+    if (ok) {
+        if (!atomic_exchange(&s_service_ok, true)) store_event("service back: a turn was answered");
+        atomic_store(&s_check_roles, LIFE_CHECK_CHAT); atomic_store(&s_check_due, false);
+        return;
+    }
+    unsigned roles = !strcmp(stage, "chat") ? 0 : !strcmp(stage, "tts") ? LIFE_CHECK_TTS : !strcmp(stage, "asr") ? LIFE_CHECK_ASR : LIFE_CHECK_TTS | LIFE_CHECK_ASR;
+    atomic_fetch_or(&s_check_roles, roles);
+    snprintf(s_service_why, sizeof s_service_why, "%s", why);
+    if (atomic_exchange(&s_service_ok, false)) store_event("service in doubt: %s", why);
+    atomic_store(&s_check_due, true);
+    instinct_refuse(why);                          // a buzz, a head shake, and the bubble
+}
 static instinct_ready_t ready_probe(char *why, size_t cap, void *user) { (void)user; return readiness(why, cap); }   // the bubble and its icon
 static void on_bubble_tap(void *user) { (void)user; if (!parent_is_active()) { store_event("bubble tapped"); toggle_pairing_mode(); } }   // the bubble opens pairing mode
 
@@ -109,6 +126,7 @@ static void on_service_checked(bool ok, int kind, const char *why, void *user)
 {
     (void)user; (void)kind;
     snprintf(s_service_why, sizeof s_service_why, "%s", why);
+    if (ok) atomic_store(&s_check_roles, LIFE_CHECK_CHAT);   // what a failed turn added was asked and answered
     if (atomic_exchange(&s_service_ok, ok) != ok) store_event("service %s: %s", ok ? "back" : "trouble", why);
 }
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
@@ -215,7 +233,7 @@ static void service_tick(void)   // once a second from the main loop: start a ch
     bool due = atomic_load(&s_check_due) || (!atomic_load(&s_service_ok) && now - s_last_check > 60 * 1000000LL);
     if (!due || now - s_last_check < 5 * 1000000LL) return;   // not twice within 5 s
     atomic_store(&s_check_due, false); s_last_check = now;
-    life_check_service(on_service_checked, NULL);
+    life_check_service(atomic_load(&s_check_roles) | LIFE_CHECK_CHAT, on_service_checked, NULL);
 }
 
 #ifdef GUGU_HOST
@@ -304,7 +322,7 @@ void app_main(void)
     call_config_t cc = { .idle_timeout_ms = (uint32_t)store_setting_int("idle_timeout_ms", 12000),
                          .max_call_ms = (uint32_t)store_setting_int("max_call_ms", 10 * 60 * 1000),
                          .lang_hint = s_lang, .where = NULL,           // NULL: the mind takes "where" from the world
-                         .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_trouble = on_call_trouble };
+                         .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_outcome = on_call_outcome };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
     parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply, .user = NULL };
@@ -336,12 +354,16 @@ void app_main(void)
     LOGI("ready: asr=%s chat=%s tts=%s", asr, chat, tts);
     {   // what the pairing page and a report need to know about this boot
         char v[256]; bool have_key = store_secret_get("minimax_api_key", v, sizeof v) == ESP_OK && v[0], have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // a short buffer reads as "unset": size it for a real key
-        char boot[240], path[200];
-        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-03b\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d}",
-                 board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80));
+        char boot[720], path[200], fw[16], crash[200] = "", bt[200] = "";
+        board_firmware_id(fw, sizeof fw);
+        bool crashed = board_crash_report(crash, sizeof crash, bt, sizeof bt);   // the last run's crash, if a core dump says so
+        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-04\",\"firmware\":\"%s\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d%s%s%s%s%s}",
+                 fw, board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80),
+                 crashed ? ",\"crash\":\"" : "", crashed ? crash : "", crashed ? "\",\"backtrace\":\"" : "", crashed ? bt : "", crashed ? "\"" : "");
         snprintf(path, sizeof path, "%s/logs/boot.json", DATA_DIR);
         atomic_file_write(path, boot, strlen(boot));
-        store_event("boot (%s): audio %s, wifi %s, key %s, online %s", board_reset_reason(), audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+        store_event("boot (%s): firmware %s, audio %s, wifi %s, key %s, online %s", board_reset_reason(), fw, audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+        if (crashed) { store_event("crash: %s", crash); store_event("crash backtrace: %s", bt); LOGE("the last run crashed: %s | %s", crash, bt); }
         store_logs_flush();                      // the boot's log reaches flash at once: a crash a minute later must not take it along
     }
 

@@ -157,12 +157,12 @@ static void log_turn(const engine_event_t *ev)
     s_last_timing = *t;
 }
 
-// A turn failed or the service is too slow: the child hears and feels it at once (the app's reaction), and the
+// A turn failed or the service is too slow: the child sees and feels it at once (the app's reaction), and the
 // event log says why.
-static void trouble(const char *why)
+static void trouble(const char *stage, const char *why)
 {
-    store_event("trouble: %s", why);
-    if (s_cfg.on_trouble) s_cfg.on_trouble(why, s_cfg.trouble_user);
+    store_event("trouble at %s: %s", stage, why);
+    if (s_cfg.on_outcome) s_cfg.on_outcome(false, stage, why, s_cfg.outcome_user);
     else audio_sfx_play("nosignal");
 }
 
@@ -212,6 +212,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         break;
     case ENGINE_EV_TURN_DONE:
         log_turn(ev);
+        if (s_cfg.on_outcome) s_cfg.on_outcome(true, "", "", s_cfg.outcome_user);   // the service answered: whatever went wrong before is over
         {
             unsigned voice_ms = atomic_exchange(&s_voice_samples, 0) * 1000u / AUDIO_SAMPLE_RATE;
             LOGI("voice delivered: %u ms for %u characters", voice_ms, (unsigned)ev->u.done.tts.chars);
@@ -240,7 +241,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         atomic_fetch_add(&s_turns_failed, 1);
         atomic_store(&s_turn_active, false);
         store_event("turn failed at %s: %s (http %d)", ev->u.error.stage, ev->u.error.err.message, ev->u.error.err.http_status);
-        { char why[64]; snprintf(why, sizeof why, "%s failed", ev->u.error.stage); trouble(why); }
+        { char why[96]; snprintf(why, sizeof why, "%s: %.70s", ev->u.error.stage, ev->u.error.err.message); trouble(ev->u.error.stage, why); }
         if (call_state() == CALL_CONNECTING) call_hangup();
         else if (call_state() == CALL_THINKING || call_state() == CALL_SPEAKING) set_state(CALL_WAITING);
         break;
@@ -336,14 +337,14 @@ static void call_task(void *arg)
         if (st == CALL_SPEAKING && audio_play_idle() && !atomic_load(&s_turn_active)) set_state(CALL_WAITING);
         if (st == CALL_WAITING && s_cfg.idle_timeout_ms && now - s_waiting_since > (int64_t)s_cfg.idle_timeout_ms * 1000) { LOGI("idle timeout"); call_hangup(); }
         if (s_cfg.max_call_ms && now - s_call_t0 > (int64_t)s_cfg.max_call_ms * 1000) { LOGI("call time cap"); call_hangup(); }
-        if (st == CALL_CONNECTING && now - s_call_t0 > 25 * 1000000LL) { LOGW("connect timeout"); trouble("the line did not open"); call_hangup(); }
+        if (st == CALL_CONNECTING && now - s_call_t0 > 25 * 1000000LL) { LOGW("connect timeout"); trouble("connect", "the line did not open"); call_hangup(); }
         uint32_t deadline = s_cfg.answer_deadline_ms ? s_cfg.answer_deadline_ms : 15000;
         if (st == CALL_THINKING && atomic_load(&s_turn_active) && now - s_thinking_since > (int64_t)deadline * 1000) {
             LOGW("no answer %u ms after release: giving up on the turn", (unsigned)deadline);
             engine_abort(s_engine);                 // the late reply, if any, is dropped by the engine's abort flag
             atomic_store(&s_turn_active, false);
             atomic_fetch_add(&s_turns_failed, 1);
-            trouble("no answer in time");
+            trouble("deadline", "no answer in time");
             set_state(CALL_WAITING);
         }
     }
@@ -356,7 +357,7 @@ esp_err_t call_init(engine_t *engine, const call_config_t *cfg)
     if (!s_preroll_mem) return ESP_ERR_NO_MEM;
     ringbuf_init(&s_preroll, s_preroll_mem, AUDIO_SAMPLE_RATE * 2 * PREROLL_SECONDS);
     audio_set_marker_cb(marker_cb, NULL);
-    if (!task_spawn("gugu_call", call_task, NULL, 4096, 3, 0)) return ESP_FAIL;
+    if (!task_spawn("gugu_call", call_task, NULL, 8192, 3, 0)) return ESP_FAIL;   // a late answer reports from here (event log, the app, the bubble): 4 KB left 680 B before that path ran
     LOGI("call ready (idle %u ms, cap %u ms)", (unsigned)cfg->idle_timeout_ms, (unsigned)cfg->max_call_ms);
     return ESP_OK;
 }
