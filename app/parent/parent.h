@@ -17,6 +17,8 @@ typedef struct {
     void (*trip_delete)(void *user);
     void (*memory_forget)(const char *book, const char *key, void *user);   // book: journey (key = trip id) | about_child | canon_grown (key = index)
     void (*test_sound)(void *user);                                        // the page's "test the speaker" button
+    int  (*test_audio)(char *json, size_t cap, void *user);                 // "test speaker and microphone": a beep listened to; the levels as JSON
+    void (*apply)(bool wifi_changed, void *user);                          // secrets were saved: take them into use now (keys at once, Wi-Fi joins)
     void *user;
 } parent_hooks_t;
 void parent_set_hooks(const parent_hooks_t *h);

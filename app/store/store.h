@@ -31,3 +31,8 @@ esp_err_t   store_ledger_add(const char *json_line);
 
 // ---- event log: logs/events.log, one timestamped line per key press, call state, failure; kept under ~64 KB (the parent page shows the tail) ----
 void        store_event(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+// ---- the captured log and the export bundle (store_export.c) ----
+void        store_logs_flush(void);                   // move what foundation/logcap captured to logs/console.log (rotated at 128 KB)
+char       *store_export_logs(size_t *len);           // one text bundle for diagnosis, secrets masked; caller mem_release()s
+size_t      store_mask_secrets(char *s, size_t n);    // in place: stored secret values and anything shaped like a key → "***"; returns the new length

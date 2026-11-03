@@ -1,6 +1,7 @@
 // board.c — façade: bring-up order, event fan-out, vibration, shared handles.
 #define LOG_TAG "board"
 #include "board_internal.h"
+#include "esp_system.h"
 #include "foundation/log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -31,6 +32,28 @@ void *board_i2c_bus(void)
 static void motor_off(void *arg)
 {
     board_ioe_write(IOE_P_MOTOR, false);
+}
+
+const char *board_reset_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:    return "power-on";
+    case ESP_RST_EXT:        return "external reset pin";
+    case ESP_RST_SW:         return "software restart";
+    case ESP_RST_PANIC:      return "crash (panic)";
+    case ESP_RST_INT_WDT:    return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:   return "task watchdog";
+    case ESP_RST_WDT:        return "watchdog";
+    case ESP_RST_DEEPSLEEP:  return "wake from deep sleep";
+    case ESP_RST_BROWNOUT:   return "brownout (power dip)";
+    case ESP_RST_SDIO:       return "sdio";
+    case ESP_RST_USB:        return "usb (serial port opened)";
+    case ESP_RST_JTAG:       return "jtag";
+    case ESP_RST_EFUSE:      return "efuse error";
+    case ESP_RST_PWR_GLITCH: return "power glitch";
+    case ESP_RST_CPU_LOCKUP: return "cpu lockup";
+    default:                 return "unknown";
+    }
 }
 
 void board_vibrate(uint16_t ms)

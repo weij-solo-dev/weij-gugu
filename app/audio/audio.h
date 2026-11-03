@@ -33,5 +33,13 @@ typedef void (*audio_marker_cb)(int id, void *user);
 void      audio_set_marker_cb(audio_marker_cb cb, void *user);     // from the audio task
 void      audio_set_volume(uint8_t percent);
 
+// ---- self-test: is the microphone delivering, and does it hear the speaker? (pairing page, console) ----
+typedef struct {
+    uint32_t ambient_ms; int ambient_peak, ambient_rms;   // 0.5 s of quiet first
+    uint32_t tone_ms;    int tone_peak, tone_rms;         // then a beep from the speaker, listened to
+    uint8_t volume; esp_err_t sfx;
+} audio_selftest_t;
+esp_err_t audio_selftest(audio_selftest_t *out);           // ESP_ERR_INVALID_STATE while a call holds the microphone
+
 // ---- local sound effects (16 kHz mono PCM / WAV files under content/sfx) ----
 esp_err_t audio_sfx_play(const char *name);                        // "dial", "coo", "whistle", "nosignal" …

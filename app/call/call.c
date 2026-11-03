@@ -102,6 +102,7 @@ static void start_turn(void)
 {
     audio_capture_stats_t cs; audio_capture_stats(&cs);
     LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
+    store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
     atomic_store(&s_turn_active, true);
     set_state(CALL_THINKING);
     ui_set_emotion(UI_EMO_CURIOUS);
@@ -159,6 +160,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
     (void)user;
     switch (ev->kind) {
     case ENGINE_EV_READY:
+        store_event("line open after %lld ms (key %s)", (long long)((clock_us() - s_call_t0) / 1000), atomic_load(&s_blue_down) ? "held" : "released");
         if (call_state() == CALL_CONNECTING) {
             flush_preroll();
             if (atomic_load(&s_blue_down)) set_state(CALL_LISTENING);   // s_captured keeps the pre-roll count
@@ -168,6 +170,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         break;
     case ENGINE_EV_TRANSCRIPT:
         LOGI("heard (%s): %s", lang_code(ev->u.transcript.lang), ev->u.transcript.text);
+        { char said[80]; snprintf(said, sizeof said, "%s", ev->u.transcript.text); mind_utf8_cut(said, 60); store_event("heard (%s): %s", lang_code(ev->u.transcript.lang), said); }
         break;
     case ENGINE_EV_TAG:
         switch (ev->u.tag) {
@@ -196,12 +199,15 @@ void call_engine_event(const engine_event_t *ev, void *user)
         break;
     case ENGINE_EV_TURN_DONE:
         log_turn(ev);
+        store_event("answered: %d segment(s), first sound %lld ms after release, done %lld ms", ev->u.done.segments,
+                    (long long)((ev->u.done.timing.t3_first_audio - ev->u.done.timing.t0_release) / 1000), (long long)((ev->u.done.timing.t4_turn_done - ev->u.done.timing.t0_release) / 1000));
         atomic_fetch_add(&s_turns_done, 1);
         atomic_store(&s_turn_active, false);
         if (call_state() == CALL_THINKING) set_state(CALL_SPEAKING);   // audio still draining
         break;
     case ENGINE_EV_NOTHING_HEARD:                 // held the key, said nothing audible: a soft "coo?" and a head tilt
         LOGI("nothing heard");
+        store_event("nothing heard: the recognizer found no words");
         atomic_fetch_add(&s_turns_empty, 1);
         atomic_store(&s_turn_active, false);
         audio_sfx_play("coo");
@@ -266,6 +272,7 @@ void call_key(call_key_t key, bool down, int held_ms)
         else {                                                     // a tap shorter than 200 ms: nothing to send
             audio_capture_stats_t cs; audio_capture_stats(&cs);
             LOGI("release after %u ms of audio: too short, nothing sent", (unsigned)cs.ms);
+            store_event("released too soon: %u ms of sound, nothing sent", (unsigned)cs.ms);
             set_state(CALL_WAITING);
         }
     } else if (st == CALL_CONNECTING) {
@@ -285,6 +292,8 @@ void call_hangup(void)
     snprintf(summary, sizeof summary, "{\"turns_ok\":%d,\"turns_failed\":%d,\"turns_empty\":%d,\"seconds\":%lld}", atomic_load(&s_turns_done),
              atomic_load(&s_turns_failed), atomic_load(&s_turns_empty), (long long)((clock_us() - s_call_t0) / 1000000));
     store_call_end(&s_log, summary);
+    store_event("hung up: %s", summary);
+    store_logs_flush();                                            // the call's log lines reach flash now, not in 30 s
     atomic_store(&s_turns_done, 0); atomic_store(&s_turns_failed, 0); atomic_store(&s_turns_empty, 0);
     ui_set_emotion(UI_EMO_NEUTRAL);
     set_state(CALL_IDLE);

@@ -8,7 +8,9 @@
 #include "store/store.h"
 #include "board/board.h"
 #include "net/net.h"
+#include "foundation/clock.h"
 #include "cJSON.h"
+#include <time.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +85,38 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         cJSON_AddNumberToObject(j, "big_free", (double)mem_avail_big());
         char *txt = cJSON_PrintUnformatted(j); cJSON_Delete(j);
         *out = strdup(txt ? txt : "{}"); *out_len = strlen(*out); cJSON_free(txt); return 200;
+    }
+    if (get && !strcmp(path, "/api/logs")) {             // one text file for diagnosis: live status, then store's bundle (secrets masked)
+        size_t n = 0; char *body = store_export_logs(&n);
+        time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+        strbuf_t b; strbuf_init(&b);
+        strbuf_printf(&b, "gugu logs, exported %04d-%02d-%02d %02d:%02d:%02d local, uptime %u s\n", (tm.tm_year + 1900) % 10000, (tm.tm_mon + 1) % 100, tm.tm_mday % 100,
+                      tm.tm_hour % 100, tm.tm_min % 100, tm.tm_sec % 100, (unsigned)(clock_ms() / 1000));
+        strbuf_printf(&b, "online %s, battery %d mV%s, internal RAM free %u B (lowest %u B), PSRAM free %u B, pairing mode %s\n",
+                      net_is_online() ? "yes" : "no", board_battery_mv(), board_is_charging() ? " charging" : "", (unsigned)mem_avail_internal(),
+                      (unsigned)mem_min_avail_internal(), (unsigned)mem_avail_big(), parent_is_active() ? "on" : "off");
+        if (body) { strbuf_append(&b, body, n); mem_release(body); }
+        *out_len = b.len; *out = malloc(b.len + 1);
+        if (*out) memcpy(*out, b.s ? b.s : "", b.len + 1); else *out_len = 0;
+        strbuf_free(&b);
+        static char disp[96];
+        snprintf(disp, sizeof disp, "attachment; filename=\"gugu-logs-%04d%02d%02d-%02d%02d.txt\"", (tm.tm_year + 1900) % 10000, (tm.tm_mon + 1) % 100,
+                 tm.tm_mday % 100, tm.tm_hour % 100, tm.tm_min % 100);
+        char view[8]; query_get(query, "view", view, sizeof view);
+        *ctype = CT_TEXT; *disposition = view[0] ? NULL : disp;
+        return 200;
+    }
+    if (post && !strcmp(path, "/api/test/audio")) {      // speaker → microphone loopback, levels as JSON
+        char json[256] = "{\"error\":\"not available\"}";
+        if (s_hooks.test_audio) s_hooks.test_audio(json, sizeof json, s_hooks.user);
+        return reply(out, out_len, json);
+    }
+    if (post && !strcmp(path, "/api/apply")) {           // {"wifi":true} after saving secrets: use them now
+        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
+        bool wifi = cJSON_IsTrue(cJSON_GetObjectItem(j, "wifi"));
+        cJSON_Delete(j);
+        if (s_hooks.apply) s_hooks.apply(wifi, s_hooks.user);
+        return reply(out, out_len, "{\"ok\":true}");
     }
     if (post && !strcmp(path, "/api/test/sound")) {      // the owner taps "test the speaker"
         if (s_hooks.test_sound) s_hooks.test_sound(s_hooks.user);

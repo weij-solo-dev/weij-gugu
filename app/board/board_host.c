@@ -80,6 +80,7 @@ bool board_key_is_down(board_key_t key) { return key < BOARD_KEY_COUNT && s_key_
 int board_battery_mv(void) { return 3900; }
 bool board_is_charging(void) { return true; }
 void board_vibrate(uint16_t ms) { LOGI("bzzt %u ms", ms); }
+const char *board_reset_reason(void) { return "power-on"; }
 void *board_i2c_bus(void) { return NULL; }
 
 // ---- called from the SDL main thread ----

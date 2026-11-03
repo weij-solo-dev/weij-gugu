@@ -190,3 +190,27 @@ esp_err_t audio_sfx_play(const char *name)
     mem_release(buf);
     return err;
 }
+
+// ---- self-test ----
+static void selftest_cb(const int16_t *pcm, size_t n, void *user) { (void)pcm; (void)n; (void)user; }
+
+esp_err_t audio_selftest(audio_selftest_t *out)
+{
+    memset(out, 0, sizeof *out);
+    if (audio_capture_active()) return ESP_ERR_INVALID_STATE;
+    out->volume = (uint8_t)atomic_load(&s_volume);
+    audio_capture_start(selftest_cb, NULL);
+    clock_sleep_ms(500);
+    audio_capture_stats_t a; audio_capture_stats(&a);
+    audio_capture_stop();
+    out->ambient_ms = a.ms; out->ambient_peak = a.peak; out->ambient_rms = a.rms;
+    audio_capture_start(selftest_cb, NULL);
+    out->sfx = audio_sfx_play("beep");
+    clock_sleep_ms(450);
+    audio_capture_stats_t b; audio_capture_stats(&b);
+    audio_capture_stop();
+    out->tone_ms = b.ms; out->tone_peak = b.peak; out->tone_rms = b.rms;
+    LOGI("selftest: volume %u, quiet %u ms peak %d rms %d, beep %u ms peak %d rms %d (%s)", out->volume, (unsigned)a.ms, a.peak, a.rms,
+         (unsigned)b.ms, b.peak, b.rms, esp_err_to_name(out->sfx));
+    return ESP_OK;
+}

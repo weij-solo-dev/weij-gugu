@@ -1,5 +1,7 @@
 #include "minitest.h"
 #include "foundation/motion.h"
+#include "foundation/logcap.h"
+#include "foundation/log.h"
 #include <math.h>
 #include "foundation/ringbuf.h"
 #include "foundation/strbuf.h"
@@ -111,9 +113,33 @@ TEST(test_motion_detector)
     for (int i = 0; i < 100; i++) { float w = 0.1f * sinf(i * 0.4f); CHECK(motion_feed(&m, 0.6f + w, 0.1f, 0.75f - w, 6000 + i * 20, &inten) == MOTION_NONE); }
 }
 
+TEST(test_logcap_ring)
+{
+    CHECK(logcap_init(256));
+    char buf[600]; while (logcap_take(buf, sizeof buf)) { }      // whatever earlier log lines left behind
+    logcap_write("hello\n", 6);
+    CHECK_EQ_INT(logcap_pending(), 6);
+    size_t n = logcap_take(buf, sizeof buf); buf[n] = 0;
+    CHECK_EQ_STR(buf, "hello\n");
+    CHECK_EQ_INT(logcap_take(buf, sizeof buf), 0);
+    char big[300]; for (int i = 0; i < 300; i++) big[i] = (char)('a' + i % 26);    // more than the ring holds
+    logcap_write(big, 300);
+    n = logcap_take(buf, sizeof buf); buf[n] = 0;
+    CHECK(strstr(buf, "44 bytes of log lost") != NULL);
+    CHECK(n >= 256 && memcmp(buf + n - 256, big + 44, 256) == 0);
+    logcap_write("0123456789", 10);                              // small takes come out in order
+    n = logcap_take(buf, 4); CHECK_EQ_INT(n, 4); CHECK(!memcmp(buf, "0123", 4));
+    n = logcap_take(buf, 100); CHECK_EQ_INT(n, 6); CHECK(!memcmp(buf, "456789", 6));
+    LOGI("logcap test line %d", 42);                             // the host LOG macros land in the ring, time-stamped
+    n = logcap_take(buf, sizeof buf); buf[n] = 0;
+    CHECK(strstr(buf, "logcap test line 42") != NULL);
+    CHECK(buf[2] == ':' && buf[5] == ':');                       // "HH:MM:SS " in front
+}
+
 void test_foundation(void)
 {
     RUN(test_motion_detector);
+    RUN(test_logcap_ring);
     RUN(test_ringbuf_wraps);
     RUN(test_strbuf_json_escape);
     RUN(test_sse_split_chunks);

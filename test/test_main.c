@@ -2,6 +2,7 @@
 #include "minitest.h"
 int mt_failures, mt_checks;
 void test_foundation(void);
+void test_store(void);
 void test_tags(void);
 void test_provider(void);
 void test_mind(void);
@@ -14,6 +15,7 @@ void test_live(void);
 int main(void)
 {
     test_foundation();
+    test_store();
     test_tags();
     test_provider();
     test_mind();

@@ -261,6 +261,27 @@ static int cmd_events(int argc, char **argv)
     return 0;
 }
 
+static int cmd_logs(int argc, char **argv)   // the same bundle the pairing page exports
+{
+    (void)argc; (void)argv;
+    size_t n; char *s = store_export_logs(&n);
+    if (!s) { printf("nothing to export\n"); return 1; }
+    fwrite(s, 1, n, stdout); printf("\n"); mem_release(s);
+    return 0;
+}
+
+static int cmd_selftest(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    audio_selftest_t t; esp_err_t e = audio_selftest(&t);
+    if (e != ESP_OK) { printf("selftest: %s\n", esp_err_to_name(e)); return 1; }
+    printf("volume %u; quiet: %u ms, peak %d, rms %d; beep: %u ms, peak %d, rms %d (%s)\n", t.volume, (unsigned)t.ambient_ms, t.ambient_peak, t.ambient_rms,
+           (unsigned)t.tone_ms, t.tone_peak, t.tone_rms, esp_err_to_name(t.sfx));
+    printf("%s\n", !t.ambient_ms ? "the microphone delivers nothing" : t.tone_peak > 4 * t.ambient_peak + 800 ? "the microphone hears the speaker: both work"
+                                                     : "the microphone does not hear the beep: the speaker may be silent (or the volume 0)");
+    return 0;
+}
+
 static int cmd_tod(int argc, char **argv)
 {
     static const char *const N[] = { "night", "sunrise", "day", "dusk" };
@@ -323,6 +344,8 @@ static const cmd_t CMDS[] = {
     { "press", "press yellow [n] | shake [n] | pickup — the child's hands, from the console", cmd_press },
     { "scan", "nearby Wi-Fi networks (what the pairing page offers)", cmd_scan },
     { "events", "events [n] — the last n lines of the persistent event log (keys, call states, failures)", cmd_events },
+    { "logs", "the diagnostic bundle (boot record, events, console log, last calls), secrets masked", cmd_logs },
+    { "selftest", "speaker → microphone loopback: does the microphone hear a beep?", cmd_selftest },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
     { "vol", "vol <0-100>", cmd_vol },
 };

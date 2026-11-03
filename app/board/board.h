@@ -61,6 +61,7 @@ bool board_touch_read(int *x, int *y);   // true while a finger is down
 bool board_key_is_down(board_key_t key);
 
 // ---- power ----
+const char *board_reset_reason(void);    // why the chip last started: "power-on", "crash (panic)", "brownout (power dip)", …
 int  board_battery_mv(void);             // -1 on error
 bool board_is_charging(void);
 void board_vibrate(uint16_t ms);

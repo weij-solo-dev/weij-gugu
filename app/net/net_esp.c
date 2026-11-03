@@ -7,6 +7,7 @@
 #include "foundation/mem.h"
 #include "foundation/strbuf.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
@@ -46,13 +47,21 @@ esp_err_t net_time_sync(const char *ntp_host)
     return ESP_OK;
 }
 
+static esp_timer_handle_t s_retry_timer;
+static void retry_cb(void *arg) { (void)arg; esp_wifi_connect(); }
+
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
     else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         atomic_store(&s_online, false);
         if (s_retries++ < 5) { esp_wifi_connect(); LOGW("wifi retry %d", s_retries); }
-        else xEventGroupSetBits(s_wifi_events, WIFI_FAIL_BIT);
+        else {                                   // five quick tries failed: tell the waiter, then keep trying every 30 s (a router that reboots comes back)
+            xEventGroupSetBits(s_wifi_events, WIFI_FAIL_BIT);
+            if (!s_retry_timer) { const esp_timer_create_args_t a = { .callback = retry_cb, .name = "gugu_net_retry" }; esp_timer_create(&a, &s_retry_timer); }
+            if (s_retry_timer && !esp_timer_is_active(s_retry_timer)) esp_timer_start_once(s_retry_timer, 30ULL * 1000000ULL);
+            if (s_retries == 6) LOGW("wifi: still offline; retrying every 30 s");
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = data;
         LOGI("wifi got ip " IPSTR, IP2STR(&e->ip_info.ip));
@@ -98,6 +107,23 @@ esp_err_t net_wifi_connect(const char *ssid, const char *pass, uint32_t timeout_
     EventBits_t bits = xEventGroupWaitBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
     LOGI("wifi %s: %s in %lld ms", ssid, (bits & WIFI_CONNECTED_BIT) ? "connected" : "failed", (long long)((clock_us() - t0) / 1000));
     return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t net_wifi_join(const char *ssid, const char *pass)
+{
+    if (!ssid || !*ssid) return ESP_ERR_INVALID_ARG;
+    wifi_config_t wc = { 0 };
+    snprintf((char *)wc.sta.ssid, sizeof wc.sta.ssid, "%s", ssid);
+    snprintf((char *)wc.sta.password, sizeof wc.sta.password, "%s", pass ? pass : "");
+    wc.sta.threshold.authmode = pass && *pass ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    wc.sta.pmf_cfg.capable = true;
+    s_retries = 0;
+    esp_wifi_start();                                    // a no-op when running (pairing mode keeps it running)
+    esp_wifi_disconnect();
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wc);
+    if (err == ESP_OK) err = esp_wifi_connect();
+    LOGI("wifi join %s: %s", ssid, esp_err_to_name(err));
+    return err;
 }
 
 int net_wifi_scan(net_wifi_ap_t *out, int cap)

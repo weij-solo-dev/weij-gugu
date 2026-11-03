@@ -207,11 +207,17 @@ void ui_set_listening(bool on)
 }
 
 // ---- the ball: a timer moves the puffed-up pigeon inside the circle, reflecting it off the rim ----
+// Tuned on the owner's word (2026-11-03): the earlier version's *later* phase felt right — about 20 px per
+// 25 ms tick, a short buzz at every wall — but it began slowly; a faster, spinning version felt worse (the
+// rotation is a software transform on the device and stutters). So: that speed from the very first frame,
+// no rotation, kicks keep it in the same band.
 static lv_timer_t *s_ball_timer; static float s_bx, s_by, s_bvx, s_bvy;
-#define BALL_R   (24 * UI_SPRITE_SCALE)         // half the puffed sprite, roughly
-#define WIN_R    (BOARD_DISPLAY_W / 2)
+#define BALL_R      (24 * UI_SPRITE_SCALE)       // half the puffed sprite, roughly
+#define WIN_R       (BOARD_DISPLAY_W / 2)
+#define BALL_TICK   25                           // ms per step
+#define BALL_SPEED  20.0f                        // px per step at the start and after each kick (~800 px/s)
+#define BALL_MAX    23.0f
 
-static int32_t s_spin;                       // tenths of a degree; the ball rolls as it flies
 static void ball_cb(lv_timer_t *t)
 {
     (void)t;
@@ -220,13 +226,19 @@ static void ball_cb(lv_timer_t *t)
     if (d > lim) {                               // reflect the velocity about the rim's normal, nudge back inside
         float nx = dx / d, ny = dy / d, dot = s_bvx * nx + s_bvy * ny;
         s_bvx -= 2 * dot * nx; s_bvy -= 2 * dot * ny;
-        s_bx = WIN_R + nx * (lim - 2); s_by = WIN_R + ny * (lim - 2);
-        s_bvx *= 0.985f; s_bvy *= 0.985f;        // it keeps its pace: the hits are the point
-        board_vibrate(35);
+        s_bx = WIN_R + nx * (lim - 1); s_by = WIN_R + ny * (lim - 1);
+        s_bvx *= 0.96f; s_bvy *= 0.96f;
+        board_vibrate(20);
     }
-    s_spin = (s_spin + (int32_t)(s_bvx * 6)) % 3600; if (s_spin < 0) s_spin += 3600;
-    lv_image_set_rotation(ui_gugu_img, s_spin);
     lv_obj_set_pos(ui_gugu_img, (int)s_bx - BALL_R, (int)s_by - BALL_R);
+}
+
+static void ball_aim(float speed)               // keep the direction, set the speed, add a little randomness
+{
+    float sp = sqrtf(s_bvx * s_bvx + s_bvy * s_bvy);
+    if (sp < 1) { s_bvx = 0.65f; s_bvy = -0.76f; sp = 1; }
+    s_bvx = s_bvx / sp * speed + (float)(lv_rand(0, 6) - 3);
+    s_bvy = s_bvy / sp * speed + (float)(lv_rand(0, 6) - 3);
 }
 
 void ui_bounce_start(void)
@@ -235,9 +247,10 @@ void ui_bounce_start(void)
     if (!s_ball) {
         s_ball = true;
         s_puff_until = 0xFFFFFFFFu; refresh_sprite();
-        lv_image_set_pivot(ui_gugu_img, BALL_R, BALL_R);
-        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R; s_bvx = 22; s_bvy = -28;
-        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, 16, NULL);
+        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R;
+        s_bvx = lv_rand(0, 1) ? 0.65f : -0.65f; s_bvy = -0.76f;   // up and to one side
+        ball_aim(BALL_SPEED);                    // full speed from the first frame
+        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, BALL_TICK, NULL);
         lv_timer_resume(s_ball_timer);
     }
     ui_unlock();
@@ -247,11 +260,8 @@ void ui_bounce_kick(int intensity)
 {
     ui_lock();
     if (s_ball) {
-        float k = 1.0f + intensity / 255.0f, sp = sqrtf(s_bvx * s_bvx + s_bvy * s_bvy);
-        if (sp < 1) { s_bvx = 22; s_bvy = -28; sp = 35; }
-        float target = 28 * k; if (target > 48) target = 48;   // up to ~3000 px/s: a blur with a buzz at every wall
-        s_bvx = s_bvx / sp * target; s_bvy = s_bvy / sp * target;
-        s_bvx += (lv_rand(0, 14) - 7); s_bvy += (lv_rand(0, 14) - 7);
+        float target = BALL_SPEED + 3.0f * (float)intensity / 255.0f;   // a harder shake, a touch faster
+        ball_aim(target > BALL_MAX ? BALL_MAX : target);
     }
     ui_unlock();
 }
@@ -264,7 +274,6 @@ bool ui_bounce_stop(void)
         s_ball = false;
         lv_timer_pause(s_ball_timer);
         s_puff_until = 0;
-        lv_image_set_rotation(ui_gugu_img, 0); lv_image_set_pivot(ui_gugu_img, 0, 0);
         lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y());
         refresh_sprite();
     }

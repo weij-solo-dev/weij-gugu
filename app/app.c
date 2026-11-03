@@ -20,6 +20,7 @@
 #include "parent/parent.h"
 #include "foundation/task.h"
 #include "foundation/atomic_file.h"
+#include "foundation/logcap.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -83,6 +84,27 @@ static void on_call_state(call_state_t s, void *user)
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
+static int on_test_audio(char *json, size_t cap, void *user)
+{
+    (void)user;
+    audio_selftest_t t; esp_err_t e = audio_selftest(&t);
+    if (e != ESP_OK) return snprintf(json, cap, "{\"error\":\"%s\"}", e == ESP_ERR_INVALID_STATE ? "a call is using the microphone" : esp_err_to_name(e));
+    store_event("audio test: volume %u, quiet peak %d over %u ms, beep peak %d over %u ms", t.volume, t.ambient_peak, (unsigned)t.ambient_ms, t.tone_peak, (unsigned)t.tone_ms);
+    return snprintf(json, cap, "{\"volume\":%u,\"ambient_ms\":%u,\"ambient_peak\":%d,\"ambient_rms\":%d,\"tone_ms\":%u,\"tone_peak\":%d,\"tone_rms\":%d,\"sfx\":\"%s\"}",
+                    t.volume, (unsigned)t.ambient_ms, t.ambient_peak, t.ambient_rms, (unsigned)t.tone_ms, t.tone_peak, t.tone_rms, esp_err_to_name(t.sfx));
+}
+static void load_credentials(void);
+static void on_apply(bool wifi_changed, void *user)   // the page saved secrets: keys take effect now, Wi-Fi joins without a reboot
+{
+    (void)user;
+    load_credentials();
+    char ssid[64], pass[64];
+    if (wifi_changed && store_secret_get("wifi_ssid", ssid, sizeof ssid) == ESP_OK && ssid[0]) {
+        if (store_secret_get("wifi_pass", pass, sizeof pass) != ESP_OK) pass[0] = '\0';
+        net_wifi_join(ssid, pass);
+    }
+    store_event("settings applied from the page (wifi %s)", wifi_changed ? "rejoined" : "unchanged");
+}
 
 // Can a call start right now? Checked before dialling so the child gets an answer at once instead of a dial tone and twenty seconds of silence.
 static bool can_dial(char *why, size_t cap)
@@ -140,6 +162,7 @@ static void load_credentials(void)
 
 void app_main(void)
 {
+    logcap_init(64 * 1024);                      // every log line from here on is also kept for the pairing page's export
     LOGI("gugu boot: free internal %u B, free big %u B", (unsigned)mem_avail_internal(), (unsigned)mem_avail_big());
     ESP_ERROR_CHECK(board_init());
     ESP_ERROR_CHECK(ui_init());
@@ -180,7 +203,7 @@ void app_main(void)
                          .lang_hint = LANG_UNKNOWN, .where = NULL };   // NULL: the mind takes "where" from the world
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .user = NULL };
+    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply, .user = NULL };
     parent_set_hooks(&ph);
     life_init();
     call_set_state_listener(on_call_state, NULL);
@@ -195,11 +218,12 @@ void app_main(void)
     {   // what the pairing page and a report need to know about this boot
         char v[256]; bool have_key = store_secret_get("minimax_api_key", v, sizeof v) == ESP_OK && v[0], have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // a short buffer reads as "unset": size it for a real key
         char boot[240], path[200];
-        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-03\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d}",
-                 audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80));
+        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-03b\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d}",
+                 board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80));
         snprintf(path, sizeof path, "%s/logs/boot.json", DATA_DIR);
         atomic_file_write(path, boot, strlen(boot));
-        store_event("boot: audio %s, wifi %s, key %s, online %s", audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+        store_event("boot (%s): audio %s, wifi %s, key %s, online %s", board_reset_reason(), audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+        store_logs_flush();                      // the boot's log reaches flash at once: a crash a minute later must not take it along
     }
 
 #ifdef GUGU_HOST
@@ -227,8 +251,9 @@ void app_main(void)
         exit(ok == total ? 0 : 2);
     }
 #endif
-    for (;;) {
+    for (unsigned beat = 1;; beat++) {
         clock_sleep_ms(10000);
+        if (beat % 3 == 0) store_logs_flush();   // the captured log reaches flash every 30 s
         LOGI("heartbeat: internal free %u B (min %u B), big free %u B, vbat %d mV%s, call %s",
              (unsigned)mem_avail_internal(), (unsigned)mem_min_avail_internal(), (unsigned)mem_avail_big(),
              board_battery_mv(), board_is_charging() ? " charging" : "", call_state_name(call_state()));

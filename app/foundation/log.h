@@ -10,7 +10,8 @@
 #include <stdio.h>
 #include <stdint.h>
 int64_t clock_us(void);
-#define GUGU_LOG(level, fmt, ...) fprintf(stderr, "%c (%lld) %s: " fmt "\n", level, (long long)(clock_us() / 1000), LOG_TAG, ##__VA_ARGS__)
+void log_host_emit(char level, const char *tag, const char *fmt, ...) __attribute__((format(printf, 3, 4)));   // foundation/logcap.c: stderr + the capture ring
+#define GUGU_LOG(level, fmt, ...) log_host_emit(level, LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGE(fmt, ...) GUGU_LOG('E', fmt, ##__VA_ARGS__)
 #define LOGW(fmt, ...) GUGU_LOG('W', fmt, ##__VA_ARGS__)
 #define LOGI(fmt, ...) GUGU_LOG('I', fmt, ##__VA_ARGS__)
