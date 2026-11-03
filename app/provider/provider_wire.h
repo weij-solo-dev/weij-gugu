@@ -15,6 +15,8 @@ typedef struct {
     void *user;
     provider_usage_t usage;
     char stop_reason[24];
+    uint32_t thinking_bytes;      // thinking_delta text the model streamed (never voiced; counts against max_tokens)
+    char other_delta[24];         // the last delta type that was neither text nor thinking, for the log
     bool done;                 // on_done or on_error already delivered
     bool text_block;           // current content block is text (not thinking)
 } wire_anthropic_t;

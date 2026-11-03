@@ -6,6 +6,7 @@
 #include "provider_internal.h"
 #include "foundation/mem.h"
 #include "foundation/strbuf.h"
+#include "foundation/atomic_file.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -18,6 +19,11 @@ void provider_fake_script(const char *asr_text, const char *chat_reply)
     if (asr_text) s_asr_text = asr_text;
     if (chat_reply) s_chat_reply = chat_reply;
 }
+
+// Replies consumed in order before the fixed one: a test can script a sequence of model answers.
+static const char *s_queue[8]; static int s_qn, s_qi;
+void provider_fake_script_queue(const char *chat_reply) { if (s_qn < 8) s_queue[s_qn++] = chat_reply; }
+void provider_fake_script_clear(void) { s_qn = s_qi = 0; }
 
 struct asr_session { asr_events_t ev; void *user; size_t samples; };
 struct chat_session { chat_events_t ev; void *user; bool cancelled; };
@@ -45,7 +51,7 @@ static esp_err_t f_chat_open(const chat_events_t *ev, void *user, chat_session_t
 static esp_err_t f_chat_send(chat_session_t *s, const chat_request_t *req)
 {
     const char *env = getenv("GUGU_FAKE_REPLY");
-    const char *r = env ? env : s_chat_reply;
+    const char *r = s_qi < s_qn ? s_queue[s_qi++] : env ? env : s_chat_reply;
     size_t n = strlen(r);
     for (size_t i = 0; i < n && !s->cancelled;) {           // deltas of 1–3 UTF-8 characters
         size_t k = 0;
@@ -91,12 +97,33 @@ static esp_err_t f_tts_flush(tts_session_t *s)
     return ESP_OK;
 }
 static esp_err_t f_tts_cancel(tts_session_t *s) { strbuf_clear(&s->text); return ESP_OK; }
+
+// IMAGE: copies a JPEG from a queue of paths (tests) or the default fixture into out_path.
+static const char *s_img_queue[8]; static int s_iqn, s_iqi;
+void provider_fake_image_queue(const char *path) { if (s_iqn < 8) s_img_queue[s_iqn++] = path; }
+void provider_fake_image_clear(void) { s_iqn = s_iqi = 0; }
+static esp_err_t f_image_generate(const image_params_t *p, provider_usage_t *usage, provider_error_t *err)
+{
+#ifdef GUGU_REPO_ROOT
+    const char *dflt = GUGU_REPO_ROOT "/test/fixtures/art/backdrop_giza.jpg";
+#else
+    const char *dflt = NULL;
+#endif
+    const char *src = s_iqi < s_iqn ? s_img_queue[s_iqi++] : getenv("GUGU_FAKE_IMAGE") ? getenv("GUGU_FAKE_IMAGE") : dflt;
+    size_t n; char *data = src ? file_read_all(src, &n) : NULL;
+    if (!data) { provider_error_set(err, PERR_OTHER, 0, 0, "fake image: no source file"); return ESP_ERR_NOT_FOUND; }
+    bool ok = atomic_file_write(p->out_path, data, n);
+    mem_release(data);
+    if (usage) usage->images = 1;
+    return ok ? ESP_OK : ESP_FAIL;
+}
 static void f_tts_close(tts_session_t *s) { strbuf_free(&s->text); free(s); }
 
 const provider_vtable_t provider_fake = {
     .id = "fake",
-    .roles = PROVIDER_ROLE_ASR | PROVIDER_ROLE_CHAT | PROVIDER_ROLE_TTS,
+    .roles = PROVIDER_ROLE_ASR | PROVIDER_ROLE_CHAT | PROVIDER_ROLE_TTS | PROVIDER_ROLE_IMAGE,
     .asr_open = f_asr_open, .asr_feed = f_asr_feed, .asr_finish = f_asr_finish, .asr_close = f_asr_close,
     .chat_open = f_chat_open, .chat_send = f_chat_send, .chat_cancel = f_chat_cancel, .chat_close = f_chat_close,
     .tts_open = f_tts_open, .tts_text = f_tts_text, .tts_flush = f_tts_flush, .tts_cancel = f_tts_cancel, .tts_close = f_tts_close,
+    .image_generate = f_image_generate,
 };

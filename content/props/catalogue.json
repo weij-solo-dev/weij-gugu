@@ -1,0 +1,30 @@
+{
+  "_styles": {
+    "backdrop": "simple flat colours, bold shapes, children's picture-book illustration, an empty scene with nobody in it, no people, no animals, no birds, no vehicles with people, no text, no watermark",
+    "prop": "simple flat colours, bold shapes, children's picture-book illustration, a single object, whole object visible, centred, front view, on a plain flat {bg} background, no shadow, no ground, no scenery, no text"
+  },
+  "lamp":       { "subject": "an old-fashioned street lamp post", "size": 40, "bg": "white", "kind": "light" },
+  "bench":      { "subject": "a wooden park bench", "size": 26, "bg": "white", "kind": "static" },
+  "mailbox":    { "subject": "a red pillar mailbox", "size": 16, "bg": "white", "kind": "static" },
+  "tree":       { "subject": "a round leafy tree", "size": 40, "bg": "white", "kind": "static" },
+  "palm":       { "subject": "a palm tree", "size": 44, "bg": "white", "kind": "static" },
+  "umbrella":   { "subject": "a striped beach umbrella", "size": 34, "bg": "white", "kind": "static" },
+  "lounger":    { "subject": "a striped beach lounger chair", "size": 30, "bg": "white", "kind": "static" },
+  "swim_ring":  { "subject": "a red and white swim ring", "size": 14, "bg": "white", "kind": "static" },
+  "camera":     { "subject": "a small retro camera", "size": 10, "bg": "white", "kind": "static" },
+  "sun_hat":    { "subject": "a straw sun hat", "size": 12, "bg": "white", "kind": "static" },
+  "sunglasses": { "subject": "a pair of sunglasses", "size": 10, "bg": "white", "kind": "static" },
+  "cat":        { "subject": "a sitting orange cat", "size": 16, "bg": "white", "kind": "living" },
+  "dog":        { "subject": "a small sitting dog", "size": 16, "bg": "white", "kind": "living" },
+  "seagull":    { "subject": "a seagull standing", "size": 18, "bg": "green", "kind": "living" },
+  "camel":      { "subject": "a friendly standing camel", "size": 26, "bg": "white", "kind": "living" },
+  "bicycle":    { "subject": "a bicycle", "size": 26, "bg": "white", "kind": "static" },
+  "boat":       { "subject": "a small wooden boat", "size": 30, "bg": "white", "kind": "static" },
+  "lantern":    { "subject": "a red paper lantern", "size": 12, "bg": "white", "kind": "light" },
+  "snowman":    { "subject": "a snowman", "size": 22, "bg": "green", "kind": "static" },
+  "kite":       { "subject": "a colourful kite", "size": 18, "bg": "white", "kind": "static" },
+  "balloon":    { "subject": "a red balloon on a string", "size": 18, "bg": "white", "kind": "static" },
+  "ice_cream":  { "subject": "an ice cream cone", "size": 10, "bg": "white", "kind": "static" },
+  "flag":       { "subject": "a small flag on a pole", "size": 24, "bg": "white", "kind": "static" },
+  "suitcase":   { "subject": "Gugu's red rolling suitcase", "size": 14, "bg": "white", "kind": "static", "builtin": true }
+}

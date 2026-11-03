@@ -4,6 +4,7 @@
 #define LOG_TAG "minimax"
 #include "provider/provider.h"
 #include "provider_internal.h"
+#include "foundation/atomic_file.h"
 #include "provider_wire.h"
 #include "net/net.h"
 #include "foundation/log.h"
@@ -188,9 +189,10 @@ static esp_err_t mm_chat_send(chat_session_t *s, const chat_request_t *req)
     int64_t t0 = clock_us();
     esp_err_t err = net_http_perform(s->http, &r, &resp);
     sse_finish(&s->sse);
-    LOGI("chat: http %d, first byte %lld ms, done %lld ms, reused %d, in %u out %u cached %u",
+    LOGI("chat: http %d, first byte %lld ms, done %lld ms, reused %d, in %u out %u cached %u, stop %s, thinking %u B%s%s",
          resp.status, (long long)(resp.t_first_byte_us / 1000), (long long)((clock_us() - t0) / 1000), (int)resp.reused_connection,
-         (unsigned)s->wire.usage.in_tokens, (unsigned)s->wire.usage.out_tokens, (unsigned)s->wire.usage.cached_tokens);
+         (unsigned)s->wire.usage.in_tokens, (unsigned)s->wire.usage.out_tokens, (unsigned)s->wire.usage.cached_tokens,
+         s->wire.stop_reason[0] ? s->wire.stop_reason : "-", (unsigned)s->wire.thinking_bytes, s->wire.other_delta[0] ? ", other delta " : "", s->wire.other_delta);
     if (!s->wire.done) {
         if (atomic_load(&s->cancelled)) { provider_error_t e; provider_error_set(&e, PERR_CANCELLED, resp.status, 0, "cancelled"); s->wire.done = true; s->ev.on_error(&e, s->user); }
         else if (resp.status != 200) wire_anthropic_http_error(&s->wire, resp.status, resp.body);
@@ -362,10 +364,64 @@ static void mm_tts_close(tts_session_t *s)
     mem_release(s);
 }
 
+// ---- IMAGE: image-01, one picture, fetched by URL and written whole ----
+static esp_err_t mm_image_generate(const image_params_t *p, provider_usage_t *usage, provider_error_t *err)
+{
+    const provider_preset_t *pr = preset();
+    if (!pr->image_url[0]) { provider_error_set(err, PERR_OTHER, 0, 0, "no image endpoint in the preset"); return ESP_ERR_NOT_SUPPORTED; }
+    strbuf_t body; strbuf_init(&body);
+    strbuf_printf(&body, "{\"model\":\"%s\",\"prompt\":\"", pr->image_model[0] ? pr->image_model : "image-01");
+    strbuf_append_json_escaped(&body, p->prompt);
+    strbuf_printf(&body, "\",\"aspect_ratio\":\"%s\",\"response_format\":\"url\",\"n\":1,\"prompt_optimizer\":false}", p->aspect ? p->aspect : "1:1");
+    char bearer[300]; net_header_t h[3]; auth_headers(h, bearer, sizeof bearer, false);
+    net_http_t *http = NULL;
+    esp_err_t e = net_http_open(pr->image_url, &http);
+    if (e != ESP_OK) { strbuf_free(&body); provider_error_set(err, PERR_NETWORK, 0, 0, "image: open failed"); return e; }
+    net_http_request_t req = { .method = "POST", .url = pr->image_url, .headers = h, .header_count = 3, .body = (const uint8_t *)body.s, .body_len = body.len, .timeout_ms = 120000 };
+    net_http_response_t resp = { 0 };
+    int64_t t0 = clock_us();
+    e = net_http_perform(http, &req, &resp);
+    strbuf_free(&body);
+    if (e != ESP_OK || resp.status != 200 || !resp.body) {
+        provider_error_set(err, e == ESP_ERR_TIMEOUT ? PERR_TIMEOUT : provider_classify_http(resp.status), resp.status, 0, resp.body ? resp.body : "image request failed");
+        mem_release(resp.body); net_http_close(http); return e != ESP_OK ? e : ESP_FAIL;
+    }
+    cJSON *j = cJSON_Parse(resp.body);
+    const cJSON *base = cJSON_GetObjectItem(j, "base_resp");
+    int code = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(base, "status_code"));
+    const char *url = cJSON_GetStringValue(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "data"), "image_urls"), 0));
+    if (code != 0 || !url) {
+        int failed = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "metadata"), "failed_count"));
+        const char *msg = cJSON_GetStringValue(cJSON_GetObjectItem(base, "status_msg"));
+        provider_error_set(err, code ? PERR_OTHER : PERR_CONTENT_REJECTED, 200, code, code ? (msg ? msg : "vendor error") : "no picture came back (safety filter?)");
+        LOGW("image: status %d, failed_count %d", code, failed);
+        cJSON_Delete(j); mem_release(resp.body); net_http_close(http); return ESP_FAIL;
+    }
+    char image_url[512]; snprintf(image_url, sizeof image_url, "%s", url);
+    cJSON_Delete(j); mem_release(resp.body); net_http_close(http);
+    int64_t t_gen = clock_us() - t0;
+    e = net_http_open(image_url, &http);
+    if (e != ESP_OK) { provider_error_set(err, PERR_NETWORK, 0, 0, "image: download open failed"); return e; }
+    net_http_request_t get = { .method = "GET", .url = image_url, .timeout_ms = 60000 };
+    net_http_response_t img = { 0 };
+    e = net_http_perform(http, &get, &img);
+    if (e != ESP_OK || img.status != 200 || !img.body || img.body_len < 1000) {
+        provider_error_set(err, PERR_NETWORK, img.status, 0, "image: download failed");
+        mem_release(img.body); net_http_close(http); return e != ESP_OK ? e : ESP_FAIL;
+    }
+    bool ok = atomic_file_write(p->out_path, img.body, img.body_len);
+    LOGI("image: %u KB, generated in %lld ms, fetched in %lld ms → %s", (unsigned)(img.body_len / 1024), (long long)(t_gen / 1000), (long long)((clock_us() - t0 - t_gen) / 1000), p->out_path);
+    mem_release(img.body); net_http_close(http);
+    if (usage) usage->images = 1;
+    if (!ok) { provider_error_set(err, PERR_OTHER, 0, 0, "image: could not write the file"); return ESP_FAIL; }
+    return ESP_OK;
+}
+
 const provider_vtable_t provider_minimax = {
     .id = VENDOR,
     .roles = PROVIDER_ROLE_ASR | PROVIDER_ROLE_CHAT | PROVIDER_ROLE_TTS | PROVIDER_ROLE_IMAGE,
     .asr_open = mm_asr_open, .asr_feed = mm_asr_feed, .asr_finish = mm_asr_finish, .asr_close = mm_asr_close,
     .chat_open = mm_chat_open, .chat_send = mm_chat_send, .chat_cancel = mm_chat_cancel, .chat_close = mm_chat_close,
     .tts_open = mm_tts_open, .tts_text = mm_tts_text, .tts_flush = mm_tts_flush, .tts_cancel = mm_tts_cancel, .tts_close = mm_tts_close,
+    .image_generate = mm_image_generate,
 };

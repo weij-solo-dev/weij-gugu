@@ -107,6 +107,13 @@ const char *provider_region(const char *vendor_id)
     return p && p->region[0] ? p->region : "domestic";
 }
 
+float provider_image_cost_fen(void)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_IMAGE);
+    const provider_preset_t *p = v ? provider_preset_get(v->id) : NULL;
+    return p ? p->price_image * 100.0f : 0.0f;
+}
+
 float provider_turn_cost_fen(const provider_usage_t *asr, const provider_usage_t *chat, const provider_usage_t *tts)
 {
     float fen = 0;

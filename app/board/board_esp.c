@@ -72,6 +72,7 @@ esp_err_t board_init(void)
     ESP_RETURN_ON_ERROR(board_display_init(), LOG_TAG, "display");
     ESP_RETURN_ON_ERROR(board_touch_init(), LOG_TAG, "touch");
     ESP_RETURN_ON_ERROR(board_input_init(), LOG_TAG, "input");
+    board_imu_init();                                  // optional: a missing IMU only logs
     LOGI("board ready");
     return ESP_OK;
 }

@@ -5,13 +5,14 @@ board      : foundation
 net        : foundation
 store      : foundation
 audio      : foundation board store
-ui         : foundation board store
+art        : foundation store
+ui         : foundation board store art
 provider   : foundation net store
 world      : foundation net store
 mind       : foundation store world provider
 engine     : foundation provider mind net
 call       : foundation engine mind audio ui store world provider
-instinct   : foundation board audio ui store world
-life       : foundation store world mind provider board
+instinct   : foundation board audio ui store world art
+life       : foundation store world mind provider board art
 parent     : foundation store board
-console    : foundation store provider net call audio board parent
+console    : foundation store provider net call audio board parent world life mind art instinct

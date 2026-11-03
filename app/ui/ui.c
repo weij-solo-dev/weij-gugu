@@ -118,6 +118,18 @@ static bool bigimg_alloc(bigimg_t *b, const lv_image_dsc_t *like)
     return b->buf != NULL;
 }
 
+static void bigimg_header(bigimg_t *b, uint32_t W, uint32_t H, bool alpha)
+{
+    memset(&b->dsc, 0, sizeof b->dsc);
+    b->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    b->dsc.header.cf = alpha ? LV_COLOR_FORMAT_RGB565A8 : LV_COLOR_FORMAT_RGB565;
+    b->dsc.header.w = W;
+    b->dsc.header.h = H;
+    b->dsc.header.stride = W * 2;
+    b->dsc.data_size = (uint32_t)W * H * (alpha ? 3 : 2);
+    b->dsc.data = b->buf;
+}
+
 // Nearest-neighbour ×UI_SPRITE_SCALE of an RGB565 / RGB565A8 descriptor (colour plane, then alpha plane).
 static void upscale(const lv_image_dsc_t *src, bigimg_t *b)
 {
@@ -140,14 +152,24 @@ static void upscale(const lv_image_dsc_t *src, bigimg_t *b)
             if (alpha) memcpy(arow + (size_t)k * W, arow, W);
         }
     }
-    memset(&b->dsc, 0, sizeof b->dsc);
-    b->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-    b->dsc.header.cf = src->header.cf;
-    b->dsc.header.w = W;
-    b->dsc.header.h = H;
-    b->dsc.header.stride = W * 2;
-    b->dsc.data_size = (uint32_t)W * H * (alpha ? 3 : 2);
-    b->dsc.data = b->buf;
+    bigimg_header(b, W, H, alpha);
+}
+
+void ui_show_backdrop(const art_image_t *img, const art_rgb_t pal[ART_MAX_COLORS])
+{
+    if (!img || img->w != ART_GRID || img->h != ART_GRID || img->alpha) return;
+    ui_lock();
+    ui_scene_is_home = false;
+    ui_scene_show_window(false);
+    lv_image_cache_drop(&s_scene_big.dsc);
+    art_render_rgb565(img, pal, UI_SPRITE_SCALE, (uint16_t *)s_scene_big.buf, NULL);
+    bigimg_header(&s_scene_big, ART_GRID * UI_SPRITE_SCALE, ART_GRID * UI_SPRITE_SCALE, false);
+    s_scene_src = NULL;                 // the next built-in scene must be re-expanded into this buffer
+    lv_image_set_src(s_scene_img, &s_scene_big.dsc);
+    lv_obj_invalidate(s_scene_img);
+    lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_case_img, LV_OBJ_FLAG_HIDDEN);
+    ui_unlock();
 }
 
 void ui_show_base(const lv_image_dsc_t *base)
@@ -195,14 +217,21 @@ static void show_scene_src(const lv_image_dsc_t *bg)
     lv_obj_invalidate(s_scene_img);
 }
 
+void ui_home_backdrop_refresh(void)
+{
+    if (ui_scene_is_home) show_scene_src(ui_home_lamp_is_on() ? &scn_home_day : &scn_home_off);
+}
+
 void ui_show_scene(ui_scene_t scene, bool night)
 {
     ui_lock();
-    const lv_image_dsc_t *bg = scene == UI_SCENE_HOME ? (night ? &scn_home_night : &scn_home_day)
-                                                     : (night ? &scn_away_night : &scn_away_day);
-    show_scene_src(bg);
     bool home = scene == UI_SCENE_HOME;
-    if (home) lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(ui_gugu_img, LV_OBJ_FLAG_HIDDEN);
+    ui_scene_is_home = home;
+    // the room's own night is the window pane (ui_scene) and the lamp; the built-in away scene still has two pictures
+    const lv_image_dsc_t *bg = home ? (ui_home_lamp_is_on() ? &scn_home_day : &scn_home_off) : (night ? &scn_away_night : &scn_away_day);
+    show_scene_src(bg);
+    ui_scene_show_window(home);
+    lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_HIDDEN);   // Gugu is on screen wherever it is; the backdrop changes
     if (home) lv_obj_remove_flag(s_case_img, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(s_case_img, LV_OBJ_FLAG_HIDDEN);
     ui_unlock();
 }
@@ -252,6 +281,7 @@ esp_err_t ui_init(void)
     lv_obj_remove_flag(s_scene_img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_pos(s_scene_img, 1, 1);
     show_scene_src(&scn_home_day);
+    ui_scene_init(scr);                                     // window pane and props: above the backdrop, below the pigeon
     s_case_img = make_sprite(scr, &spr_case_down, 93 * UI_SPRITE_SCALE + 1, 62 * UI_SPRITE_SCALE + 1);
     ui_gugu_img = lv_image_create(scr);
     lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_CLICKABLE);
@@ -260,10 +290,54 @@ esp_err_t ui_init(void)
     s_eyes_img = make_sprite(ui_gugu_img, NULL, 0, 0);
     lv_obj_add_flag(s_beak_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_eyes_img, LV_OBJ_FLAG_HIDDEN);
+    ui_scene_init_accessory();
+    ui_scene_show_window(true);
     ui_anim_init(scr);
 
     if (!task_spawn("gugu_ui_main", ui_task, NULL, 8192, 4, 0)) return ESP_FAIL;
     LOGI("ui ready: 2x%u B internal DMA draw buffers, %u KB of pre-scaled art in PSRAM", (unsigned)buf_bytes,
          (unsigned)((s_scene_big.dsc.data_size + 2 * s_gugu_big[s_gugu_slot].dsc.data_size) / 1024));
     return ESP_OK;
+}
+
+// ---- notice card ----
+static lv_obj_t *s_notice, *s_notice_title, *s_notice_body;
+
+void ui_show_notice(const char *title, const char *body)
+{
+    ui_lock();
+    if (!s_notice) {
+        s_notice = lv_obj_create(lv_screen_active());
+        lv_obj_set_size(s_notice, BOARD_DISPLAY_W, BOARD_DISPLAY_H);
+        lv_obj_center(s_notice);
+        lv_obj_set_style_radius(s_notice, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(s_notice, lv_color_hex(0x1B2430), 0);
+        lv_obj_set_style_bg_opa(s_notice, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_notice, 0, 0);
+        lv_obj_set_style_pad_all(s_notice, 0, 0);
+        lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        s_notice_title = lv_label_create(s_notice);
+        lv_obj_set_style_text_color(s_notice_title, lv_color_hex(0xF6D27A), 0);
+        lv_obj_set_style_text_font(s_notice_title, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_align(s_notice_title, LV_TEXT_ALIGN_CENTER, 0);
+        s_notice_body = lv_label_create(s_notice);
+        lv_obj_set_style_text_color(s_notice_body, lv_color_white(), 0);
+        lv_obj_set_style_text_font(s_notice_body, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_align(s_notice_body, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_line_space(s_notice_body, 12, 0);
+    }
+    lv_label_set_text(s_notice_title, title ? title : "");
+    lv_label_set_text(s_notice_body, body ? body : "");
+    lv_obj_align(s_notice_title, LV_ALIGN_CENTER, 0, -130);
+    lv_obj_center(s_notice_body);
+    lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_notice);
+    ui_unlock();
+}
+
+void ui_hide_notice(void)
+{
+    ui_lock();
+    if (s_notice) lv_obj_add_flag(s_notice, LV_OBJ_FLAG_HIDDEN);
+    ui_unlock();
 }

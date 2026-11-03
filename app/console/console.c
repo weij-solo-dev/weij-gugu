@@ -4,6 +4,7 @@
 #include "foundation/mem.h"
 #include "foundation/clock.h"
 #include "foundation/atomic_file.h"
+#include "foundation/wav.h"
 #include "store/store.h"
 #include "provider/provider.h"
 #include "net/net.h"
@@ -11,7 +12,14 @@
 #include "audio/audio.h"
 #include "board/board.h"
 #include "parent/parent.h"
+#include "world/world.h"
+#include "life/life.h"
+#include "mind/mind.h"
+#include "art/art.h"
+#include "instinct/instinct.h"
 #include <string.h>
+#include <dirent.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -60,7 +68,8 @@ static int cmd_hang(int argc, char **argv) { (void)argc; (void)argv; call_hangup
 
 static int cmd_replay(int argc, char **argv)
 {
-    if (argc < 2) { printf("usage: replay <wav path> [turns]\n"); return 1; }
+    if (argc < 2) { printf("usage: replay <wav path> [turns|early]\n"); return 1; }
+    if (argc > 2 && !strcmp(argv[2], "early")) { esp_err_t err = call_replay_wav_early(argv[1], 60000); printf("replay early: %s\n", esp_err_to_name(err)); return err == ESP_OK ? 0 : 1; }
     int turns = argc > 2 ? atoi(argv[2]) : 1;
     for (int i = 0; i < turns; i++) {
         esp_err_t err = call_replay_wav(argv[1], 60000);
@@ -69,6 +78,52 @@ static int cmd_replay(int argc, char **argv)
     }
     return 0;
 }
+
+// hold <ms> [wav]: press the blue key for <ms> with the real microphone. With a WAV, play it through the
+// speaker meanwhile, so the microphone hears speech: an acoustic loopback test of the whole microphone path.
+static int cmd_hold(int argc, char **argv)
+{
+    int ms = argc > 1 ? atoi(argv[1]) : 3000;
+    call_key(CALL_KEY_BLUE, true, 0);
+    int64_t t0 = clock_us();
+    while (call_state() == CALL_CONNECTING && clock_us() - t0 < 30 * 1000000LL) clock_sleep_ms(50);
+    if (call_state() != CALL_LISTENING) { printf("not listening: %s\n", call_state_name(call_state())); call_key(CALL_KEY_BLUE, false, 0); return 1; }
+    if (argc > 2) {
+        size_t n; char *buf = file_read_all(argv[2], &n);
+        uint32_t sr, bytes; uint16_t ch; size_t off;
+        if (buf && wav_parse_header((uint8_t *)buf, n, &sr, &ch, &bytes, &off) && sr == AUDIO_SAMPLE_RATE && ch == 1) {
+            size_t total = bytes / 2; if (off + bytes > n) total = (n - off) / 2;
+            audio_play_pcm((const int16_t *)(buf + off), total);
+            int wav_ms = (int)(total * 1000 / AUDIO_SAMPLE_RATE);
+            if (wav_ms + 400 > ms) ms = wav_ms + 400;
+            printf("playing %s (%d ms) through the speaker while listening\n", argv[2], wav_ms);
+        } else printf("cannot play %s (need 16 kHz mono 16-bit WAV)\n", argv[2]);
+        if (buf) mem_release(buf);
+    }
+    clock_sleep_ms(ms);
+    audio_capture_stats_t cs; audio_capture_stats(&cs);
+    call_key(CALL_KEY_BLUE, false, ms);
+    printf("held %d ms: captured %u ms, peak %d, rms %d\n", ms, (unsigned)cs.ms, cs.peak, cs.rms);
+    return 0;
+}
+
+// mic [seconds]: a microphone level meter outside a call (cumulative peak and RMS every half second).
+static void mic_cb(const int16_t *pcm, size_t n, void *user) { (void)pcm; (void)n; (void)user; }
+static int cmd_mic(int argc, char **argv)
+{
+    if (call_state() != CALL_IDLE) { printf("hang up first\n"); return 1; }
+    int secs = argc > 1 ? atoi(argv[1]) : 3;
+    audio_capture_start(mic_cb, NULL);
+    for (int i = 0; i < secs * 2; i++) {
+        clock_sleep_ms(500);
+        audio_capture_stats_t cs; audio_capture_stats(&cs);
+        printf("  %5u ms  peak %5d  rms %5d\n", (unsigned)cs.ms, cs.peak, cs.rms);
+    }
+    audio_capture_stop();
+    return 0;
+}
+
+static int cmd_sleep(int argc, char **argv) { clock_sleep_ms(argc > 1 ? atoi(argv[1]) : 1000); return 0; }   // let a turn finish while the log streams
 
 static int cmd_mem(int argc, char **argv)
 {
@@ -106,11 +161,112 @@ static int cmd_cat(int argc, char **argv)
     return 0;
 }
 
+// ---- the trip and the clock (world / life) ----
+static int cmd_trip(int argc, char **argv)
+{
+    if (argc > 1 && !strcmp(argv[1], "new")) {
+        life_plan_t p = { .kind_hint = argc > 2 ? argv[2] : NULL, .place_hint = argc > 3 ? argv[3] : NULL, .nights = argc > 4 ? atoi(argv[4]) : 0 };
+        char why[200]; int64_t t0 = clock_us();
+        esp_err_t err = life_plan_trip(&p, why, sizeof why);
+        printf("trip new: %s in %lld ms: %s\n", esp_err_to_name(err), (long long)((clock_us() - t0) / 1000), why);
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (argc > 1 && !strcmp(argv[1], "clear")) { printf("%s\n", esp_err_to_name(world_trip_clear())); return 0; }
+    if (argc > 1 && !strcmp(argv[1], "json")) { char p[200]; snprintf(p, sizeof p, "%s/trips/current.json", store_data_dir()); char *a[] = { "cat", p }; return cmd_cat(2, a); }
+    world_state_t st; world_state(&st);
+    printf("phase %s at %s, %s, local %02d:%02d, sun %02d:%02d-%02d:%02d, clock offset %+lld s\n", world_phase_name(st.phase), st.place, world_tod_name(st.tod),
+           st.local_hour, st.local_min, st.sunrise_min / 60, st.sunrise_min % 60, st.sunset_min / 60, st.sunset_min % 60, (long long)world_clock_offset());
+    const world_trip_t *t = world_trip_lock();
+    if (!t) { printf("  no trip card (trip new [deliver|vacation|visit] [place] [nights])\n"); return 0; }
+    printf("  %s: %s to %s (%s), %s..%s, %d nights, day %d, %d nights left\n  reason: %s\n", t->id, world_kind_name(t->kind), t->place.name, t->place.country,
+           t->depart_date, t->return_date, t->nights, st.day_index, st.nights_left, t->reason);
+    for (int i = 0; i < t->days_count; i++) printf("  day %d: %s\n", i + 1, t->days[i]);
+    for (int i = 0; i < t->fact_count; i++) printf("  fact: %s\n", t->facts[i]);
+    printf("  friend %s (%s), souvenir %s, objects %d, scene: %s\n", t->friend_name, t->friend_animal, t->souvenir, t->object_count, t->scene_prompt);
+    world_trip_unlock();
+    return 0;
+}
+
+static int cmd_clock(int argc, char **argv)
+{
+    if (argc > 1 && !strcmp(argv[1], "reset")) world_clock_reset();
+    else if (argc > 1) world_clock_shift((int64_t)(atof(argv[1]) * 3600.0));
+    time_t now = world_now(); struct tm tm; localtime_r(&now, &tm);
+    printf("now %04d-%02d-%02d %02d:%02d:%02d (offset %+.1f h)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, world_clock_offset() / 3600.0);
+    return 0;
+}
+
+static int cmd_tick(int argc, char **argv) { (void)argc; (void)argv; printf("tick: %s\n", esp_err_to_name(life_tick())); return 0; }
+static int cmd_diary(int argc, char **argv) { (void)argc; (void)argv; char why[160]; esp_err_t e = life_diary_now(why, sizeof why); printf("diary: %s: %s\n", esp_err_to_name(e), why); return 0; }
+static int cmd_recap(int argc, char **argv) { (void)argc; (void)argv; char why[160]; int64_t t0 = clock_us(); esp_err_t e = life_recap_now(why, sizeof why); printf("recap: %s in %lld ms: %s\n", esp_err_to_name(e), (long long)((clock_us() - t0) / 1000), why); return 0; }
+static int cmd_art(int argc, char **argv)
+{
+    char dir[200] = "";
+    const world_trip_t *t = world_trip_lock();
+    if (t) { snprintf(dir, sizeof dir, "%s/art/%s", store_data_dir(), t->id); world_trip_unlock(); }
+    if (argc > 1 && !strcmp(argv[1], "retry") && dir[0]) {       // drop the .fail markers, then generate again
+        DIR *d = opendir(dir); struct dirent *e;
+        while (d && (e = readdir(d)) != NULL) if (strstr(e->d_name, ".fail")) { char p[300]; snprintf(p, sizeof p, "%s/%s", dir, e->d_name); remove(p); }
+        if (d) closedir(d);
+    }
+    if (argc > 1 && (!strcmp(argv[1], "gen") || !strcmp(argv[1], "retry"))) {
+        char why[160]; int64_t t0 = clock_us();
+        esp_err_t err = life_art_now(why, sizeof why);
+        printf("art: %s in %lld ms: %s\n", esp_err_to_name(err), (long long)((clock_us() - t0) / 1000), why);
+    }
+    if (!dir[0]) { printf("no trip card\n"); return 1; }
+    DIR *d = opendir(dir); struct dirent *e;
+    if (!d) { printf("%s: nothing generated yet\n", dir); return 0; }
+    printf("%s:\n", dir);
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char p[300]; snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        art_image_t img;
+        if (strstr(e->d_name, ".art") && art_load(p, &img) == ESP_OK) { printf("  %-16s %ux%u, %d colours%s\n", e->d_name, img.w, img.h, img.ncolors, img.alpha ? ", alpha" : ""); art_free(&img); }
+        else printf("  %s\n", e->d_name);
+    }
+    closedir(d);
+    return 0;
+}
+
+static int cmd_press(int argc, char **argv)   // press yellow [n] | press shake [n] | press pickup: what the child's hands do
+{
+    int n = argc > 2 ? atoi(argv[2]) : 1;
+    if (argc > 1 && !strcmp(argv[1], "shake")) { for (int i = 0; i < n; i++) { instinct_shaken(160); clock_sleep_ms(300); } printf("shaken x%d\n", n); return 0; }
+    if (argc > 1 && !strcmp(argv[1], "pickup")) { instinct_picked_up(); printf("picked up\n"); return 0; }
+    if (argc < 2 || strcmp(argv[1], "yellow")) { printf("usage: press yellow [n] | shake [n] | pickup\n"); return 1; }
+    for (int i = 0; i < n; i++) { instinct_yellow_tap(); clock_sleep_ms(250); }
+    printf("yellow x%d\n", n);
+    return 0;
+}
+
+static int cmd_tod(int argc, char **argv)
+{
+    static const char *const N[] = { "night", "sunrise", "day", "dusk" };
+    int v = -1;
+    if (argc > 1) for (int i = 0; i < 4; i++) if (!strcmp(argv[1], N[i])) v = i;
+    if (argc > 1 && strcmp(argv[1], "auto") && v < 0) { printf("usage: tod night|sunrise|day|dusk|auto\n"); return 1; }
+    instinct_set_tod_override(v);
+    printf("time of day: %s\n", v < 0 ? "follows the clock" : N[v]);
+    return 0;
+}
+
+static int cmd_journey(int argc, char **argv)
+{
+    MEM_BIG_BSS static char buf[4096];
+    if (argc > 1 && !strcmp(argv[1], "forget") && argc > 2) { printf("%s %s\n", esp_err_to_name(mind_journey_forget(argv[2])), esp_err_to_name(world_trip_forget(argv[2]))); return 0; }
+    if (argc > 1 && !strcmp(argv[1], "ask") && argc > 2) { size_t n = mind_journey_match(argv[2], buf, sizeof buf, 3); printf("%u match(es)\n%s", (unsigned)n, buf); return 0; }
+    mind_journey_recent(buf, sizeof buf, 5); printf("%s", buf);
+    size_t n = mind_book_text("about_child", buf, sizeof buf); printf("about_child: %u entries\n%s", (unsigned)n, buf);
+    n = mind_book_text("canon_grown", buf, sizeof buf); printf("canon_grown: %u entries\n%s", (unsigned)n, buf);
+    return 0;
+}
+
 static int cmd_parent(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "off")) { parent_exit(); printf("parent mode off\n"); return 0; }
     esp_err_t err = parent_enter();
-    printf("parent mode %s: hotspot %s password %s\n", esp_err_to_name(err), parent_hotspot_ssid(), parent_hotspot_password());
+    printf("parent mode %s: hotspot %s password %s page %s\n", esp_err_to_name(err), parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url());
     return err == ESP_OK ? 0 : 1;
 }
 
@@ -126,12 +282,24 @@ static const cmd_t CMDS[] = {
     { "get", "get <key>", cmd_get },
     { "call", "dial a call (blue key tap)", cmd_call },
     { "hang", "hang up", cmd_hang },
-    { "replay", "replay <wav> [turns] — feed a recording as the microphone", cmd_replay },
+    { "replay", "replay <wav> [turns|early] — feed a recording as the microphone (early: let go before the line is open)", cmd_replay },
+    { "hold", "hold <ms> [wav] — hold the blue key with the real microphone; a WAV is played through the speaker meanwhile", cmd_hold },
+    { "mic", "mic [seconds] — microphone level meter", cmd_mic },
+    { "sleep", "sleep <ms> — wait (scripts: let a turn finish)", cmd_sleep },
     { "stat", "memory, battery, network, call state", cmd_stat },
     { "mem", "heap regions: free, largest block, low-water mark", cmd_mem },
     { "ls", "ls [dir]", cmd_ls },
     { "cat", "cat <path>", cmd_cat },
     { "parent", "parent [off] — hotspot + web page for the parent", cmd_parent },
+    { "trip", "trip [new [kind] [place] [nights] | clear | json] — the trip card and where Gugu is", cmd_trip },
+    { "clock", "clock [+hours|-hours|reset] — shift the clock to walk through a trip", cmd_clock },
+    { "tick", "run the daily life tick now (diary, recap, then a trip when one is due)", cmd_tick },
+    { "diary", "write the journey's day entries for the trip so far (no model call)", cmd_diary },
+    { "recap", "write the recap of the finished trip into the journey (one model call)", cmd_recap },
+    { "journey", "journey [ask <words> | forget <trip id>] — the three memory books", cmd_journey },
+    { "art", "art [gen|retry] — the generated pictures of the current trip (backdrop, props, friend)", cmd_art },
+    { "tod", "tod night|sunrise|day|dusk|auto — force the time of day the scene shows", cmd_tod },
+    { "press", "press yellow [n] | shake [n] | pickup — the child's hands, from the console", cmd_press },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
     { "vol", "vol <0-100>", cmd_vol },
 };

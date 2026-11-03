@@ -1,6 +1,7 @@
 #include "minitest.h"
 #include "mind/mind_tags.h"
 #include "foundation/mem.h"
+#include "foundation/atomic_file.h"
 
 static char seg_log[512]; static int seg_n; static mind_tag_t tag_log[16]; static int tag_n; static char text_acc[256];
 static void t_text(const char *s, size_t n, void *u) { strncat(text_acc, s, n); }
@@ -26,7 +27,7 @@ TEST(test_tags_unknown_and_brackets)
 {
     reset();
     tag_sink_t sink = { t_text, t_tag, t_seg }; tag_parser_t p; tag_parser_init(&p, &sink, NULL);
-    feed_bytewise(&p, "[angry]不行哦。[1+1] 等于二。[ 嗯");
+    feed_bytewise(&p, "[grumpy]不行哦。[1+1] 等于二。[ 嗯");
     tag_parser_finish(&p);
     CHECK_EQ_INT(tag_n, 0);                                  // unknown tag dropped, not voiced
     CHECK_EQ_STR(seg_log, "不行哦。|[1+1] 等于二。|[ 嗯|");   // non-tag brackets are ordinary text
@@ -64,6 +65,19 @@ TEST(test_tags_strip_and_english)
     CHECK_EQ_STR(mind_tag_name(TAG_PUFF), "puff");
     CHECK(mind_tag_parse("HAPPY", 5) == TAG_HAPPY);
     CHECK(mind_tag_is_emotion(TAG_SAD) && !mind_tag_is_emotion(TAG_NOD));
+    // v1.1: the four new faces and two new actions, and tags.md names every tag the parser knows
+    CHECK(mind_tag_parse("angry", 5) == TAG_ANGRY && mind_tag_parse("dizzy", 5) == TAG_DIZZY && mind_tag_parse("proud", 5) == TAG_PROUD && mind_tag_parse("scared", 6) == TAG_SCARED);
+    CHECK(mind_tag_parse("peck", 4) == TAG_PECK && mind_tag_parse("jump", 4) == TAG_JUMP);
+    CHECK(mind_tag_is_emotion(TAG_DIZZY) && !mind_tag_is_emotion(TAG_PECK));
+    CHECK_EQ_INT(TAG_COUNT, 20);   // 19 tags + TAG_NONE
+    size_t len; char *md = file_read_all(GUGU_REPO_ROOT "/content/prompts/tags.md", &len);
+    CHECK(md != NULL);
+    if (md) {
+        int missing = 0;
+        for (int t = TAG_NEUTRAL; t < TAG_COUNT; t++) if (!strstr(md, mind_tag_name((mind_tag_t)t))) { printf("  tags.md lacks %s\n", mind_tag_name((mind_tag_t)t)); missing++; }
+        CHECK_EQ_INT(missing, 0);
+        mem_release(md);
+    }
 }
 
 void test_tags(void)

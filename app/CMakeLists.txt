@@ -10,7 +10,7 @@ else()
     set(GUGU_REQUIRES driver esp_driver_i2c esp_driver_spi esp_driver_gpio esp_driver_i2s esp_lcd esp_timer esp_event
         nvs_flash esp_wifi esp_netif lwip esp_http_client esp_http_server esp-tls json vfs esp_psram esp_partition app_update esp_driver_usb_serial_jtag mbedtls)
     set(GUGU_PRIV_REQUIRES lvgl__lvgl espressif__esp_lcd_co5300 espressif__esp_codec_dev joltwallet__littlefs
-        espressif__esp_websocket_client)
+        espressif__esp_websocket_client espressif__bmi270)
 endif()
 idf_component_register(
     SRCS ${GUGU_SRCS}

@@ -3,12 +3,12 @@
 #include <string.h>
 
 static const char *const NAMES[TAG_COUNT] = {
-    "", "neutral", "happy", "laughing", "surprised", "curious", "shy", "sad", "sleepy",
-    "coo", "puff", "whistle", "wave", "nod",
+    "", "neutral", "happy", "laughing", "surprised", "curious", "shy", "sad", "sleepy", "angry", "scared", "proud", "dizzy",
+    "coo", "puff", "whistle", "wave", "nod", "peck", "jump",
 };
 
 const char *mind_tag_name(mind_tag_t t) { return t < TAG_COUNT ? NAMES[t] : ""; }
-bool mind_tag_is_emotion(mind_tag_t t) { return t >= TAG_NEUTRAL && t <= TAG_SLEEPY; }
+bool mind_tag_is_emotion(mind_tag_t t) { return t >= TAG_NEUTRAL && t <= TAG_DIZZY; }
 
 mind_tag_t mind_tag_parse(const char *name, size_t n)
 {

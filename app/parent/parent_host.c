@@ -60,3 +60,4 @@ void parent_exit(void) { s_active = false; }
 bool parent_is_active(void) { return s_active; }
 const char *parent_hotspot_ssid(void) { return "gugu-HOST"; }
 const char *parent_hotspot_password(void) { return s_active ? "12345678" : ""; }
+const char *parent_hotspot_url(void) { return "http://127.0.0.1:8088"; }

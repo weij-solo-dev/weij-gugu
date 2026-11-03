@@ -28,3 +28,5 @@ typedef void (*call_state_cb)(call_state_t state, void *user);
 void         call_set_state_listener(call_state_cb cb, void *user);
 // Replay harness: dial, feed a 16 kHz WAV as the utterance, release, wait for the turn to finish.
 esp_err_t    call_replay_wav(const char *path, uint32_t timeout_ms);
+// Same, but the utterance is spoken and the key released while the line is still opening (the pre-roll path).
+esp_err_t    call_replay_wav_early(const char *path, uint32_t timeout_ms);

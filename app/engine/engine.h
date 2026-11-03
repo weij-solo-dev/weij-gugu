@@ -25,6 +25,7 @@ typedef enum {
     ENGINE_EV_AUDIO,           // u.audio — PCM for the current segment
     ENGINE_EV_SEGMENT_END,     // u.segment
     ENGINE_EV_TURN_DONE,       // u.done
+    ENGINE_EV_NOTHING_HEARD,   // the key was held but the ASR heard no words; nothing was sent to the model
     ENGINE_EV_ERROR,           // u.error — the turn (or the pre-warm) failed; the call decides what to say
     ENGINE_EV_ABORTED,         // the turn was cancelled
 } engine_event_kind_t;

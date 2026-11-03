@@ -9,10 +9,11 @@
 
 typedef enum {
     TAG_NONE = 0,
-    // emotions (8)
+    // emotions (12)
     TAG_NEUTRAL, TAG_HAPPY, TAG_LAUGHING, TAG_SURPRISED, TAG_CURIOUS, TAG_SHY, TAG_SAD, TAG_SLEEPY,
-    // actions / sounds (5)
-    TAG_COO, TAG_PUFF, TAG_WHISTLE, TAG_WAVE, TAG_NOD,
+    TAG_ANGRY, TAG_SCARED, TAG_PROUD, TAG_DIZZY,
+    // actions / sounds (7)
+    TAG_COO, TAG_PUFF, TAG_WHISTLE, TAG_WAVE, TAG_NOD, TAG_PECK, TAG_JUMP,
     TAG_COUNT
 } mind_tag_t;
 

@@ -34,6 +34,7 @@ typedef struct {
     uint32_t audio_ms;      // ASR / TTS audio duration billed or produced
     uint32_t chars;         // TTS characters billed
     uint32_t in_tokens, out_tokens, cached_tokens;   // CHAT
+    uint32_t images;        // IMAGE: pictures produced
 } provider_usage_t;
 
 // ---- language ----
@@ -171,6 +172,7 @@ const char *provider_region(const char *vendor_id);                          // 
 
 // Cost of one turn's usage in CNY cents (list prices from the presets of the vendors assigned to each role).
 float provider_turn_cost_fen(const provider_usage_t *asr, const provider_usage_t *chat, const provider_usage_t *tts);
+float provider_image_cost_fen(void);   // list price of one picture from the vendor assigned to the IMAGE role
 
 // Helpers shared by vendor files.
 void provider_error_set(provider_error_t *e, provider_error_kind_t kind, int http, int api, const char *msg);

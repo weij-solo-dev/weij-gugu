@@ -14,6 +14,10 @@ extern const lv_image_dsc_t spr_gugu_curious;
 extern const lv_image_dsc_t spr_gugu_shy;
 extern const lv_image_dsc_t spr_gugu_sad;
 extern const lv_image_dsc_t spr_gugu_sleepy;
+extern const lv_image_dsc_t spr_gugu_angry;
+extern const lv_image_dsc_t spr_gugu_scared;
+extern const lv_image_dsc_t spr_gugu_proud;
+extern const lv_image_dsc_t spr_gugu_dizzy;
 extern const lv_image_dsc_t spr_gugu_puff;
 extern const lv_image_dsc_t spr_gugu_wave;
 extern const lv_image_dsc_t spr_gugu_neutral_open;
@@ -24,6 +28,10 @@ extern const lv_image_dsc_t spr_gugu_curious_open;
 extern const lv_image_dsc_t spr_gugu_shy_open;
 extern const lv_image_dsc_t spr_gugu_sad_open;
 extern const lv_image_dsc_t spr_gugu_sleepy_open;
+extern const lv_image_dsc_t spr_gugu_angry_open;
+extern const lv_image_dsc_t spr_gugu_scared_open;
+extern const lv_image_dsc_t spr_gugu_proud_open;
+extern const lv_image_dsc_t spr_gugu_dizzy_open;
 extern const lv_image_dsc_t spr_gugu_puff_open;
 extern const lv_image_dsc_t spr_gugu_wave_open;
 extern const lv_image_dsc_t spr_gugu_blink;
@@ -33,18 +41,55 @@ extern const lv_image_dsc_t scn_home_day;
 extern const lv_image_dsc_t scn_home_night;
 extern const lv_image_dsc_t scn_away_day;
 extern const lv_image_dsc_t scn_away_night;
+extern const lv_image_dsc_t scn_home_off;
+extern const lv_image_dsc_t spr_prop_lamp;
+extern const lv_image_dsc_t spr_prop_bench;
+extern const lv_image_dsc_t spr_prop_mailbox;
+extern const lv_image_dsc_t spr_prop_tree;
+extern const lv_image_dsc_t spr_prop_palm;
+extern const lv_image_dsc_t spr_prop_umbrella;
+extern const lv_image_dsc_t spr_prop_lounger;
+extern const lv_image_dsc_t spr_prop_boat;
+extern const lv_image_dsc_t spr_prop_lantern;
+extern const lv_image_dsc_t spr_prop_flag;
+extern const lv_image_dsc_t spr_prop_cat;
+extern const lv_image_dsc_t spr_prop_seagull;
+extern const lv_image_dsc_t spr_win_night;
+extern const lv_image_dsc_t spr_win_sunrise;
+extern const lv_image_dsc_t spr_win_day;
+extern const lv_image_dsc_t spr_win_dusk;
+extern const lv_image_dsc_t spr_acc_sun_hat;
+extern const lv_image_dsc_t spr_acc_camera;
+extern const lv_image_dsc_t spr_acc_sunglasses_neutral;
+extern const lv_image_dsc_t spr_acc_sunglasses_happy;
+extern const lv_image_dsc_t spr_acc_sunglasses_laughing;
+extern const lv_image_dsc_t spr_acc_sunglasses_surprised;
+extern const lv_image_dsc_t spr_acc_sunglasses_curious;
+extern const lv_image_dsc_t spr_acc_sunglasses_shy;
+extern const lv_image_dsc_t spr_acc_sunglasses_sad;
+extern const lv_image_dsc_t spr_acc_sunglasses_sleepy;
+extern const lv_image_dsc_t spr_acc_sunglasses_angry;
+extern const lv_image_dsc_t spr_acc_sunglasses_scared;
+extern const lv_image_dsc_t spr_acc_sunglasses_proud;
+extern const lv_image_dsc_t spr_acc_sunglasses_dizzy;
+extern const lv_image_dsc_t spr_acc_sunglasses_puff;
+extern const lv_image_dsc_t spr_acc_sunglasses_wave;
 extern const lv_image_dsc_t spr_beak_neutral;
 extern const lv_image_dsc_t spr_beak_happy;
 extern const lv_image_dsc_t spr_beak_curious;
 extern const lv_image_dsc_t spr_beak_shy;
 extern const lv_image_dsc_t spr_beak_sad;
 extern const lv_image_dsc_t spr_beak_sleepy;
+extern const lv_image_dsc_t spr_beak_angry;
+extern const lv_image_dsc_t spr_beak_scared;
+extern const lv_image_dsc_t spr_beak_proud;
+extern const lv_image_dsc_t spr_beak_dizzy;
 extern const lv_image_dsc_t spr_beak_puff;
 extern const lv_image_dsc_t spr_beak_wave;
 extern const lv_image_dsc_t spr_eyes_blink;
 
-// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, puff, wave
-#define UI_EMOTION_COUNT 10
+// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, angry, scared, proud, dizzy, puff, wave
+#define UI_EMOTION_COUNT 14
 extern const lv_image_dsc_t *const ui_emotion_sprites[UI_EMOTION_COUNT];
 extern const lv_image_dsc_t *const ui_emotion_sprites_open[UI_EMOTION_COUNT];   // same emotions, beak open
 
@@ -53,3 +98,12 @@ typedef struct { const lv_image_dsc_t *img; int16_t x, y; } ui_patch_t;
 extern const ui_patch_t ui_beak_patch[UI_EMOTION_COUNT];   // beak-open pixels per emotion
 extern const ui_patch_t ui_blink_patch;                     // eyes-closed pixels of the neutral face
 extern const bool ui_blink_fits[UI_EMOTION_COUNT];          // that face equals neutral under the blink patch
+
+// v1.1 object layer: built-in props by catalogue id, the window panes (art_tod_t order), accessory anchors per face.
+typedef struct { const char *id; const lv_image_dsc_t *img; } ui_prop_sprite_t;
+extern const ui_prop_sprite_t ui_prop_sprites[];
+extern const int ui_prop_sprite_count;
+extern const lv_image_dsc_t *const ui_window_sprites[4];      // night, sunrise, day, dusk
+extern const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT];   // dark lenses over that face's eyes
+extern const int16_t ui_hat_y[UI_EMOTION_COUNT];               // base y of the sun hat for that face (x = 12)
+extern const int16_t ui_camera_y[UI_EMOTION_COUNT];            // base y of the camera on the chest (x = 18)

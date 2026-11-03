@@ -13,7 +13,8 @@
 
 static httpd_handle_t s_httpd;
 static bool s_active;
-static char s_ssid[32], s_pass[12];
+static char s_ssid[32], s_pass[12], s_url[40];
+static esp_netif_t *s_ap_netif;             // created once; enter/exit only switch the Wi-Fi mode
 
 static esp_err_t any_handler(httpd_req_t *req)
 {
@@ -67,10 +68,13 @@ esp_err_t parent_enter(void)
     snprintf((char *)ap.ap.ssid, sizeof ap.ap.ssid, "%s", s_ssid);
     snprintf((char *)ap.ap.password, sizeof ap.ap.password, "%s", s_pass);
     ap.ap.ssid_len = strlen(s_ssid); ap.ap.max_connection = 2; ap.ap.authmode = WIFI_AUTH_WPA2_PSK; ap.ap.channel = 6;
-    esp_netif_create_default_wifi_ap();
+    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), LOG_TAG, "apsta");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), LOG_TAG, "ap cfg");
     esp_wifi_start();
+    esp_netif_ip_info_t ip;
+    if (s_ap_netif && esp_netif_get_ip_info(s_ap_netif, &ip) == ESP_OK) snprintf(s_url, sizeof s_url, "http://" IPSTR, IP2STR(&ip.ip));
+    else snprintf(s_url, sizeof s_url, "http://192.168.4.1");
     s_active = true;
     LOGI("hotspot %s up (password shown on the device only)", s_ssid);
     return ESP_OK;
@@ -88,3 +92,4 @@ void parent_exit(void)
 bool parent_is_active(void) { return s_active; }
 const char *parent_hotspot_ssid(void) { return s_ssid; }
 const char *parent_hotspot_password(void) { return s_pass; }
+const char *parent_hotspot_url(void) { return s_url; }

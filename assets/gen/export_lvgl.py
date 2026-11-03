@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pixelgen as pg
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'app', 'ui')
-EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'puff', 'wave']
+EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave']   # ui_emotion_t order
 
 def rgb565(c):
     r, g, b = c
@@ -83,6 +83,20 @@ def main():
     images.append(('scn_home_night', pg.room('home', night=True, moons=0), False))
     images.append(('scn_away_day', pg.room('away', night=False, moons=2), False))
     images.append(('scn_away_night', pg.room('away', night=True, moons=2), False))
+    images.append(('scn_home_off', pg.room('home', night=False, moons=0, lamp_on=False), False))   # the lamp switched off
+    # v1.1: built-in props (fallbacks behind generated ones), the window pane at four times of day, accessories
+    for pid, fn in pg.PROPS.items():
+        images.append((f'spr_prop_{pid}', fn(), True))
+    for tod in ('night', 'sunrise', 'day', 'dusk'):
+        images.append((f'spr_win_{tod}', pg.window(tod), True))
+    images.append(('spr_acc_sun_hat', pg.acc_sun_hat(), True))
+    images.append(('spr_acc_camera', pg.acc_camera(), True))
+    glasses, hat_y, camera_y = [], [], []
+    for e in EMOTIONS:
+        pg.gugu(e); g = pg.LAST_GEOM
+        gc, gx, gy = pg.acc_sunglasses(g['eye_boxes'])
+        images.append((f'spr_acc_sunglasses_{e}', gc, True)); glasses.append((f'&spr_acc_sunglasses_{e}', gx, gy))
+        hat_y.append(int(round(g['head_top'])) - 7); camera_y.append(int(round(g['cy'])) + 1)
 
     # Overlay patches: the pixels that change when the beak opens or the eyes close, cropped to their bounding
     # box, so ui_anim.c repaints a patch instead of the whole pigeon. A patch is only usable when it covers every
@@ -136,6 +150,25 @@ def main():
     else:
         c_parts.append('const ui_patch_t ui_blink_patch = { NULL, 0, 0 };')
     c_parts.append('const bool ui_blink_fits[UI_EMOTION_COUNT] = { ' + ', '.join('true' if f else 'false' for f in blink_fits) + ' };')
+    h_parts.append('')
+    h_parts.append('// v1.1 object layer: built-in props by catalogue id, the window panes (art_tod_t order), accessory anchors per face.')
+    h_parts.append('typedef struct { const char *id; const lv_image_dsc_t *img; } ui_prop_sprite_t;')
+    h_parts.append('extern const ui_prop_sprite_t ui_prop_sprites[];')
+    h_parts.append('extern const int ui_prop_sprite_count;')
+    h_parts.append('extern const lv_image_dsc_t *const ui_window_sprites[4];      // night, sunrise, day, dusk')
+    h_parts.append('extern const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT];   // dark lenses over that face\'s eyes')
+    h_parts.append('extern const int16_t ui_hat_y[UI_EMOTION_COUNT];               // base y of the sun hat for that face (x = 12)')
+    h_parts.append('extern const int16_t ui_camera_y[UI_EMOTION_COUNT];            // base y of the camera on the chest (x = 18)')
+    c_parts.append('const ui_prop_sprite_t ui_prop_sprites[] = {')
+    c_parts.append('    ' + ', '.join(f'{{ "{pid}", &spr_prop_{pid} }}' for pid in pg.PROPS) + ',')
+    c_parts.append('};')
+    c_parts.append(f'const int ui_prop_sprite_count = {len(pg.PROPS)};')
+    c_parts.append('const lv_image_dsc_t *const ui_window_sprites[4] = { &spr_win_night, &spr_win_sunrise, &spr_win_day, &spr_win_dusk };')
+    c_parts.append('const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT] = {')
+    c_parts.append('    ' + ', '.join(f'{{ {img}, {x}, {y} }}' for img, x, y in glasses) + ',')
+    c_parts.append('};')
+    c_parts.append('const int16_t ui_hat_y[UI_EMOTION_COUNT] = { ' + ', '.join(str(v) for v in hat_y) + ' };')
+    c_parts.append('const int16_t ui_camera_y[UI_EMOTION_COUNT] = { ' + ', '.join(str(v) for v in camera_y) + ' };')
     print('beak patches:', ', '.join(f'{e}={"ok" if b[0] != "NULL" else "-"}' for e, b in zip(EMOTIONS, beak)))
     print('blink patch:', 'ok' if blink_ok else 'none', 'bbox', bb_eyes, 'fits:', ', '.join(e for e, f in zip(EMOTIONS, blink_fits) if f))
     os.makedirs(OUT_DIR, exist_ok=True)

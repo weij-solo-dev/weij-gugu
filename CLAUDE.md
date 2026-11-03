@@ -8,9 +8,12 @@ for product decisions, in `PLAN.md`. Do not restate either here.
 
 gugu is an electronic pet for 3–5 year olds: an anthropomorphic homing pigeon named **咕咕 (Gugu)**
 that lives on an M5Stack StopWatch (ESP32-S3R8, 466×466 round AMOLED, mic, speaker, IMU, RTC,
-450 mAh). It travels for a few nights, mails a postcard home every day, can be phoned by the child
-(blue key, push-to-talk) and read (yellow key), and brings back one souvenir per trip. The child
-speaks English, Mandarin or Cantonese; Gugu answers in the child's language with one voice.
+450 mAh). Its job is delivering letters: every few days a model-written **trip card** (`data/trips/current.json`,
+planned by `life`, kept by `world`) sends it to a real place for one to three nights (a delivery, a holiday or a
+visit); the screen follows where it is and the real time of day there; it mails a postcard home every day and brings
+back one souvenir per trip. The child can call it any time (blue key, push-to-talk; the yellow key is for play, and
+held for three seconds it toggles parent mode). The child speaks English, Mandarin or Cantonese; Gugu answers in the
+child's language with one voice.
 
 **The application is the firmware.** There is no backend, proxy, account or app. The device talks
 to the AI vendors directly over TLS with the family's own API keys, and keeps every byte of state
@@ -57,7 +60,8 @@ mind        ├─ engine    one turn of conversation: cascade (ASR→LLM→tags
                         │
 services    ├─ provider  the unified vendor protocol + minimax / qwen / qwen_realtime / volc / fake
             ├─ audio     mic capture, playback with jitter buffer, local sound effects, mp3 decode
-            └─ ui        LVGL scenes, the animation table (tag → clip), generated sprites
+            ├─ art       generated pictures → pixel art: JPEG decode + shrink, palettes, keyed props, time-of-day palettes, .art files
+            └─ ui        LVGL scenes, the animation table (tag → clip), generated sprites, generated backdrops
                         │
 platform    ├─ net       HTTPS keep-alive + SSE, WSS, TLS session reuse, connection pre-warm
             ├─ store     LittleFS files, encrypted NVS, atomic writes, logs, cost ledger, export
@@ -70,24 +74,25 @@ base        foundation   small headerful components, included directly (no umbre
 
 | Module | Owns | May include |
 |---|---|---|
-| `foundation` | log macros, ring buffer, string builder, SSE line parser, hex/base64, wav header, atomic file write, monotonic clock, small typed event queue | — |
-| `board` | `board.h`: display, touch, two keys, ES8311 + I2S, BMI270, RX8130 RTC, M5PM1 power levels and wake reasons, M5IOE1 vibration, battery; `board_host.c` stub for the host build | `foundation` |
+| `foundation` | log macros, ring buffer, string builder, SSE line parser, hex/base64, wav header, atomic file write, monotonic clock, small typed event queue, the motion detector (`motion.h`: accelerometer samples → shake / pick-up) | — |
+| `board` | `board.h`: display, touch, two keys, ES8311 + I2S, BMI270 (`board_imu_esp.c`: 50 Hz accelerometer → `foundation/motion` → shake / pick-up events; the host's S and P keys), RX8130 RTC, M5PM1 power levels and wake reasons, M5IOE1 vibration, battery; `board_host.c` stub for the host build | `foundation` |
 | `net` | `net.h`: HTTP client with keep-alive and streaming body (SSE), WebSocket client, TLS session tickets, pre-warm; `net_esp.c` / `net_host.c` backends | `foundation` |
 | `store` | `store.h`: LittleFS mount, encrypted NVS for keys and settings, JSON file read/write (tmp + rename), turn log, cost ledger, export bundle | `foundation` |
 | `audio` | `audio.h`: 16 kHz mono capture to a PSRAM ring, PCM playback with 2–3 frame pre-buffer, local SFX, mp3 decode for postcards, RMS for beak sync | `foundation` `board` `store` |
-| `ui` | `ui.h`: LVGL setup, scenes (home / away / call / parent), the animation engine driven by expression tags, sprites generated from `assets/` (scene and base sprite pre-scaled into PSRAM, beak/eyelid overlay patches) | `foundation` `board` `store` |
+| `art` | `art.h`: a JPEG from the image role → the 116-grid backdrop (≤20 colours, sky entries, the ground strip the card asks for) or a keyed prop sprite (outlined, with a quality gate); palettes for the four times of day; the `.art` file under `data/art/<trip>/`; the prop catalogue `content/props/catalogue.json`. Decoder: LVGL's bundled TJpgDec, shrinking while decoding | `foundation` `store` |
+| `ui` | `ui.h`: LVGL setup, scenes (home / away / call / parent), the animation engine driven by expression tags, sprites generated from `assets/` (scene and base sprite pre-scaled into PSRAM, beak/eyelid overlay patches), `ui_show_backdrop` for a generated scene, the object layer (`ui_scene.c`: props and the friend on the ground line, built-in or generated sprites, hit test, behaviours wiggle / toggle / wave / bounce / sound, time-of-day scheduling, the home's lamp and window pane, accessories on the pigeon) | `foundation` `board` `store` `art` |
 | `provider` | `provider.h`: the vendor protocol (roles ASR / CHAT / TTS / S2S / IMAGE, session shapes, events, errors, usage, per-turn cost); `provider_minimax.c` (live-verified), `provider_qwen.c`, `provider_qwen_realtime.c`, `provider_volc.c` (written to the public protocols, not yet exercised live), `provider_fake.c`; wire codecs `provider_wire_anthropic.c`, `provider_wire_openai.c`; `provider_preset.c` for `content/providers/*.json` | `foundation` `net` `store` |
-| `world` | `world.h`: trip calendar (pure function of settings + date), festivals incl. lunar table, sunrise/sunset, Open-Meteo weather, place-pack index | `foundation` `net` `store` |
-| `mind` | `mind.h`: the four prompt blocks, tag vocabulary and streaming parser, language policy, mood baseline, the three memory books, post-call extraction, life/reflection content | `foundation` `store` `world` `provider` |
+| `world` | `world.h`: the trip card (JSON under `data/trips/`), the trip phase as a pure function of card + clock, sunrise/sunset and time of day at the pigeon's location, the shiftable clock the console and tests use; festivals and weather later | `foundation` `net` `store` |
+| `mind` | `mind.h`: the four prompt blocks, tag vocabulary and streaming parser, language policy, mood baseline, the three memory books (`mind_memory.c`: the journey log `memory/journey.jsonl`, `about_child.json`, `canon_grown.json`; recall by place/friend name), the trip-card and recap requests (`mind_trip.c`); post-call extraction later | `foundation` `store` `world` `provider` |
 | `engine` | `engine.h`: `engine_t` interface, `engine_cascade.c`, `engine_s2s.c` (slot), per-turn timing probes t0–t5 | `foundation` `provider` `mind` |
 | `call` | `call.h`: IDLE → CONNECTING → WAITING ⇄ LISTENING → THINKING → SPEAKING → ENDED, cancellation, per-stage timeouts, quiet hours, time cap, "no signal" fallback | `foundation` `engine` `mind` `audio` `ui` `store` `world` |
-| `instinct` | `instinct.h`: idle animations, blink/breathe/doze, touch and pick-up reactions, scene choice from world state | `foundation` `board` `audio` `ui` `store` `world` |
-| `life` | `life.h`: what to do on each wake reason, nightly generation, postcard delivery wake, post-call job, weekly reflection, going back to sleep | `foundation` `store` `world` `mind` `provider` `board` |
+| `instinct` | `instinct.h`: idle animations, blink/breathe/doze, scene choice from world state (the trip's generated backdrop and sprites when they exist, built-in ones otherwise, at the time of day there), the object list and layout for a trip (friend on the right, props on the left), what a touch does (object → its behaviour + vibration + a sound; Gugu → coo), a time-of-day override for screenshots | `foundation` `board` `audio` `ui` `store` `world` `art` |
+| `life` | `life.h`: the worker that plans the next trip card on the journey so far (`life_plan_trip`), writes the diary of each day away and the recap once home (`life_diary_now`, `life_recap_now`), generates the trip's pictures through the image role (`life_art_now`: backdrop, ≤3 props, the friend; one `.art` or `.fail` per piece, ledger line per picture), and the daily tick that runs them in order (`life_tick`, nightly and once after boot; planning keyed by date); wake reasons, postcards and the weekly reflection later | `foundation` `store` `world` `mind` `provider` `board` `art` |
 | `parent` | `parent.h`: softAP with random numeric password, captive portal, JSON API, embedded static page | `foundation` `store` `board` |
-| `console` | `console.h`: the serial test console (USB-Serial/JTAG on the device, stdin on the host): provisioning (`wifi`, `key`, `set`), `call`/`hang`/`replay`, `stat`, `mem`, `ls`/`cat`, `sfx`, `vol` | `foundation` `store` `provider` `net` `call` `audio` `board` |
+| `console` | `console.h`: the serial test console (USB-Serial/JTAG on the device, stdin on the host): provisioning (`wifi`, `key`, `set`), `call`/`hang`/`replay [early]`, real-microphone checks (`hold`, `mic`), the trip and the journey (`trip [new|clear|json]`, `clock`, `tick`, `diary`, `recap`, `journey`), the pictures (`art [gen|retry]`, `tod`), the child's hands (`press yellow|shake|pickup`), `parent`, `stat`, `mem`, `ls`/`cat`, `sfx`, `vol`, `sleep` | `foundation` `store` `provider` `net` `call` `audio` `board` `parent` `world` `life` `mind` `art` `instinct` |
 
-`world` and `life` are reserved for stage 1 (trip calendar, postcards, ticks) and do not exist yet; everything
-else in the table is in the tree.
+Every module in the table is in the tree; `world` and `life` arrived with v1.1 (the trip card and its planner) and
+still grow (postcards, festivals, weather, wake reasons).
 
 ## Core Rules
 
@@ -149,8 +154,9 @@ say so out loud, do not slip it in.
   full-text search, random access inside multi-MB files).
 - `content/` is packed into the LittleFS image at build time: `prompts/` (persona, canon seed,
   tags, per-language examples), `providers/` (presets), `places/` (place packs), `sfx/`, `web/`.
-- `assets/` holds art sources and generators; `assets/gen/pixelgen.py` renders sprites and scenes,
-  and `tools/assets/` converts them to LVGL C arrays. Never edit a generated file.
+- `assets/` holds art sources and generators; `assets/gen/pixelgen.py` renders sprites, scenes, the built-in props,
+  accessories and window panes, `assets/gen/export_lvgl.py` turns them into `app/ui/ui_sprites.c/.h` (with the
+  accessory anchors per face), `assets/gen/sfxgen.py` synthesises `content/sfx/*.wav`. Never edit a generated file.
 
 ### Memory and power
 
@@ -181,9 +187,18 @@ say so out loud, do not slip it in.
 
 ### Add an expression tag
 
-Change `content/prompts/tags.md`, `mind_tags.c` and `ui_anim.c` in one commit, add the clip to
-`assets/gen/pixelgen.py`, regenerate, and run `test_tags`. The vocabulary is deliberately small
-(≤ 13); argue for the addition in `PLAN.md` first.
+Change `content/prompts/tags.md`, `mind_tags.c` and `ui_anim.c` (plus `ui.h`'s `ui_emotion_t`, `call.c`'s
+tag→face map and the `EMOTIONS` list in `export_lvgl.py` for a face) in one commit, draw the face or clip in
+`assets/gen/pixelgen.py`, regenerate, and run `test_tags`. The vocabulary is deliberately small (19 now, soft cap
+20); argue for an addition in `PLAN.md` first (the three tests: the model can pick it reliably, a child reads it on
+the face, it comes up weekly).
+
+### Change the trip card
+
+The card's fields are decided in three places that move together: `content/prompts/trip_card.md` (what the model
+is asked to write), `world_card.c` (parse, validate, serialise) and `test_world.c` / `test_life.c` (a fixture card
+and a scripted planner reply). The parent page (`content/web/index.html`, `/api/trip`) reads the same JSON. Dates
+are never the model's: `life` stamps `depart_date` / `return_date` / `id` / `generated_at`.
 
 ### Add a place pack
 
@@ -217,6 +232,7 @@ idf.py -B .derived_data/build -p /dev/cu.usbmodem83401 flash
 python3 tools/check_deps.py                   # module dependency rules (rules 2–4)
 python tools/dev/monitor.py --port /dev/cu.usbmodem83401 --reset --seconds 30 --grep app:,call:   # IDF's python has pyserial
 python tools/dev/serial_cmd.py --port /dev/cu.usbmodem83401 --times "stat" "ls /content/prompts"  # drive the device console
+python tools/dev/trip_walk.py --port /dev/cu.usbmodem83401     # a whole trip in minutes: card, pictures, diary, recap, the next card
 ```
 
 Host simulator and unit tests are a plain CMake project (not the IDF Linux target: macOS needs SDL on
@@ -231,6 +247,7 @@ GUGU_LIVE=1 ./host/build/gugu_tests                       # + live vendor tests 
 ./host/build/gugu_host [--scale 2]                        # the simulator: B/Y keys, mouse = touch, stdin = console
 ./host/build/gugu_host --replay test/fixtures/x.wav --turns 3 --quit-after 120000   # one call, N turns, exit
 python3 tools/dev/replay_report.py host/data              # P50/P90 of asr / first_token / first_tts / first_play / done
+python3 tools/dev/screenshots.py --out /tmp/gugu_shots     # every scene × four times of day, the play, the shake → index.html
 ```
 
 Secrets on the host come from the environment (`GUGU_MINIMAX_API_KEY`, …), conventionally sourced

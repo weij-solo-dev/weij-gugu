@@ -75,8 +75,10 @@ void wire_anthropic_event(wire_anthropic_t *w, const char *event, const char *da
         if (dt && !strcmp(dt, "text_delta")) {
             const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(d, "text"));
             if (t && *t && w->ev.on_delta) w->ev.on_delta(t, strlen(t), w->user);
-        }
-        // thinking_delta / signature_delta are not voiced
+        } else if (dt && !strcmp(dt, "thinking_delta")) {   // not voiced, but counted: a model that thinks long starves the reply of max_tokens
+            const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(d, "thinking"));
+            if (t) w->thinking_bytes += (uint32_t)strlen(t);
+        } else if (dt && strcmp(dt, "signature_delta")) snprintf(w->other_delta, sizeof w->other_delta, "%s", dt);
     } else if (!strcmp(type, "message_start")) {
         read_usage(w, cJSON_GetObjectItem(cJSON_GetObjectItem(j, "message"), "usage"));
     } else if (!strcmp(type, "message_delta")) {

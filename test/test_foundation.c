@@ -1,4 +1,6 @@
 #include "minitest.h"
+#include "foundation/motion.h"
+#include <math.h>
 #include "foundation/ringbuf.h"
 #include "foundation/strbuf.h"
 #include "foundation/sse.h"
@@ -86,8 +88,32 @@ TEST(test_atomic_file)
     remove(path); remove("/tmp/gugu_test_atomic.json.tmp");
 }
 
+TEST(test_motion_detector)
+{
+    motion_t m; motion_init(&m); int inten = 0; int shakes = 0, pickups = 0;
+    // at rest on the table for a second: nothing
+    for (int i = 0; i < 50; i++) { motion_event_t e = motion_feed(&m, 0.02f, -0.01f, 1.0f, i * 20, &inten); CHECK(e == MOTION_NONE); }
+    // a hard shake: |a| swings 0.3 .. 1.9 g at 5 Hz for a second
+    for (int i = 0; i < 50; i++) {
+        float t = (50 + i) * 20 / 1000.0f, s = sinf(2 * 3.14159f * 5 * t);
+        motion_event_t e = motion_feed(&m, 0.8f * s, 0.1f, 1.0f + 0.8f * s, (50 + i) * 20, &inten);
+        if (e == MOTION_SHAKE) shakes++;
+        CHECK(e != MOTION_PICKUP);
+    }
+    printf("  shakes reported in one second of rattling: %d (intensity %d)\n", shakes, inten);
+    CHECK(shakes >= 1 && shakes <= 4);        // at most once per ~300 ms while it goes on
+    CHECK(inten >= 40);
+    // calm again for two seconds, then a tilt: a pick-up, once
+    for (int i = 0; i < 100; i++) CHECK(motion_feed(&m, 0.02f, -0.01f, 1.0f, 2000 + i * 20, &inten) == MOTION_NONE);
+    for (int i = 0; i < 30; i++) if (motion_feed(&m, 0.6f, 0.1f, 0.75f, 4000 + i * 20, &inten) == MOTION_PICKUP) pickups++;
+    CHECK_EQ_INT(pickups, 1);
+    // gentle carrying (small wobble) is neither
+    for (int i = 0; i < 100; i++) { float w = 0.1f * sinf(i * 0.4f); CHECK(motion_feed(&m, 0.6f + w, 0.1f, 0.75f - w, 6000 + i * 20, &inten) == MOTION_NONE); }
+}
+
 void test_foundation(void)
 {
+    RUN(test_motion_detector);
     RUN(test_ringbuf_wraps);
     RUN(test_strbuf_json_escape);
     RUN(test_sse_split_chunks);

@@ -11,9 +11,14 @@ warm, slightly husky voice.
 
 [中文说明 → README_CN.md](README_CN.md)
 
-> Status: **prototype v1.0 under acceptance.** The full push-to-talk conversation runs end to end on the
-> StopWatch over home Wi-Fi against MiniMax in three languages (first sound P50 2.7 s, target 2 s) and in
-> the host simulator. The planning document and the full decision log live in [`PLAN.md`](PLAN.md) (Chinese).
+> Status: **v1.1 "the pigeon that goes out" is code-complete and awaiting the owner's acceptance** (v1.0, the
+> talking pigeon, runs on the device since 2026-11-03). v1.1 adds: a story engine that writes a **trip card** every
+> few days (a real place, a reason that follows from the last trip, the day plan, child-sized facts, a friend, a
+> souvenir, postcards) and a **journey log** Gugu remembers and can be asked about; pictures generated per trip and
+> turned into pixel art on the device (a backdrop with four times of day, keyed props, the friend); a touchable
+> object layer (lamp, window, props); the yellow key's whistle play; the walkie-talkie sounds; 19 expressions; the
+> IMU (shake → a bouncing ball, then dizzy, then cross; pick-up → a look). The planning document and the full
+> decision log live in [`PLAN.md`](PLAN.md) (Chinese).
 
 ## What makes it different
 
@@ -24,9 +29,15 @@ warm, slightly husky voice.
 - **A story that grows.** Gugu has a seed canon (a grandmother who gave it the little suitcase, animal
   friends in the cities it visits) and a slowly growing one: whatever it says out loud becomes true,
   one or two new facts a week, never contradicting itself.
+- **Its job is the mail.** Every few days the model plans a trip card: a letter to deliver in a real city
+  (or, now and then, a holiday or a visit to a relative), one to three nights, a plan for each day, five to
+  eight facts a four-year-old can hold, the animal friend there, the souvenir. Departure, arrival and the
+  return follow the real calendar; the picture follows the real sunrise and sunset where Gugu is. On a call
+  Gugu may only retell what the card says. Parents can read and delete the card.
 - **It remembers the child.** Names, friends, fears, new skills, brought up naturally days later.
 - **Parents see everything, without an account.** Every call transcript, postcard and memory is on
-  the device; a hotspot and a web page let a parent read, export or delete it.
+  the device; holding the yellow key for three seconds opens a hotspot and shows its name and password
+  on the screen, and a web page lets a parent read, export or delete everything.
 
 ## How it is built
 
@@ -35,9 +46,10 @@ The whole product is **firmware plus the AI vendors' APIs**. There is no server,
 ```text
  StopWatch (ESP32-S3, ESP-IDF C) ──TLS──▶ MiniMax · Alibaba Qwen · Volcengine
    ├─ push-to-talk call: ASR → LLM → expression tags → TTS, first sound ≤ 2 s
-   ├─ the pet's life: trip calendar, postcards, souvenirs, memory books, all on LittleFS
-   ├─ pixel-art home on a 466×466 round display, 13 expressions driven by the model
-   └─ parent mode: hotspot + captive portal + web page served by the device
+   ├─ the pet's life: model-planned trip cards, real-time calendar and sun, postcards, souvenirs, memory books, all on LittleFS
+   ├─ pixel-art home and generated places on a 466×466 round display, 19 expressions driven by the model
+   ├─ pictures per trip: image-01 → JPEG decoded and shrunk on the ESP32 → 116-grid palette art, four times of day
+   └─ parent mode: hotspot + web page served by the device: calls, the trip card, the three memory books
 ```
 
 - **Hardware:** M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB PSRAM, 466×466 AMOLED,
@@ -105,6 +117,7 @@ See [`CLAUDE.md`](CLAUDE.md) for the module rules and the full tool list.
 | M4 | The shell: idle behaviours, animation table, local sounds, keys — done |
 | M5 | Alternate vendors, config switching, cost ledger, minimal parent page — done (Bailian vendors compiled, not live-tested) |
 | M6 | Acceptance run: first sound ≤ 2 s, one voice across three languages, tag hit rate, resource headroom — device numbers in PLAN.md: first sound P50 2.67 s / P90 3.99 s (target 2 / 3), tags 10/10 valid, headroom steady but transiently low; voice blind test pending |
+| v1.1 | The pigeon that goes out: trip cards and the journey log (A, A2), the generated-art pipeline (C), the object layer (B), keys and sounds (E), the IMU (D), the screenshot and trip-walk self-tests (F) — code complete 2026-11-03, acceptance report in PLAN.md |
 
 ## License
 

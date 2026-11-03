@@ -11,6 +11,7 @@
 #include "board/board.h"
 #include "foundation/log.h"
 #include <stdlib.h>
+#include <math.h>
 
 static lv_obj_t *s_ring, *s_dot;
 static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
@@ -39,9 +40,41 @@ static void refresh_sprite(void)
     ui_show_base(base);
     ui_show_beak(beak);
     ui_show_eyes(eyes);
+    ui_scene_refresh_accessory(base == &spr_gugu_puff || base == &spr_gugu_puff_open ? UI_EMO_PUFF : base == &spr_gugu_wave || base == &spr_gugu_wave_open ? UI_EMO_WAVE : s_emotion);
 }
 
-void ui_anim_emotion_changed(ui_emotion_t e) { s_emotion = e; refresh_sprite(); }
+static void jitter_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 2 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 20)) / 32767); }
+static void sway_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 6 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 2)) / 32767); }
+static void x_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, GUGU_BASE_X); }
+static void wobble(lv_anim_exec_xcb_t exec, uint32_t ms)
+{
+    lv_anim_t a; lv_anim_init(&a);
+    lv_anim_set_var(&a, ui_gugu_img);
+    lv_anim_set_values(&a, 0, 360);
+    lv_anim_set_duration(&a, ms);
+    lv_anim_set_exec_cb(&a, exec);
+    lv_anim_set_completed_cb(&a, x_done);
+    lv_anim_start(&a);
+}
+static void bob(int32_t depth, uint32_t ms, uint32_t repeat);
+static void hop(int32_t height, uint32_t ms);
+static bool s_ball;
+
+// A change of mood is felt as well as seen: a small movement goes with the new face.
+void ui_anim_emotion_changed(ui_emotion_t e)
+{
+    s_emotion = e; refresh_sprite();
+    if (s_ball) return;
+    switch (e) {
+    case UI_EMO_LAUGHING: bob(2 * UI_SPRITE_SCALE, 110, 3); break;
+    case UI_EMO_HAPPY: case UI_EMO_PROUD: hop(5 * UI_SPRITE_SCALE, 260); break;
+    case UI_EMO_SURPRISED: hop(8 * UI_SPRITE_SCALE, 220); break;
+    case UI_EMO_SCARED: wobble(jitter_exec, 900); break;
+    case UI_EMO_DIZZY: wobble(sway_exec, 2000); break;
+    case UI_EMO_ANGRY: bob(3 * UI_SPRITE_SCALE, 120, 0); break;
+    default: break;
+    }
+}
 
 // ---- mouth: open when loud, 12 Hz decision so the beak flaps with syllables ----
 static void mouth_timer_cb(lv_timer_t *t)
@@ -89,6 +122,39 @@ void ui_set_idle(bool on)
 }
 
 // ---- one-shot actions ----
+static void bob_done(lv_anim_t *a);
+// a hop: up and back down along a half sine
+static void hop_exec(void *obj, int32_t v) { lv_obj_set_y(obj, rest_y() - v); }
+static void hop(int32_t height, uint32_t ms)
+{
+    lv_anim_t a; lv_anim_init(&a);
+    lv_anim_set_var(&a, ui_gugu_img);
+    lv_anim_set_values(&a, 0, height);
+    lv_anim_set_duration(&a, ms / 2); lv_anim_set_playback_duration(&a, ms / 2);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&a, hop_exec);
+    lv_anim_set_completed_cb(&a, bob_done);
+    lv_anim_start(&a);
+}
+// a loop around the window: the pigeon (wings up) follows a circle and lands back on its spot
+static void fly_exec(void *obj, int32_t v)
+{
+    int32_t cx = GUGU_BASE_X, cy = rest_y(), r = 36 * UI_SPRITE_SCALE;
+    int32_t s = lv_trigo_sin((int16_t)v), c = lv_trigo_cos((int16_t)v);
+    lv_obj_set_pos(obj, cx - r * s / 32767, cy - r * (32767 - c) / 32767 / 2);
+}
+static void fly_done(lv_anim_t *a) { (void)a; lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y()); s_wave_until = 0; refresh_sprite(); }
+static void fly(uint32_t ms)
+{
+    s_wave_until = lv_tick_get() + ms; refresh_sprite();
+    lv_anim_t a; lv_anim_init(&a);
+    lv_anim_set_var(&a, ui_gugu_img);
+    lv_anim_set_values(&a, 0, 360);
+    lv_anim_set_duration(&a, ms);
+    lv_anim_set_exec_cb(&a, fly_exec);
+    lv_anim_set_completed_cb(&a, fly_done);
+    lv_anim_start(&a);
+}
 static void bob_exec(void *obj, int32_t v) { lv_obj_set_y(obj, rest_y() + v); }
 static void bob_done(lv_anim_t *a) { (void)a; lv_obj_set_y(ui_gugu_img, rest_y()); }
 static void bob(int32_t depth, uint32_t ms, uint32_t repeat)
@@ -108,6 +174,9 @@ void ui_play_action(ui_action_t a)
     case UI_ACT_WAVE: s_wave_until = lv_tick_get() + 900; refresh_sprite(); break;
     case UI_ACT_PUFF: s_puff_until = lv_tick_get() + 1500; refresh_sprite(); break;
     case UI_ACT_COO: case UI_ACT_WHISTLE: bob(UI_SPRITE_SCALE, 90, 0); break;   // a quick squash; the sound is the caller's
+    case UI_ACT_PECK: bob(3 * UI_SPRITE_SCALE, 110, 1); break;                    // two quick dips
+    case UI_ACT_JUMP: hop(10 * UI_SPRITE_SCALE, 320); break;
+    case UI_ACT_FLY: fly(1400); break;
     }
     ui_unlock();
 }
@@ -133,6 +202,67 @@ void ui_set_listening(bool on)
         lv_obj_add_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
     }
     ui_unlock();
+}
+
+// ---- the ball: a timer moves the puffed-up pigeon inside the circle, reflecting it off the rim ----
+static lv_timer_t *s_ball_timer; static float s_bx, s_by, s_bvx, s_bvy;
+#define BALL_R   (24 * UI_SPRITE_SCALE)         // half the puffed sprite, roughly
+#define WIN_R    (BOARD_DISPLAY_W / 2)
+
+static void ball_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_bx += s_bvx; s_by += s_bvy;
+    float dx = s_bx - WIN_R, dy = s_by - WIN_R, d = sqrtf(dx * dx + dy * dy), lim = (float)(WIN_R - BALL_R);
+    if (d > lim) {                               // reflect the velocity about the rim's normal, nudge back inside
+        float nx = dx / d, ny = dy / d, dot = s_bvx * nx + s_bvy * ny;
+        s_bvx -= 2 * dot * nx; s_bvy -= 2 * dot * ny;
+        s_bx = WIN_R + nx * (lim - 1); s_by = WIN_R + ny * (lim - 1);
+        s_bvx *= 0.96f; s_bvy *= 0.96f;
+        board_vibrate(18);
+    }
+    lv_obj_set_pos(ui_gugu_img, (int)s_bx - BALL_R, (int)s_by - BALL_R);
+}
+
+void ui_bounce_start(void)
+{
+    ui_lock();
+    if (!s_ball) {
+        s_ball = true;
+        s_puff_until = 0xFFFFFFFFu; refresh_sprite();
+        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R; s_bvx = 9; s_bvy = -11;
+        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, 25, NULL);
+        lv_timer_resume(s_ball_timer);
+    }
+    ui_unlock();
+}
+
+void ui_bounce_kick(int intensity)
+{
+    ui_lock();
+    if (s_ball) {
+        float k = 1.0f + intensity / 255.0f, sp = sqrtf(s_bvx * s_bvx + s_bvy * s_bvy);
+        if (sp < 1) { s_bvx = 9; s_bvy = -11; sp = 14; }
+        float target = 12 * k; if (target > 22) target = 22;
+        s_bvx = s_bvx / sp * target; s_bvy = s_bvy / sp * target;
+        s_bvx += (lv_rand(0, 6) - 3); s_bvy += (lv_rand(0, 6) - 3);
+    }
+    ui_unlock();
+}
+
+bool ui_bounce_stop(void)
+{
+    ui_lock();
+    bool was = s_ball;
+    if (s_ball) {
+        s_ball = false;
+        lv_timer_pause(s_ball_timer);
+        s_puff_until = 0;
+        lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y());
+        refresh_sprite();
+    }
+    ui_unlock();
+    return was;
 }
 
 void ui_anim_init(lv_obj_t *scr)

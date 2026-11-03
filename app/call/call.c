@@ -31,7 +31,7 @@ static int64_t s_t5_first_play;
 static engine_timing_t s_last_timing;
 static mind_tag_t s_seg_emotion[32];
 static bool s_seg_marker_pending[32];
-static atomic_int s_turns_done, s_turns_failed;
+static atomic_int s_turns_done, s_turns_failed, s_turns_empty;   // empty: the key was held but no words were heard
 static call_state_cb s_state_cb; static void *s_state_user;
 
 const char *call_state_name(call_state_t s)
@@ -40,13 +40,21 @@ const char *call_state_name(call_state_t s)
     return s <= CALL_ENDED ? N[s] : "?";
 }
 
+// The ring is on whenever the key is held and the microphone is being recorded: while the line is still
+// opening (the audio goes to the pre-roll) as well as while listening.
+static void update_ring(void)
+{
+    call_state_t st = (call_state_t)atomic_load(&s_state);
+    ui_set_listening(atomic_load(&s_blue_down) && (st == CALL_CONNECTING || st == CALL_LISTENING));
+}
+
 static void set_state(call_state_t s)
 {
     call_state_t old = (call_state_t)atomic_exchange(&s_state, s);
     if (old != s) {
         LOGI("state %s -> %s", call_state_name(old), call_state_name(s));
         if (s == CALL_WAITING) s_waiting_since = clock_us();
-        ui_set_listening(s == CALL_LISTENING);
+        update_ring();
         if (s_state_cb) s_state_cb(s, s_state_user);
     }
 }
@@ -60,6 +68,7 @@ static ui_emotion_t emotion_of(mind_tag_t t)
     case TAG_HAPPY: return UI_EMO_HAPPY; case TAG_LAUGHING: return UI_EMO_LAUGHING; case TAG_SURPRISED: return UI_EMO_SURPRISED;
     case TAG_CURIOUS: return UI_EMO_CURIOUS; case TAG_SHY: return UI_EMO_SHY; case TAG_SAD: return UI_EMO_SAD;
     case TAG_SLEEPY: return UI_EMO_SLEEPY; case TAG_PUFF: return UI_EMO_PUFF; case TAG_WAVE: return UI_EMO_WAVE;
+    case TAG_ANGRY: return UI_EMO_ANGRY; case TAG_SCARED: return UI_EMO_SCARED; case TAG_PROUD: return UI_EMO_PROUD; case TAG_DIZZY: return UI_EMO_DIZZY;
     default: return UI_EMO_NEUTRAL;
     }
 }
@@ -78,6 +87,18 @@ static void flush_preroll(void)
     int16_t buf[320];
     size_t got;
     while ((got = ringbuf_read(&s_preroll, buf, sizeof buf)) > 0) engine_on_audio(s_engine, buf, got / 2);
+}
+
+// The key is up and the utterance is complete: hand it to the engine.
+static void start_turn(void)
+{
+    audio_capture_stats_t cs; audio_capture_stats(&cs);
+    LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
+    atomic_store(&s_turn_active, true);
+    set_state(CALL_THINKING);
+    ui_set_emotion(UI_EMO_CURIOUS);
+    audio_sfx_play("static");                                      // the walkie-talkie: over, the answer is on its way
+    engine_on_release(s_engine, NULL);
 }
 
 // ---- speaker markers → face ----
@@ -133,6 +154,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         if (call_state() == CALL_CONNECTING) {
             flush_preroll();
             if (atomic_load(&s_blue_down)) set_state(CALL_LISTENING);   // s_captured keeps the pre-roll count
+            else if (atomic_load(&s_captured) >= AUDIO_SAMPLE_RATE / 5) start_turn();   // spoke and let go before the line was open
             else set_state(CALL_WAITING);
         }
         break;
@@ -146,6 +168,8 @@ void call_engine_event(const engine_event_t *ev, void *user)
         case TAG_PUFF: ui_play_action(UI_ACT_PUFF); break;
         case TAG_COO: audio_sfx_play("coo"); ui_play_action(UI_ACT_COO); break;
         case TAG_WHISTLE: audio_sfx_play("whistle"); ui_play_action(UI_ACT_WHISTLE); break;
+        case TAG_PECK: audio_sfx_play("tap"); ui_play_action(UI_ACT_PECK); break;
+        case TAG_JUMP: audio_sfx_play("pop"); ui_play_action(UI_ACT_JUMP); break;
         default: break;
         }
         break;
@@ -168,6 +192,14 @@ void call_engine_event(const engine_event_t *ev, void *user)
         atomic_store(&s_turn_active, false);
         if (call_state() == CALL_THINKING) set_state(CALL_SPEAKING);   // audio still draining
         break;
+    case ENGINE_EV_NOTHING_HEARD:                 // held the key, said nothing audible: a soft "coo?" and a head tilt
+        LOGI("nothing heard");
+        atomic_fetch_add(&s_turns_empty, 1);
+        atomic_store(&s_turn_active, false);
+        audio_sfx_play("coo");
+        ui_set_emotion(UI_EMO_CURIOUS);
+        if (call_state() == CALL_THINKING) set_state(CALL_WAITING);
+        break;
     case ENGINE_EV_ERROR:
         LOGW("engine error at %s: %s", ev->u.error.stage, ev->u.error.err.message);
         atomic_fetch_add(&s_turns_failed, 1);
@@ -189,6 +221,7 @@ static void dial(void)
     s_call_t0 = clock_us();
     ringbuf_clear(&s_preroll);
     atomic_store(&s_captured, 0);
+    s_t5_first_play = 0;
     set_state(CALL_CONNECTING);
     audio_sfx_play("dial");
     audio_capture_start(capture_cb, NULL);
@@ -213,25 +246,23 @@ void call_key(call_key_t key, bool down, int held_ms)
             s_t5_first_play = 0;
             atomic_store(&s_captured, 0);
             audio_capture_start(capture_cb, NULL);
+            audio_sfx_play("beep");                                // the walkie-talkie: your turn
             set_state(CALL_LISTENING);
             break;
         default: break;
         }
-    } else {
-        if (st == CALL_LISTENING) {
-            audio_capture_stop();
-            if (atomic_load(&s_captured) < AUDIO_SAMPLE_RATE / 5) {   // a tap shorter than 200 ms: nothing to send
-                set_state(CALL_WAITING);
-                return;
-            }
-            atomic_store(&s_turn_active, true);
-            set_state(CALL_THINKING);
-            ui_set_emotion(UI_EMO_CURIOUS);
-            engine_on_release(s_engine, NULL);
-        } else if (st == CALL_CONNECTING) {
-            audio_capture_stop();   // the utterance is in the pre-roll; it is sent when READY arrives and the key is up
+    } else if (st == CALL_LISTENING) {
+        audio_capture_stop();
+        if (atomic_load(&s_captured) >= AUDIO_SAMPLE_RATE / 5) start_turn();
+        else {                                                     // a tap shorter than 200 ms: nothing to send
+            audio_capture_stats_t cs; audio_capture_stats(&cs);
+            LOGI("release after %u ms of audio: too short, nothing sent", (unsigned)cs.ms);
+            set_state(CALL_WAITING);
         }
+    } else if (st == CALL_CONNECTING) {
+        audio_capture_stop();   // the utterance stays in the pre-roll; READY sends it (a bare tap just opens the line)
     }
+    update_ring();
 }
 
 void call_hangup(void)
@@ -242,9 +273,10 @@ void call_hangup(void)
     engine_end_call(s_engine);
     audio_play_flush();
     char summary[96];
-    snprintf(summary, sizeof summary, "{\"turns_ok\":%d,\"turns_failed\":%d,\"seconds\":%lld}", atomic_load(&s_turns_done), atomic_load(&s_turns_failed), (long long)((clock_us() - s_call_t0) / 1000000));
+    snprintf(summary, sizeof summary, "{\"turns_ok\":%d,\"turns_failed\":%d,\"turns_empty\":%d,\"seconds\":%lld}", atomic_load(&s_turns_done),
+             atomic_load(&s_turns_failed), atomic_load(&s_turns_empty), (long long)((clock_us() - s_call_t0) / 1000000));
     store_call_end(&s_log, summary);
-    atomic_store(&s_turns_done, 0); atomic_store(&s_turns_failed, 0);
+    atomic_store(&s_turns_done, 0); atomic_store(&s_turns_failed, 0); atomic_store(&s_turns_empty, 0);
     ui_set_emotion(UI_EMO_NEUTRAL);
     set_state(CALL_IDLE);
 }
@@ -278,6 +310,17 @@ esp_err_t call_init(engine_t *engine, const call_config_t *cfg)
     return ESP_OK;
 }
 
+static esp_err_t wait_turn(int64_t since, uint32_t timeout_ms, int done_before, int failed_before, int empty_before)
+{
+    while (clock_us() - since < (int64_t)timeout_ms * 1000) {
+        clock_sleep_ms(50);
+        if (atomic_load(&s_turns_failed) > failed_before) return ESP_FAIL;
+        if (atomic_load(&s_turns_empty) > empty_before) return ESP_ERR_NOT_FOUND;   // nothing heard
+        if (atomic_load(&s_turns_done) > done_before && call_state() == CALL_WAITING) return ESP_OK;
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
 esp_err_t call_replay_wav(const char *path, uint32_t timeout_ms)
 {
     int64_t t0 = clock_us();
@@ -290,7 +333,7 @@ esp_err_t call_replay_wav(const char *path, uint32_t timeout_ms)
         while (call_state() != CALL_WAITING && call_state() != CALL_IDLE && clock_us() - t0 < 30 * 1000000LL) clock_sleep_ms(50);
         if (call_state() != CALL_WAITING) { LOGE("replay: call did not connect (%s)", call_state_name(call_state())); return ESP_FAIL; }
     }
-    int done_before = atomic_load(&s_turns_done), failed_before = atomic_load(&s_turns_failed);
+    int done_before = atomic_load(&s_turns_done), failed_before = atomic_load(&s_turns_failed), empty_before = atomic_load(&s_turns_empty);
     int64_t ta = clock_us();
     call_key(CALL_KEY_BLUE, true, 0);
     int64_t tb = clock_us();
@@ -300,10 +343,17 @@ esp_err_t call_replay_wav(const char *path, uint32_t timeout_ms)
     int64_t t1 = clock_us();
     LOGI("replay: press %lld ms, inject %lld ms, release %lld ms", (long long)((tb - ta) / 1000), (long long)((tc - tb) / 1000), (long long)((t1 - tc) / 1000));
     if (err != ESP_OK) return err;
-    while (clock_us() - t1 < (int64_t)timeout_ms * 1000) {
-        clock_sleep_ms(50);
-        if (atomic_load(&s_turns_failed) > failed_before) return ESP_FAIL;
-        if (atomic_load(&s_turns_done) > done_before && call_state() == CALL_WAITING) return ESP_OK;
-    }
-    return ESP_ERR_TIMEOUT;
+    return wait_turn(t1, timeout_ms, done_before, failed_before, empty_before);
+}
+
+esp_err_t call_replay_wav_early(const char *path, uint32_t timeout_ms)
+{
+    if (call_state() != CALL_IDLE) return ESP_ERR_INVALID_STATE;
+    int done_before = atomic_load(&s_turns_done), failed_before = atomic_load(&s_turns_failed), empty_before = atomic_load(&s_turns_empty);
+    call_key(CALL_KEY_BLUE, true, 0);                 // dial, speak into the pre-roll and let go while the line is still opening
+    esp_err_t err = audio_capture_inject_wav(path, false);
+    call_key(CALL_KEY_BLUE, false, 500);
+    LOGI("replay early: released while %s", call_state_name(call_state()));
+    if (err != ESP_OK) return err;
+    return wait_turn(clock_us(), timeout_ms, done_before, failed_before, empty_before);
 }

@@ -101,11 +101,22 @@ size_t audio_pull(int16_t *out, size_t samples)
 }
 
 // ---- capture side ----
+static atomic_uint s_cap_samples; static atomic_int s_cap_peak; static atomic_uint_fast64_t s_cap_sq;
+
 esp_err_t audio_capture_start(audio_capture_cb cb, void *user)
 {
     s_cap_user = user; s_cap_cb = cb;
+    atomic_store(&s_cap_samples, 0); atomic_store(&s_cap_peak, 0); atomic_store(&s_cap_sq, 0);
     atomic_store(&s_cap_active, true);
     return audio_platform_capture(true);
+}
+
+void audio_capture_stats(audio_capture_stats_t *out)
+{
+    unsigned n = atomic_load(&s_cap_samples); uint64_t sq = atomic_load(&s_cap_sq);
+    out->ms = (uint32_t)((uint64_t)n * 1000 / AUDIO_SAMPLE_RATE);
+    out->peak = atomic_load(&s_cap_peak);
+    out->rms = n ? (int)__builtin_sqrt((double)(sq / n)) : 0;
 }
 
 void audio_capture_stop(void)
@@ -121,7 +132,15 @@ static atomic_bool s_injecting;   // a replay is standing in for the microphone:
 static void deliver_capture(const int16_t *pcm, size_t samples)
 {
     audio_capture_cb cb = s_cap_cb;
-    if (atomic_load(&s_cap_active) && cb) cb(pcm, samples, s_cap_user);
+    if (!atomic_load(&s_cap_active) || !cb) return;
+    int peak = atomic_load(&s_cap_peak); uint64_t sq = 0;
+    for (size_t i = 0; i < samples; i++) {
+        int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+        if (v > peak) peak = v;
+        sq += (uint64_t)((int32_t)pcm[i] * pcm[i]);
+    }
+    atomic_store(&s_cap_peak, peak); atomic_fetch_add(&s_cap_sq, sq); atomic_fetch_add(&s_cap_samples, (unsigned)samples);
+    cb(pcm, samples, s_cap_user);
 }
 
 void audio_push_capture(const int16_t *pcm, size_t samples)

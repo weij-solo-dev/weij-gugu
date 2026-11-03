@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "provider/provider.h"
+#include "world/world.h"
 #include "mind_tags.h"
 
 typedef struct {
@@ -31,6 +32,7 @@ esp_err_t mind_prompt_build(mind_prompt_t *out, lang_t reply_lang, const char *w
 void   mind_dialog_reset(void);
 void   mind_dialog_add(const char *role, const char *text);
 size_t mind_dialog_messages(chat_message_t *out, size_t cap);   // oldest first
+const char *mind_dialog_last_user(void);                       // what the child just said, or NULL
 
 // ---- language policy ----
 lang_t mind_reply_lang(lang_t asr_lang, const char *transcript);
@@ -40,3 +42,27 @@ char  *mind_normalize_transcript(char *text);
 
 // ---- mood baseline (v1.0: a fixed sentence per time of day) ----
 const char *mind_mood_sentence(void);
+
+// ---- the trip card: life asks the model for the next trip with this request; world keeps the answer ----
+typedef struct {
+    chat_block_t blocks[2];   // persona + canon; the planning task and the card's schema (content/prompts/trip_card.md)
+    size_t count;
+    const char *user;         // the request for this particular trip: date, home, hints, places already visited
+} mind_trip_request_t;
+esp_err_t mind_trip_request_build(mind_trip_request_t *out, const char *kind_hint, const char *place_hint,
+                                  const char *depart_date, int nights_hint, const char *recent_places, const char *journey);
+// The recap of the trip just finished (content/prompts/trip_recap.md); `days_text` is the journey's day entries for it.
+esp_err_t mind_recap_request_build(mind_trip_request_t *out, const char *days_text);
+
+// ---- the three memory books (mind_memory.c): the journey log and the two lists the extraction will fill ----
+typedef enum { JOURNEY_PLANNED = 0, JOURNEY_DAY, JOURNEY_RETURNED } journey_kind_t;
+esp_err_t mind_journey_add(journey_kind_t k, const world_trip_t *t, const char *date, int day, const char *text, const char (*hooks)[160], int n_hooks);
+size_t    mind_journey_recent(char *dst, size_t cap, int trips);          // the last `trips` recaps, this trip's days so far, open hooks
+size_t    mind_journey_days_text(const char *trip_id, char *dst, size_t cap);
+size_t    mind_journey_match(const char *utterance, char *dst, size_t cap, int max);   // entries whose place or friend the child named
+bool      mind_journey_has(journey_kind_t k, const char *trip_id, const char *date);   // date may be NULL
+esp_err_t mind_journey_forget(const char *trip_id);
+size_t    mind_book_text(const char *book, char *dst, size_t cap);       // "about_child" | "canon_grown", one line per entry
+esp_err_t mind_book_forget(const char *book, int index);
+size_t    mind_calls_digest(const char *date, char *dst, size_t cap);    // what the child and Gugu said that day, short
+void      mind_utf8_cut(char *s, size_t max_bytes);

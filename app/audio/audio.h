@@ -18,6 +18,9 @@ void      audio_capture_stop(void);
 bool      audio_capture_active(void);
 // Test / replay: feed a 16 kHz mono WAV through the capture callback as if it were the microphone.
 esp_err_t audio_capture_inject_wav(const char *path, bool realtime);
+// What the capture callback has received since the last audio_capture_start(): duration, peak and RMS.
+typedef struct { uint32_t ms; int peak; int rms; } audio_capture_stats_t;
+void      audio_capture_stats(audio_capture_stats_t *out);
 
 // ---- playback ----
 esp_err_t audio_play_pcm(const int16_t *pcm, size_t samples);     // copies into the playback ring

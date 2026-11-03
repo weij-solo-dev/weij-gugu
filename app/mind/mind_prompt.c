@@ -14,7 +14,7 @@ static char *s_persona, *s_canon, *s_tags, *s_today_tpl;
 static char *s_examples[4];          // indexed by lang_t
 static char s_child_name[32] = "小朋友";
 static int s_child_age_months;
-MEM_BIG_BSS static char s_block_a[6144], s_block_a2[2048], s_block_b[512], s_block_c[768];
+MEM_BIG_BSS static char s_block_a[6144], s_block_a2[2048], s_block_b[8192], s_block_c[1024];
 
 static char *load(const char *dir, const char *rel)
 {
@@ -31,6 +31,8 @@ esp_err_t mind_prompt_load(const char *content_dir)
     s_canon = load(content_dir, "canon_seed.md");
     s_tags = load(content_dir, "tags.md");
     s_today_tpl = load(content_dir, "today.md");
+    mind_trip_tpl = load(content_dir, "trip_card.md");
+    mind_recap_tpl = load(content_dir, "trip_recap.md");
     s_examples[LANG_ZH] = load(content_dir, "examples/zh.md");
     s_examples[LANG_YUE] = load(content_dir, "examples/yue.md");
     s_examples[LANG_EN] = load(content_dir, "examples/en.md");
@@ -42,6 +44,8 @@ void mind_set_child(const char *name, int age_months)
     if (name && *name) snprintf(s_child_name, sizeof s_child_name, "%s", name);
     s_child_age_months = age_months;
 }
+
+const char *mind_child_name(void) { return s_child_name; }
 
 // Replace {key} occurrences; unknown keys are left as-is. Pairs: key, value, key, value, …, NULL.
 void mind_fill(char *dst, size_t cap, const char *tpl, const char *const *pairs)
@@ -81,23 +85,44 @@ const char *mind_mood_sentence(void)
     return "你今天心情不错。";
 }
 
+// A: persona + seed canon + tag vocabulary (stable for months); the trip planner shares it
+const char *mind_block_a(void)
+{
+    const char *const pairs_a[] = { "child_name", s_child_name, NULL };
+    MEM_BIG_BSS static char persona[4096]; mind_fill(persona, sizeof persona, s_persona ? s_persona : "", pairs_a);
+    snprintf(s_block_a, sizeof s_block_a, "%s\n\n【设定集】\n%s\n\n【表情标签】\n%s", persona, s_canon ? s_canon : "", s_tags ? s_tags : "");
+    return s_block_a;
+}
+
 esp_err_t mind_prompt_build(mind_prompt_t *out, lang_t reply_lang, const char *where, const char *events)
 {
     if (!s_persona) return ESP_ERR_INVALID_STATE;
     char age[64] = "";
     if (s_child_age_months > 0) snprintf(age, sizeof age, "，%u 岁%s", (unsigned)(s_child_age_months / 12) % 100u, (s_child_age_months % 12) >= 6 ? "半" : "");
-    const char *const pairs_a[] = { "child_name", s_child_name, NULL };
-    // A: persona + seed canon + tag vocabulary (stable for months)
-    MEM_BIG_BSS static char persona[4096]; mind_fill(persona, sizeof persona, s_persona, pairs_a);
-    snprintf(s_block_a, sizeof s_block_a, "%s\n\n【设定集】\n%s\n\n【表情标签】\n%s", persona, s_canon ? s_canon : "", s_tags ? s_tags : "");
+    mind_block_a();
     // A2: examples in the reply language (stable per language)
     const char *ex = (reply_lang > LANG_UNKNOWN && reply_lang <= LANG_YUE && s_examples[reply_lang]) ? s_examples[reply_lang] : s_examples[LANG_ZH];
     const char *lang_line = reply_lang == LANG_YUE ? "这一通电话孩子在说粤语，你用口语粤语回答。" :
                             reply_lang == LANG_EN ? "The child is speaking English on this call; answer in simple English." :
                             "这一通电话孩子在说普通话，你用普通话回答。";
     snprintf(s_block_a2, sizeof s_block_a2, "%s\n\n【对话示例】\n%s", lang_line, ex ? ex : "");
-    // B: memory books (empty until milestone 3)
-    snprintf(s_block_b, sizeof s_block_b, "【你记得的事】\n（还没有，这是你们最早的几次聊天。）");
+    // B: the three memory books and the trip card. Stable for a day at a time (cached), except the last part:
+    // journey entries the child's latest words point at.
+    {
+        size_t o = (size_t)snprintf(s_block_b, sizeof s_block_b, "【你记得的事】\n");
+        size_t n = mind_book_text("about_child", s_block_b + o, sizeof s_block_b - o); o += strlen(s_block_b + o);
+        if (!n) o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "（还没有，这是你们最早的几次聊天。）\n");
+        o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "\n【设定集 · 后来知道的】\n");
+        n = mind_book_text("canon_grown", s_block_b + o, sizeof s_block_b - o); o += strlen(s_block_b + o);
+        if (!n) o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "（还没有。）\n");
+        o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "\n");
+        mind_trip_block(s_block_b + o, sizeof s_block_b - o); o += strlen(s_block_b + o);
+        o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "\n");
+        mind_journey_recent(s_block_b + o, sizeof s_block_b - o, 3); o += strlen(s_block_b + o);
+        o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "故事里的事只能照上面说，真实世界的事只能照趟卡说；孩子提到你不记得的名字或地方，就说\"咕，我不记得了\"，不要编。\n");
+        const char *said = mind_dialog_last_user();
+        if (said && o + 1 < sizeof s_block_b) { o += (size_t)snprintf(s_block_b + o, sizeof s_block_b - o, "\n"); mind_journey_match(said, s_block_b + o, sizeof s_block_b - o, 3); }
+    }
     // C: today
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     char date[40], weekday[16];
@@ -105,6 +130,8 @@ esp_err_t mind_prompt_build(mind_prompt_t *out, lang_t reply_lang, const char *w
     snprintf(date, sizeof date, "%u年%u月%u日", (unsigned)(tm.tm_year + 1900) % 10000u, (unsigned)(tm.tm_mon + 1) % 100u, (unsigned)tm.tm_mday % 100u);
     snprintf(weekday, sizeof weekday, "%s", WD[tm.tm_wday]);
     char age_phrase[64]; memcpy(age_phrase, age, sizeof age); age_phrase[sizeof age - 1] = 0;
+    char where_buf[240];
+    if (!where) { mind_where_sentence(where_buf, sizeof where_buf); where = where_buf; }   // the world knows where Gugu is
     const char *const pairs_c[] = { "date", date, "weekday", weekday, "daypart", daypart(tm.tm_hour), "child_name", s_child_name,
                                     "age_phrase", age_phrase, "where", where ? where : "在家里", "mood", mind_mood_sentence(),
                                     "events", events ? events : "", NULL };

@@ -1,6 +1,14 @@
 #include "minitest.h"
 #include "mind/mind.h"
+#include "world/world.h"
+#include "store/store.h"
+#include "foundation/mem.h"
+#include "foundation/atomic_file.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#define TEST_DATA GUGU_REPO_ROOT "/host/build/test_data"
 
 TEST(test_mind_prompt_blocks)
 {
@@ -40,9 +48,63 @@ TEST(test_mind_language_and_normalize)
     CHECK_EQ_STR(mind_normalize_transcript(t), "你好呀我是咕咕今天我去啦公园");
 }
 
+static const char *MCARD =
+    "{\"id\":\"t-m1\",\"kind\":\"deliver\",\"place\":{\"name\":\"北京\",\"country\":\"中国\",\"lat\":39.9,\"lon\":116.4,\"tz_offset_min\":480},"
+    "\"reason\":\"给小花送信\",\"depart_date\":\"2026-11-01\",\"return_date\":\"2026-11-03\",\"nights\":2,\"facts\":[\"a\",\"b\",\"c\"],\"friend\":{\"name\":\"小花\",\"animal\":\"喜鹊\"}}";
+MEM_BIG_BSS static world_trip_t s_mcard;
+
+TEST(test_mind_memory_books)
+{
+    store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .child_age_months = 42, .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
+    CHECK(mind_init(&cfg) == ESP_OK);
+    char p[300]; snprintf(p, sizeof p, "%s/memory/journey.jsonl", TEST_DATA); remove(p);
+    char why[96];
+    CHECK(world_trip_from_json(MCARD, strlen(MCARD), &s_mcard, why, sizeof why));
+    static char buf[4096];
+    CHECK_EQ_INT(mind_journey_recent(buf, sizeof buf, 3), 0);
+    CHECK(strstr(buf, "还没出过门") != NULL);
+    CHECK(mind_journey_add(JOURNEY_PLANNED, &s_mcard, "2026-10-31", 0, "给小花送信。这是第一趟。", s_mcard.hooks, 0) == ESP_OK);
+    CHECK(mind_journey_add(JOURNEY_DAY, &s_mcard, "2026-11-01", 1, "到北京了，见到小花。", NULL, 0) == ESP_OK);
+    char hooks[2][160] = { "小花约我春天再来看玉兰花", "" };
+    CHECK(mind_journey_add(JOURNEY_RETURNED, &s_mcard, "2026-11-03", 0, "这趟去北京给小花送信，见到了天坛。", hooks, 1) == ESP_OK);
+    CHECK_EQ_INT(mind_journey_recent(buf, sizeof buf, 3), 1);
+    CHECK(strstr(buf, "11月1日到11月3日去北京送信：这趟去北京") != NULL);
+    CHECK(strstr(buf, "还没兑现的线头：小花约我春天再来看玉兰花") != NULL);
+    CHECK(strstr(buf, "第 1 天") == NULL);                 // no current card: the day lines belong to a trip in progress only
+    CHECK_EQ_INT(mind_journey_days_text("t-m1", buf, sizeof buf), 1);
+    CHECK(strstr(buf, "第 1 天（2026-11-01）：到北京了") != NULL);
+    CHECK_EQ_INT(mind_journey_match("你还记得小花吗", buf, sizeof buf, 3), 1);
+    CHECK(strstr(buf, "【你想起来的事】") != NULL && strstr(buf, "北京") != NULL);
+    CHECK_EQ_INT(mind_journey_match("今天天气真好", buf, sizeof buf, 3), 0);
+    CHECK(mind_journey_has(JOURNEY_RETURNED, "t-m1", NULL));
+    CHECK(mind_journey_has(JOURNEY_DAY, "t-m1", "2026-11-01"));
+    CHECK(!mind_journey_has(JOURNEY_DAY, "t-m1", "2026-11-02"));
+    // the two lists: empty files exist, entries read as lines, forgetting by index
+    CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 0);
+    snprintf(p, sizeof p, "%s/memory/about_child.json", TEST_DATA);
+    const char *two = "[{\"text\":\"小满怕打雷\",\"date\":\"2026-11-02\"},{\"text\":\"小满有个好朋友叫豆豆\",\"date\":\"2026-11-02\"}]";
+    CHECK(atomic_file_write(p, two, strlen(two)));
+    CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 2);
+    CHECK(strstr(buf, "豆豆") != NULL);
+    CHECK(mind_book_forget("about_child", 0) == ESP_OK);
+    CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 1);
+    CHECK(strstr(buf, "怕打雷") == NULL);
+    CHECK(mind_book_forget("about_child", 5) == ESP_ERR_NOT_FOUND);
+    atomic_file_write(p, "[]", 2);
+    // forgetting a trip removes every entry of it
+    CHECK(mind_journey_forget("t-m1") == ESP_OK);
+    CHECK(!mind_journey_has(JOURNEY_RETURNED, "t-m1", NULL));
+    CHECK_EQ_INT(mind_journey_recent(buf, sizeof buf, 3), 0);
+    // UTF-8 safe cuts
+    char s[] = "你好世界"; mind_utf8_cut(s, 7); CHECK_EQ_STR(s, "你好");
+    char e[] = "hello"; mind_utf8_cut(e, 10); CHECK_EQ_STR(e, "hello");
+}
+
 void test_mind(void)
 {
     RUN(test_mind_prompt_blocks);
     RUN(test_mind_dialog_ring);
     RUN(test_mind_language_and_normalize);
+    RUN(test_mind_memory_books);
 }

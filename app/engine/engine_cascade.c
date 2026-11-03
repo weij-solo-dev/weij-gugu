@@ -131,7 +131,7 @@ static void fail(cascade_t *c, const char *stage, const provider_error_t *err)
 
 static void run_turn(cascade_t *c, const char *events)
 {
-    const provider_vtable_t *vasr = provider_for(PROVIDER_ROLE_ASR), *vchat = provider_for(PROVIDER_ROLE_CHAT), *vtts = provider_for(PROVIDER_ROLE_TTS);
+    const provider_vtable_t *vasr = provider_for(PROVIDER_ROLE_ASR), *vchat = provider_for(PROVIDER_ROLE_CHAT);
     memset(&c->t, 0, sizeof c->t); c->t.t0_release = clock_us();
     c->transcript[0] = '\0'; c->asr_failed = c->chat_failed = c->chat_done = false;
     strbuf_clear(&c->reply); strbuf_clear(&c->seg_text);
@@ -145,8 +145,9 @@ static void run_turn(cascade_t *c, const char *events)
     if (atomic_load(&c->abort)) return;
     if (c->asr_failed) { fail(c, "asr", &c->asr_err); return; }
     mind_normalize_transcript(c->transcript);
-    if (c->transcript[0] == '\0') {
-        provider_error_t e; provider_error_set(&e, PERR_OTHER, 200, 0, "empty transcript"); fail(c, "asr", &e); return;
+    if (c->transcript[0] == '\0') {                       // silence, a breath, a tap: nothing to answer, not a failure
+        LOGI("nothing heard in %u ms of audio", (unsigned)c->u_asr.audio_ms);
+        engine_event_t nh = { .kind = ENGINE_EV_NOTHING_HEARD }; emit(c, &nh); return;
     }
     c->reply_lang = mind_reply_lang(c->reply_lang, c->transcript);
     engine_event_t tev = { .kind = ENGINE_EV_TRANSCRIPT, .u.transcript = { c->transcript, c->reply_lang } };

@@ -17,6 +17,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 </style></head><body>
 <header>咕咕 · 家长页 <span class="muted" id="status" style="color:#ccc"></span></header>
 <main>
+<section><h2>这一趟</h2><div id="trip" class="muted">加载中…</div><button class="secondary" id="tripDel" style="display:none" onclick="deleteTrip()">删除这张趟卡（咕咕就不去了）</button></section>
+<section><h2>记忆</h2><div class="muted" style="margin-bottom:6px">旅程志</div><div id="journey" class="muted">加载中…</div><div class="muted" style="margin:10px 0 6px">关于孩子</div><div id="about_child" class="muted"></div><div class="muted" style="margin:10px 0 6px">它后来知道的（生长正典）</div><div id="canon_grown" class="muted"></div></section>
 <section><h2>通话记录</h2><div id="calls" class="muted">加载中…</div>
 <button class="secondary" onclick="location.href='/api/export'">导出全部记录</button></section>
 <section id="detail" style="display:none"><h2 id="detailTitle">通话</h2><div id="turns"></div></section>
@@ -39,6 +41,13 @@ async function j(u,o){const r=await fetch(u,o);return r.json()}
 async function load(){
   try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`}catch(e){}
   try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang1','lang2','lang3','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
+  try{const t=await j('/api/trip');if(!t){$('trip').textContent='还没有计划中的出门。'}else{const kind={deliver:'送信',vacation:'度假',visit:'探亲'}[t.kind]||t.kind;
+    $('trip').innerHTML=`<div><b>${kind}</b> · ${t.place.name}（${t.place.country}）· ${t.depart_date} 出发，住 ${t.nights} 晚，${t.return_date} 回家</div><div style="margin:6px 0">${t.reason}${t.recipient?'<br>收件人：'+t.recipient:''}${t.letter?'<br>信里写：'+t.letter:''}</div><div><b>它会讲的事</b><ul>${(t.facts||[]).map(f=>`<li>${f}</li>`).join('')}</ul></div><div><b>每天</b><ol>${(t.days||[]).map(d=>`<li>${d}</li>`).join('')}</ol></div><div class="muted">朋友：${(t.friend||{}).name||''}（${(t.friend||{}).animal||''}）· 纪念品：${t.souvenir||''} · 生成于 ${t.generated_at||''}</div>`;
+    $('tripDel').style.display='inline-block'}}catch(e){$('trip').textContent='读取失败'}
+  try{const jr=await j('/api/memory?book=journey');if(!jr.length){$('journey').textContent='还没出过门。'}else{const trips={};for(const e of jr){(trips[e.trip]=trips[e.trip]||{meta:e,items:[]}).items.push(e)}
+    const kind={deliver:'送信',vacation:'度假',visit:'探亲'};
+    $('journey').innerHTML=Object.values(trips).reverse().map(t=>`<div style="margin:8px 0;padding:8px;border:1px solid #eee;border-radius:8px"><b>${kind[t.meta.kind]||t.meta.kind} · ${t.meta.place}</b> <span class="muted">${t.meta.depart} 到 ${t.meta.return}${t.meta.friend?' · 朋友 '+t.meta.friend:''}</span>${t.items.map(e=>`<div style="margin-top:4px">${e.t==='planned'?'出发前':e.t==='day'?'第 '+e.day+' 天':'回来后'}：${e.text}${e.hooks&&e.hooks.length?'<div class="muted">线头：'+e.hooks.join('；')+'</div>':''}</div>`).join('')}<button class="secondary" style="margin-top:6px;padding:5px 10px;font-size:12px" onclick="forget('journey','${t.meta.trip}')">忘掉这一趟</button></div>`).join('')}}catch(e){$('journey').textContent='读取失败'}
+  for(const b of ['about_child','canon_grown']){try{const arr=await j('/api/memory?book='+b);$(b).innerHTML=arr.length?arr.map((e,i)=>`<div>· ${typeof e==='string'?e:e.text} <a href="#" class="muted" onclick="forget('${b}','${i}');return false">删</a></div>`).join(''):'还没有。'}catch(e){}}
   try{const calls=await j('/api/calls');if(!calls.length){$('calls').textContent='还没有通话。';return}
     calls.reverse();const rows=calls.map(c=>`<tr class="call" onclick="showCall('${c.file}','${c.id}')"><td>${new Date(c.started_ms).toLocaleString()}</td><td>${c.turns} 轮</td><td class="muted">${c.summary?(c.summary.seconds+' 秒'):''}</td></tr>`).join('');
     $('calls').innerHTML=`<table>${rows}</table>`}catch(e){$('calls').textContent='读取失败'}
@@ -46,6 +55,8 @@ async function load(){
 async function showCall(file,id){const turns=await j('/api/call?file='+encodeURIComponent(file));$('detail').style.display='block';$('detailTitle').textContent='通话 '+id;
   $('turns').innerHTML=turns.map(t=>`<div style="margin:8px 0"><div><b>孩子</b>（${t.lang}）：${t.transcript}</div><div><b>咕咕</b>：${t.reply}</div><div class="muted">首次出声 ${t.ms.first_play} ms · 识别 ${t.ms.asr} ms · 首字 ${t.ms.first_token} ms · 结束 ${t.ms.done} ms</div></div>`).join('')||'<span class="muted">空</span>';
   $('detail').scrollIntoView()}
+async function forget(book,key){if(!confirm('删除后咕咕就忘了这件事。确定？'))return;await j('/api/memory/forget',{method:'POST',body:JSON.stringify({book,key})});load()}
+async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
 async function saveSettings(){const b={};for(const k of ['child_name','lang1','lang2','lang3'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
   const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});$('saveMsg').textContent=r.ok?'已保存':'失败'}
 async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++;$(k).value=''}$('secretMsg').textContent=`已保存 ${n} 项`}

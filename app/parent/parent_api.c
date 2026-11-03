@@ -17,6 +17,9 @@ static const char *CT_JSON = "application/json; charset=utf-8", *CT_HTML = "text
 
 static int reply(char **out, size_t *len, const char *s) { *out = strdup(s); *len = strlen(s); return 200; }
 
+static parent_hooks_t s_hooks;
+void parent_set_hooks(const parent_hooks_t *h) { s_hooks = h ? *h : (parent_hooks_t){ 0 }; }
+
 static void query_get(const char *query, const char *key, char *val, size_t cap)
 {
     val[0] = '\0';
@@ -127,6 +130,38 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         *out = strdup(b.s ? b.s : ""); *out_len = b.len; strbuf_free(&b);
         *ctype = CT_TEXT; *disposition = "attachment; filename=\"gugu-calls.jsonl\"";
         return 200;
+    }
+    if (get && !strcmp(path, "/api/trip")) {               // the current trip card (data/trips/current.json), or null
+        snprintf(p, sizeof p, "%s/trips/current.json", store_data_dir());
+        size_t n; char *s = file_read_all(p, &n);
+        if (!s) return reply(out, out_len, "null");
+        *out = strdup(s); *out_len = n; mem_release(s); return 200;
+    }
+    if (get && !strcmp(path, "/api/trips")) {              // every card ever planned, one row each
+        snprintf(p, sizeof p, "%s/trips/index.jsonl", store_data_dir());
+        *out = jsonl_to_array(p); *out_len = strlen(*out); return 200;
+    }
+    if (get && !strcmp(path, "/api/memory")) {             // ?book=journey|about_child|canon_grown
+        char book[24]; query_get(query, "book", book, sizeof book);
+        if (!strcmp(book, "journey")) { snprintf(p, sizeof p, "%s/memory/journey.jsonl", store_data_dir()); *out = jsonl_to_array(p); *out_len = strlen(*out); return 200; }
+        if (strcmp(book, "about_child") && strcmp(book, "canon_grown")) return reply(out, out_len, "{\"error\":\"unknown book\"}"), 400;
+        snprintf(p, sizeof p, "%s/memory/%s.json", store_data_dir(), book);
+        size_t n; char *s = file_read_all(p, &n);
+        if (!s) return reply(out, out_len, "[]");
+        *out = strdup(s); *out_len = n; mem_release(s); return 200;
+    }
+    if (post && !strcmp(path, "/api/memory/forget")) {     // {"book":"journey","key":"<trip id>"} or {"book":"about_child","key":"<index>"}
+        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
+        const char *book = cJSON_GetStringValue(cJSON_GetObjectItem(j, "book")), *key = cJSON_GetStringValue(cJSON_GetObjectItem(j, "key"));
+        if (!book || !key) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"book and key required\"}"), 400; }
+        if (s_hooks.memory_forget) s_hooks.memory_forget(book, key, s_hooks.user);
+        cJSON_Delete(j);
+        return reply(out, out_len, "{\"ok\":true}");
+    }
+    if (post && !strcmp(path, "/api/trip/delete")) {       // the parent cancels the trip; Gugu forgets it
+        if (s_hooks.trip_delete) s_hooks.trip_delete(s_hooks.user);
+        else { snprintf(p, sizeof p, "%s/trips/current.json", store_data_dir()); remove(p); }
+        return reply(out, out_len, "{\"ok\":true}");
     }
     return reply(out, out_len, "{\"error\":\"not found\"}"), 404;
 }

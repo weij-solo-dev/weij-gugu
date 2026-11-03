@@ -11,3 +11,11 @@ void        parent_exit(void);
 bool        parent_is_active(void);
 const char *parent_hotspot_ssid(void);
 const char *parent_hotspot_password(void);
+const char *parent_hotspot_url(void);       // the page address on the hotspot, e.g. http://192.168.4.1
+// Upward hooks app.c wires at init: actions the page triggers in modules parent may not include.
+typedef struct {
+    void (*trip_delete)(void *user);
+    void (*memory_forget)(const char *book, const char *key, void *user);   // book: journey (key = trip id) | about_child | canon_grown (key = index)
+    void *user;
+} parent_hooks_t;
+void parent_set_hooks(const parent_hooks_t *h);
