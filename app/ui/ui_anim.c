@@ -46,6 +46,12 @@ static void refresh_sprite(void)
 static void jitter_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 2 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 20)) / 32767); }
 static void sway_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 6 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 2)) / 32767); }
 static void headshake_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 4 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 3)) / 32767); }   // three swings: no, no, no
+static void look_exec(void *obj, int32_t v)          // one sine period, clipped: the clipped tops are the holds ("over there? … over there?")
+{
+    int32_t s = lv_trigo_sin((int16_t)v) * 8 / 5;
+    if (s > 32767) s = 32767; else if (s < -32767) s = -32767;
+    lv_obj_set_x(obj, GUGU_BASE_X + 5 * UI_SPRITE_SCALE * s / 32767);
+}
 static void x_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, GUGU_BASE_X); }
 static void wobble(lv_anim_exec_xcb_t exec, uint32_t ms)
 {
@@ -179,6 +185,7 @@ void ui_play_action(ui_action_t a)
     case UI_ACT_JUMP: hop(10 * UI_SPRITE_SCALE, 320); break;
     case UI_ACT_FLY: fly(1400); break;
     case UI_ACT_SHAKE_HEAD: wobble(headshake_exec, 700); break;
+    case UI_ACT_LOOK_AROUND: wobble(look_exec, 2600); break;
     }
     ui_unlock();
 }

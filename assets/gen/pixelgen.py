@@ -235,26 +235,34 @@ def draw_vest(c, cx, cy, rx, ry, color='red'):
             c.put(x, y, col)
     c.outline_of({base, dark, light}, P['line'])
 
+def lens_mask(x0, y0, w, h):
+    """A round lens: the pixels whose centres fall inside the ellipse in the eye box, a touch inside so a 7×7 lens is the
+    classic 3-5-7-7-7-5-3 pixel circle (2026-11-03, owner: "镜片是否也可以改为圆框")."""
+    cx, cy, rx, ry = x0 + w / 2, y0 + h / 2, w / 2, h / 2
+    return {(x, y) for y in range(y0, y0 + h) for x in range(x0, x0 + w) if ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 0.95}
+
+def lens_ring(mask):
+    """The frame: every pixel outside the lens that shares an edge with it (a one-pixel, 8-connected ring)."""
+    return {(nx, ny) for (x, y) in mask for (nx, ny) in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)) if (nx, ny) not in mask}
+
 def draw_glasses(c, eyes, color='rim'):
     """Round frames around each eye box, a bridge, and temples running out to the head.
     eyes: list of (x, y, w, h) eye boxes as drawn."""
     P = PAL
     rim = P[color]
-    boxes = []
+    rings = []
     for (x, y, w, h) in eyes:
-        fx0, fy0, fx1, fy1 = x - 1, y - 1, x + w, y + h
-        boxes.append((fx0, fy0, fx1, fy1))
-        # rounded rectangle: skip the four corners
-        for xx in range(fx0 + 1, fx1):
-            c.put(xx, fy0, rim); c.put(xx, fy1, rim)
-        for yy in range(fy0 + 1, fy1):
-            c.put(fx0, yy, rim); c.put(fx1, yy, rim)
-        # a lens glint in the top-left of the frame if that pixel is body
-        if c.get(fx0 + 1, fy0 + 1) in (P['body'], P['shade'], P['hi']): c.put(fx0 + 1, fy0 + 1, P['lens'])
-    (l0, ly0, l1, ly1), (r0, ry0, r1, ry1) = boxes
-    by = (ly0 + ly1) // 2
-    c.hline(l1 + 1, r0 - 1, by, rim)                      # bridge
-    c.hline(l0 - 3, l0 - 1, by, rim); c.hline(r1 + 1, r1 + 3, by, rim)   # temples
+        ring = lens_ring(lens_mask(x, y, w, h))
+        for (px, py) in ring: c.put(px, py, rim)
+        rings.append(ring)
+    by = eyes[0][1] + (eyes[0][3] - 1) // 2                  # the left lens's middle row
+    def span(ring, box):
+        xs = [px for (px, py) in ring if py == by]
+        return (min(xs), max(xs)) if xs else (box[0] - 1, box[0] + box[2])
+    (l0, l1), (r0, r1) = span(rings[0], eyes[0]), span(rings[1], eyes[1])
+    if r0 - 1 >= l1 + 1: c.hline(l1 + 1, r0 - 1, by, rim)   # bridge (none when the frames touch)
+    for x in list(range(l0 - 3, l0)) + list(range(r1 + 1, r1 + 4)):   # temples, only where the head is
+        if c.get(x, by) not in (None, PAL.get('bg')): c.put(x, by, rim)
 
 def hook_bag(c, x, y):
     """The satchel hanging from the wall hook (home state marker once the scarf is gone)."""
@@ -374,138 +382,155 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         draw_kerchief(c, cx, cy, rx, ry)
     # beanie is drawn after the face so it can overlap the forehead
 
-    # face — cartoon-big: every mood is a different shape, readable from across the room (2026-11-03, "再夸张一点")
+    # face — cartoon-big: every mood is a different shape, readable from across the room (2026-11-03, "再夸张一点").
+    # Round glasses with white lenses D pixels across (owner, 2026-11-03: white lenses, round frames, "再大一点半径"). The
+    # left lens spans exl-1 .. exl-2+D, the right one exr-1 .. exr-2+D; lo / ro are the frames' outer columns, and
+    # everything beside the glasses (blush, brows, tears) is placed from them. Each lens holds one simple mark (a pupil,
+    # one arch, one line) that keeps clear of the frame ("眼镜内线条太多太复杂").
+    D = 9
     ey = int(cy - 11)
-    exl, exr = int(cx) - 7, int(cx) + 3
-    def eye_box(x0, y0, w, h, pw=2, ph=2, look=(0, 0)):
-        c.rect(x0, y0, w, h, P['eyew']); eye_boxes.append((x0, y0, w, h))
-        px, py = x0 + w // 2 - pw // 2 + look[0], y0 + h // 2 - ph // 2 + look[1]
+    exl, exr = int(cx) - 1 - D, int(cx) + 3
+    lo, ro = exl - 2, exr - 1 + D
+    LY = 1 + (D - 7) // 2                                   # lens top = eye y - LY: the lens stays centred where the 7-pixel one was
+    FEATHERS = (P['body'], P['shade'], P['hi'], P['belly'])
+    def body_paint(x, y, w, h, col):                        # blush only lands on feathers: never on a lens, never past the outline
+        for yy in range(y, y + h):
+            for xx in range(x, x + w):
+                if c.get(xx, yy) in FEATHERS: c.put(xx, yy, col)
+    def eye_box(x0, y0, w, h, pw=3, ph=3, look=(0, 0)):
+        for (x, y) in lens_mask(x0, y0, w, h): c.put(x, y, P['eyew'])
+        eye_boxes.append((x0, y0, w, h))
+        px, py = x0 + (w - pw) // 2 + look[0], y0 + (h - ph) // 2 + look[1]
         c.rect(px, py, pw, ph, P['pupil']); c.put(px, py, P['hi'])
-    def eye_open(x, y, pw=2, ph=3, look=(0, 0)):            # the everyday eye: 6×7
-        eye_box(x - 1, y - 1, 6, 7, pw, ph, look)
-    def eye_arc(x, y, down=False, wide=False):              # a closed happy eye ︶ (︵ when down); wide = a tall laugh
-        eye_boxes.append((x, y, 4, 5))
-        if wide:
-            c.hline(x - 1, x + 4, y + 1, P['line']); c.put(x - 2, y + 2, P['line']); c.put(x + 5, y + 2, P['line'])
-            c.put(x - 3, y + 3, P['line']); c.put(x + 6, y + 3, P['line']); c.put(x - 3, y + 4, P['line']); c.put(x + 6, y + 4, P['line'])
-            c.hline(x - 1, x + 4, y + 2, P['line'])
-        elif not down:
-            c.hline(x - 1, x + 4, y + 2, P['line']); c.put(x - 2, y + 3, P['line']); c.put(x + 5, y + 3, P['line']); c.hline(x, x + 3, y + 1, P['line'])
-        else:
-            c.hline(x - 1, x + 4, y + 3, P['line']); c.put(x - 2, y + 2, P['line']); c.put(x + 5, y + 2, P['line'])
-    def eye_squeeze(x, y):                                  # > <  laughing hard, 6 px
-        eye_boxes.append((x - 1, y, 6, 6))
-        for i in range(4): c.put(x - 1 + i, y + i, P['line']); c.put(x - 1 + i, y + 5 - i, P['line']); c.put(x + i, y + i, P['line']); c.put(x + i, y + 5 - i, P['line'])
-    def eye_shut(x, y):                                     # a heavy lid: fast asleep
-        eye_boxes.append((x - 1, y, 6, 5))
-        c.hline(x - 2, x + 5, y + 3, P['line']); c.hline(x - 1, x + 4, y + 4, P['line'])
-    def eye_spiral(x, y):                                   # knocked-out X eyes, 7×7
-        x0, y0 = x - 1, y - 1
-        eye_boxes.append((x0, y0, 7, 7)); c.rect(x0, y0, 7, 7, P['eyew'])
-        for i in range(7): c.put(x0 + i, y0 + i, P['pupil']); c.put(x0 + 6 - i, y0 + i, P['pupil'])
-        for i in range(1, 6): c.put(x0 + i, y0 + i - 1, P['pupil']); c.put(x0 + 6 - i, y0 + i - 1, P['pupil'])
+    def eye_open(x, y, pw=3, ph=3, look=(0, 0)):            # the everyday eye: a round lens, a 3×3 pupil with a glint
+        eye_box(x - 1, y - LY, D, D, pw, ph, look)
+    def lens(x, y):                                         # a closed eye's lens; returns its centre
+        x0, y0 = x - 1, y - LY
+        for (px, py) in lens_mask(x0, y0, D, D): c.put(px, py, P['eyew'])
+        eye_boxes.append((x0, y0, D, D))
+        return x0 + D // 2, y0 + D // 2
+    def eye_arc(x, y, down=False, wide=False):              # ︵ a happy closed eye, 7 wide (︶ when down)
+        mx, my = lens(x, y); ink = P['pupil']; k = 1 if down else -1
+        c.hline(mx - 1, mx + 1, my + 2 * k, ink); c.put(mx - 2, my + k, ink); c.put(mx + 2, my + k, ink); c.put(mx - 3, my, ink); c.put(mx + 3, my, ink)   # ends on the full-width row
+    def eye_squeeze(x, y, right=False):                     # > on the left eye, < on the right: a bold arrow, laughing hard
+        mx, my = lens(x, y)
+        for dy in range(-2, 3):
+            t = 2 - abs(dy)                                 # how far toward the tip this row reaches
+            xs = (mx + 1 - t, mx + 2 - t) if right else (mx - 2 + t, mx - 1 + t)
+            c.hline(xs[0], xs[1], my + dy, P['pupil'])
+    def eye_shut(x, y):                                     # asleep (and the blink): one flat line
+        mx, my = lens(x, y)
+        c.hline(mx - 2, mx + 2, my + 1, P['pupil'])
+    def eye_spiral(x, y):                                   # knocked out: a × in the lens
+        mx, my = lens(x, y)
+        for k in range(-2, 3): c.put(mx + k, my + k, P['pupil']); c.put(mx + k, my - k, P['pupil'])
     def star(sx, sy, big=False):
         c.hline(sx - 1, sx + 1, sy, P['glow']); c.vline(sx, sy - 1, sy + 1, P['glow'])
         if big: c.hline(sx - 2, sx + 2, sy, P['glow']); c.vline(sx, sy - 2, sy + 2, P['glow'])
-    def brow_v(thick=2):                                    # angry: thick brows slanting down to the middle
-        for i in range(5):
-            for t in range(thick):
-                c.put(exl - 2 + i, ey - 4 + i // 2 + t, P['line']); c.put(exr + 5 - i, ey - 4 + i // 2 + t, P['line'])
-    def brow_sad():                                         # inner ends up
-        for i in range(5):
-            c.put(exl - 2 + i, ey - 2 - i // 2, P['line']); c.put(exr + 5 - i, ey - 2 - i // 2, P['line'])
+    def brows(outer_low, thick=1, steps=2, gap=1):          # from each frame's outer edge to its lens centre, gap empty rows above the frame
+        n = D // 2 + 1
+        for side, (x0, y0, w, h) in zip((0, 1), eye_boxes):
+            lowest = y0 - 2 - gap                           # the frame's top row is y0 - 1
+            for i in range(n):
+                xx = lo + i if side == 0 else ro - i
+                lift = (i * steps) // n                       # 0 at the outer end … steps-1 at the inner end
+                up = lift if outer_low else steps - 1 - lift  # how far this column sits above the brow's lowest end
+                for t in range(thick): c.put(xx, lowest - up - t, P['line'])
+
+    # cheeks first: the lenses drawn next cover any blush that reaches under them
+    if emotion in ('happy', 'laughing', 'proud', 'wave'):
+        body_paint(lo - 3, ey + 5, 3, 2, P['cheek']); body_paint(ro + 1, ey + 5, 3, 2, P['cheek'])
+    elif emotion == 'angry':
+        body_paint(lo - 3, ey + 5, 3, 3, P['red2']); body_paint(ro + 1, ey + 5, 3, 3, P['red2'])
+    elif emotion in ('neutral', 'curious', 'puff'):
+        body_paint(lo - 2, ey + 5, 2, 1, P['cheek']); body_paint(ro + 1, ey + 5, 2, 1, P['cheek'])
 
     if eyes_closed:
-        eye_arc(exl, ey); eye_arc(exr, ey)
+        eye_shut(exl, ey); eye_shut(exr, ey)
     elif emotion == 'neutral':
         eye_open(exl, ey); eye_open(exr, ey)
     elif emotion == 'happy':
-        eye_arc(exl, ey, wide=True); eye_arc(exr, ey, wide=True)
+        eye_arc(exl, ey); eye_arc(exr, ey)
     elif emotion == 'laughing':
-        eye_squeeze(exl, ey); eye_squeeze(exr, ey)
-        c.rect(exr + 6, ey + 3, 2, 3, P['skyd']); c.put(exr + 6, ey + 3, P['cloud'])        # a tear of joy
+        eye_squeeze(exl, ey - 2); eye_squeeze(exr, ey - 2, right=True)                  # the laugh pushes the glasses up
         for sgn in (-1, 1):                                                                # "ha ha" lines beside the head
             x = int(cx) + sgn * 21
             for yy in (ey - 4, ey, ey + 4): c.hline(x - 1, x + 1, yy, P['hi'])
-    elif emotion == 'surprised':                                                           # goggle eyes
-        eye_box(14, ey - 3, 10, 10, 2, 2); eye_box(24, ey - 3, 10, 10, 2, 2)
-        c.hline(13, 17, ey - 6, P['line']); c.hline(30, 34, ey - 6, P['line'])            # brows shot up
+    elif emotion == 'surprised':                                                           # goggle eyes: lenses two pixels bigger again
+        G = D + 2
+        eye_box(int(cx) - 1 - G, ey - 3, G, G, 2, 2); eye_box(int(cx) + 1, ey - 3, G, G, 2, 2)
+        c.hline(int(cx) - 11, int(cx) - 7, ey - 6, P['line']); c.hline(int(cx) + 6, int(cx) + 10, ey - 6, P['line'])   # brows shot up
     elif emotion == 'curious':                                                             # "hmm?": eyes up and to the side, one brow up, head tilted a pixel
-        eye_open(exl, ey + 1, pw=2, ph=3, look=(1, -1)); eye_open(exr, ey - 1, pw=2, ph=3, look=(1, -1))
-        c.hline(exr - 1, exr + 4, ey - 5, P['line']); c.put(exr + 5, ey - 4, P['line'])     # the raised brow
-        c.hline(exl - 1, exl + 4, ey - 1, P['line'])                                           # the other one flat and low
+        eye_open(exl, ey + 1, look=(1, -1)); eye_open(exr, ey - 1, look=(1, -1))
+        (lx0, ly0, _, _), (rx0, ry0, _, _) = eye_boxes
+        c.hline(rx0 + 1, rx0 + D - 3, ry0 - 3, P['line']); c.put(rx0 + D - 2, ry0 - 2, P['line'])   # the raised brow
+        c.hline(lx0 + 2, lx0 + D - 3, ly0 - 3, P['line'])                                            # the other one flat and low
     elif emotion == 'shy':                                                                 # peeking from behind a wing
-        eye_open(exl, ey + 1, pw=2, ph=3, look=(-1, 1)); eye_open(exr, ey + 1, pw=2, ph=3, look=(-1, 1))   # eyes down and away
-        c.rect(exl - 7, ey + 5, 6, 3, P['cheek']); c.rect(exr + 6, ey + 5, 6, 3, P['cheek'])              # enormous blush
-        c.put(exl - 8, ey + 6, P['cheek']); c.put(exr + 12, ey + 6, P['cheek'])
-        for i, (sx, sy) in enumerate(((int(cx) + 15, ey - 9), (int(cx) + 18, ey - 6))):                     # two little hearts
+        eye_open(exl, ey + 1, look=(-1, 1)); eye_open(exr, ey + 1, look=(-1, 1))             # eyes down and away
+        body_paint(lo - 6, ey + 5, 6, 3, P['cheek']); body_paint(ro + 1, ey + 5, 6, 3, P['cheek'])   # enormous blush
+        body_paint(lo - 7, ey + 6, 1, 1, P['cheek']); body_paint(ro + 7, ey + 6, 1, 1, P['cheek'])
+        for i, (sx, sy) in enumerate(((int(cx) + 15, ey - 9), (int(cx) + 18, ey - 6))):     # two little hearts
             c.put(sx, sy, P['cheek']); c.put(sx + 2, sy, P['cheek']); c.hline(sx, sx + 2, sy + 1, P['cheek']); c.put(sx + 1, sy + 2, P['cheek'])
     elif emotion == 'sad':
         eye_open(exl, ey + 1, look=(0, 1)); eye_open(exr, ey + 1, look=(0, 1))
-        brow_sad()
-        for x in (exl + 1, exr + 1):                                                       # tears streaming
-            c.rect(x, ey + 7, 2, 6, P['skyd']); c.put(x, ey + 7, P['cloud']); c.put(x + 1, ey + 13, P['skyd'])
+        brows(outer_low=True, steps=3)                                                     # inner ends up
+        for (x0, y0, w, h) in eye_boxes:                                                   # tears streaming from under each lens
+            tx, ty = x0 + w // 2 - 1, y0 + h + 1
+            c.rect(tx, ty, 2, 6, P['skyd']); c.put(tx, ty, P['cloud']); c.put(tx + 1, ty + 6, P['skyd'])
     elif emotion == 'sleepy':
-        eye_shut(exl, ey + 1); eye_shut(exr, ey + 1)
-        c.ellipse(cx + 4, ey + 9, 3.5, 3.5, P['skyd']); c.put(int(cx) + 3, ey + 7, P['cloud'])   # a snot bubble
+        eye_shut(exl, ey); eye_shut(exr, ey)
+        fb = max(y0 + h for (_, y0, _, h) in eye_boxes)                                    # a snot bubble just under the glasses
+        c.ellipse(cx + 1, fb + 4, 3.0, 3.0, P['skyd']); c.put(int(cx), fb + 2, P['cloud'])
     elif emotion == 'puff':
         eye_arc(exl, ey + 1); eye_arc(exr, ey + 1)
     elif emotion == 'wave':
-        eye_arc(exl, ey, wide=True); eye_open(exr, ey)
+        eye_arc(exl, ey); eye_open(exr, ey)
     elif emotion == 'angry':
-        eye_open(exl, ey, pw=2, ph=2, look=(1, 1)); eye_open(exr, ey, pw=2, ph=2, look=(0, 1))
-        brow_v(3)
+        eye_open(exl, ey + 1, pw=2, ph=2, look=(1, 1)); eye_open(exr, ey + 1, pw=2, ph=2, look=(0, 1))   # a pixel lower: room for the brows
+        brows(outer_low=False, thick=2, steps=2)                                           # slanting down to the middle, clear of the frames
         for sx in (int(cx) - 17, int(cx) + 12):                                            # steam
             c.rect(sx, ey - 11, 5, 3, P['cloud']); c.rect(sx + 1, ey - 12, 3, 1, P['cloud']); c.put(sx + 2, ey - 13, P['cloud'])
     elif emotion == 'scared':
-        eye_box(14, ey - 3, 10, 10, 1, 1, look=(-2, -2)); eye_box(24, ey - 3, 10, 10, 1, 1, look=(-2, -2))
-        for sx, sy in ((int(cx) + 14, ey - 8), (int(cx) + 17, ey - 3), (int(cx) - 16, ey - 5)):   # sweat flying
+        G = D + 2
+        eye_box(int(cx) - 1 - G, ey - 3, G, G, 1, 1, look=(-2, -2)); eye_box(int(cx) + 1, ey - 3, G, G, 1, 1, look=(-2, -2))
+        for sx, sy in ((int(cx) + 15, ey - 8), (int(cx) + 18, ey - 3), (int(cx) - 17, ey - 5)):   # sweat flying
             c.put(sx, sy, P['skyd']); c.rect(sx - 1, sy + 1, 3, 2, P['skyd'])
         for sgn in (-1, 1):                                                                # trembling lines
             x = int(cx) + sgn * 21
             for yy in (ey + 6, ey + 10, ey + 14): c.vline(x, yy, yy + 2, P['hi'])
     elif emotion == 'proud':
-        eye_arc(exl, ey - 3); eye_arc(exr, ey - 3)
+        eye_arc(exl, ey - 3, down=True); eye_arc(exr, ey - 3, down=True)   # ︶ smug, chin up
         c.ellipse(cx, cy + 4, rx * 0.56, ry * 0.5, P['hi'], pred=lambda x, y: c.get(x, y) == P['belly'])
         for sx, sy, b in ((int(cx) - 16, ey - 8, True), (int(cx) + 15, ey - 9, True), (int(cx) + 18, ey, False), (int(cx) - 19, ey + 1, False)): star(sx, sy, b)
     elif emotion == 'dizzy':
         eye_spiral(exl, ey - 1); eye_spiral(exr, ey + 1)                                   # a tilt: one eye higher than the other
         for sx, sy in ((int(cx) - 17, ey - 9), (int(cx) + 15, ey - 12), (int(cx) - 3, ey - 15), (int(cx) + 19, ey - 1)): star(sx, sy, True)
 
-    # cheeks
-    if emotion in ('happy', 'laughing', 'proud', 'wave'):
-        c.rect(exl - 4, ey + 5, 4, 2, P['cheek']); c.rect(exr + 5, ey + 5, 4, 2, P['cheek'])
-    elif emotion == 'angry':
-        c.rect(exl - 4, ey + 5, 4, 3, P['red2']); c.rect(exr + 5, ey + 5, 4, 3, P['red2'])
-    elif emotion in ('neutral', 'curious', 'puff'):
-        c.rect(exl - 3, ey + 5, 2, 1, P['cheek']); c.rect(exr + 5, ey + 5, 2, 1, P['cheek'])
-
-    # beak and mouth
+    # beak: Gugu's only mouth, always the orange beak (2026-11-03, owner: "有些表情是用黑线，有些时候用橙色块，到底是用哪个？";
+    # the black grin, frown, teeth and wavy lines are gone). A mood changes the beak itself: shut, chirping, talking, wide
+    # open with a tongue, a tall O, drooping, pressed, askew. It sits in the gap between the lenses (a row lower where the
+    # lenses reach down to it), and under the frames when it is wider than the gap or the goggles meet.
     bx, by = int(cx) - 1, ey + 4
-    if emotion == 'laughing':                                                              # a huge laugh with a tongue
-        c.rect(bx - 2, by, 7, 1, P['beak']); c.rect(bx - 2, by + 1, 7, 4, P['mouth']); c.rect(bx - 1, by + 3, 5, 2, P['cheek']); c.rect(bx - 2, by + 5, 7, 1, P['beak2'])
+    under = max([by] + [y0 + h + 1 for (_, y0, _, h) in eye_boxes])                       # the first row under the frames
+    beak_y = under if emotion in ('surprised', 'scared', 'laughing') else by + 1 if emotion in ('sad', 'angry', 'puff', 'dizzy') else by
+    def shut(y): c.rect(bx, y, 3, 1, P['beak']); c.put(bx + 1, y + 1, P['beak2'])
+    def opened(y, rows): c.rect(bx, y, 3, 1, P['beak']); c.rect(bx, y + 1, 3, rows, P['mouth']); c.rect(bx, y + 1 + rows, 3, 1, P['beak2'])
+    if emotion == 'laughing':                                                              # wide open with a tongue
+        c.rect(bx - 2, beak_y, 7, 1, P['beak']); c.rect(bx - 2, beak_y + 1, 7, 4, P['mouth']); c.rect(bx - 1, beak_y + 3, 5, 2, P['cheek']); c.rect(bx - 2, beak_y + 5, 7, 1, P['beak2'])
     elif emotion == 'surprised':                                                           # a tall O
-        c.rect(bx - 1, by + 1, 5, 1, P['beak']); c.rect(bx - 1, by + 2, 5, 4, P['mouth']); c.rect(bx - 1, by + 6, 5, 1, P['beak2'])
-    elif beak_open:
-        c.rect(bx, by, 3, 1, P['beak']); c.rect(bx, by + 1, 3, 2, P['mouth']); c.rect(bx, by + 3, 3, 1, P['beak2'])
-    elif emotion in ('happy', 'proud', 'wave'):                                            # a grin from cheek to cheek
-        c.rect(bx, by, 3, 1, P['beak']); c.put(bx + 1, by + 1, P['beak2'])
-        c.put(bx - 4, by, P['line']); c.put(bx - 3, by + 1, P['line']); c.hline(bx - 2, bx + 4, by + 2, P['line']); c.put(bx + 5, by + 1, P['line']); c.put(bx + 6, by, P['line'])
-    elif emotion == 'sad':                                                                 # a big frown
-        c.rect(bx, by + 1, 3, 1, P['beak']); c.put(bx + 1, by + 2, P['beak2'])
-        c.put(bx - 3, by + 5, P['line']); c.put(bx - 2, by + 4, P['line']); c.hline(bx - 1, bx + 3, by + 3, P['line']); c.put(bx + 4, by + 4, P['line']); c.put(bx + 5, by + 5, P['line'])
-    elif emotion == 'scared':                                                              # a wobbly wail
-        c.rect(bx, by, 3, 1, P['beak']); c.rect(bx, by + 1, 3, 2, P['mouth'])
-        for i in range(7): c.put(bx - 2 + i, by + 3 + (i % 2), P['line'])
-    elif emotion == 'angry':                                                               # gritted teeth
-        c.rect(bx, by, 3, 1, P['beak']); c.rect(bx - 2, by + 1, 7, 2, P['line']); c.rect(bx - 1, by + 1, 5, 1, P['eyew']); c.put(bx, by + 1, P['line']); c.put(bx + 2, by + 1, P['line'])
-    elif emotion == 'dizzy':                                                               # a wavy mouth
-        c.rect(bx, by, 3, 1, P['beak'])
-        for i in range(7): c.put(bx - 2 + i, by + 1 + (1 if i % 3 == 1 else 0), P['line'])
+        c.rect(bx - 1, beak_y, 5, 1, P['beak']); c.rect(bx - 1, beak_y + 1, 5, 4, P['mouth']); c.rect(bx - 1, beak_y + 5, 5, 1, P['beak2'])
+    elif beak_open:                                                                        # talking
+        opened(beak_y, 2)
     elif emotion == 'shy':
         pass                                                                               # behind the wing
-    else:
-        c.rect(bx, by, 3, 1, P['beak']); c.put(bx + 1, by + 1, P['beak2'])
+    elif emotion in ('happy', 'wave', 'scared'):                                           # chirping (scared: a gasp)
+        opened(beak_y, 1)
+    elif emotion == 'angry':                                                               # pressed shut
+        c.rect(bx, beak_y, 3, 1, P['beak']); c.rect(bx, beak_y + 1, 3, 1, P['beak2'])
+    elif emotion == 'dizzy':                                                               # open and askew
+        c.rect(bx, beak_y, 3, 1, P['beak']); c.rect(bx, beak_y + 1, 3, 1, P['mouth']); c.put(bx, beak_y + 2, P['beak2'])
+    else:                                                                                  # neutral, curious, sleepy, proud, puff, sad (a row lower: drooping)
+        shut(beak_y)
 
     if 'glasses' in parts and len(eye_boxes) == 2:
         draw_glasses(c, eye_boxes)
@@ -765,17 +790,28 @@ def acc_camera():
     c.rect(1, 2, 11, 6, P['grey2']); c.rect(4, 1, 4, 1, P['grey']); c.ellipse(6.5, 5, 2.5, 2.2, P['grey']); c.ellipse(6.5, 5, 1.2, 1.2, P['skyd']); c.put(10, 3, P['red'])
     return outline(c)
 
-def acc_sunglasses(eye_boxes):
-    """Dark lenses over one face's eye boxes, with the bridge and temples. Returns (canvas, x, y) in sprite coordinates."""
+def acc_sunglasses(eye_boxes, cx=None, rx=None):
+    """Round dark lenses over one face's glasses (each lens and its frame), a glint, the bridge and the temples (kept
+    inside the head when cx / rx are given). Returns (canvas, x, y) in sprite coordinates."""
     xs0 = min(b[0] for b in eye_boxes) - 4; ys0 = min(b[1] for b in eye_boxes) - 2
     xs1 = max(b[0] + b[2] for b in eye_boxes) + 3; ys1 = max(b[1] + b[3] for b in eye_boxes) + 1
     c = Canvas(xs1 - xs0 + 1, ys1 - ys0 + 1); P = PAL
+    rings = []
     for (x, y, w, h) in eye_boxes:
-        c.rect(x - 1 - xs0, y - 1 - ys0, w + 2, h + 2, P['pupil']); c.put(x - xs0, y - ys0, P['lensdk'])
-    l, r = sorted(eye_boxes)[0], sorted(eye_boxes)[-1]
-    by = l[1] + 1 - ys0
-    c.hline(l[0] + l[2] + 1 - xs0, r[0] - 2 - xs0, by, P['rim'])
-    c.hline(l[0] - 4 - xs0, l[0] - 2 - xs0, by, P['rim']); c.hline(r[0] + r[2] + 1 - xs0, r[0] + r[2] + 3 - xs0, by, P['rim'])
+        mask = lens_mask(x, y, w, h); ring = lens_ring(mask); rings.append(ring)
+        for (px, py) in mask | ring: c.put(px - xs0, py - ys0, P['pupil'])
+        gx, gy = x + w // 4, y + h // 4                      # a glint up and to the left
+        for (dx, dy) in ((0, 0), (1, 0), (0, 1)): c.put(gx + dx - xs0, gy + dy - ys0, P['lensdk'])
+    order = sorted(range(len(eye_boxes)), key=lambda i: eye_boxes[i][0])
+    l, r = eye_boxes[order[0]], eye_boxes[order[-1]]
+    by = l[1] + (l[3] - 1) // 2
+    def span(ring, box):
+        xs = [px for (px, py) in ring if py == by]
+        return (min(xs), max(xs)) if xs else (box[0] - 1, box[0] + box[2])
+    (l0, l1), (r0, r1) = span(rings[order[0]], l), span(rings[order[-1]], r)
+    if r0 - 1 >= l1 + 1: c.hline(l1 + 1 - xs0, r0 - 1 - xs0, by - ys0, P['rim'])
+    for x in list(range(l0 - 3, l0)) + list(range(r1 + 1, r1 + 4)):
+        if cx is None or abs(x + 0.5 - cx) <= rx - 1: c.put(x - xs0, by - ys0, P['rim'])
     return c, xs0, ys0
 
 def window(tod):

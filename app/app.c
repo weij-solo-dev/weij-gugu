@@ -84,6 +84,7 @@ static void on_call_state(call_state_t s, void *user)
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
 static void on_call_trouble(const char *why, void *user) { (void)user; instinct_refuse(why); }   // a failed or late turn: a buzz, a head shake, a sad face
+static bool ready_probe(char *why, size_t cap, void *user) { (void)user; return can_dial(why, cap); }   // instinct's puzzled face
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
 static int on_test_audio(char *json, size_t cap, void *user)
 {
@@ -187,6 +188,7 @@ void app_main(void)
     char presets[200]; snprintf(presets, sizeof presets, "%s/providers", CONTENT_DIR);
     provider_init(presets);
     load_credentials();
+    instinct_set_ready_probe(ready_probe, NULL);   // vendors are known from here on: instinct may ask whether a call could start
     const char *asr = store_setting_str("provider_asr", "minimax"), *chat = store_setting_str("provider_chat", "minimax"), *tts = store_setting_str("provider_tts", "minimax");
 #ifdef GUGU_HOST
     if (getenv("GUGU_PROVIDERS")) asr = chat = tts = getenv("GUGU_PROVIDERS");   // e.g. fake: offline stability runs

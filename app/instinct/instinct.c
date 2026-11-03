@@ -25,6 +25,15 @@ static int64_t s_mood_until; static ui_emotion_t s_mood_next = UI_EMO_COUNT; sta
 static int s_taps; static int64_t s_tap_last;
 static int64_t s_shake_last;                 // the ball keeps bouncing while shakes keep coming
 
+// Not ready to call (no Wi-Fi, offline, no key): the puzzled face is the resting face, with a look around now and then.
+#define PUZZLED_AFTER_US  (15 * 1000000LL)   // the answer must stay "no" this long: the Wi-Fi joining at boot is not a reason
+#define LOOK_EVERY_US     (12 * 1000000LL)
+static instinct_ready_fn s_ready_fn; static void *s_ready_user;
+static atomic_int s_ready_override = -1;
+static int64_t s_unready_since, s_last_look;
+static bool s_puzzled;
+static atomic_int s_rest = UI_EMO_NEUTRAL;  // the face a timed mood returns to
+
 // the trip's pictures, loaded once per trip
 static char s_art_trip[40];
 static art_image_t s_backdrop; static bool s_backdrop_loaded;
@@ -123,6 +132,46 @@ static void show(const world_state_t *st)
 
 static void mood(ui_emotion_t e, int ms) { ui_set_emotion(e); s_mood_until = clock_us() + (int64_t)ms * 1000; }
 
+void instinct_set_ready_probe(instinct_ready_fn fn, void *user) { s_ready_user = user; s_ready_fn = fn; }
+void instinct_set_ready_override(int ready) { atomic_store(&s_ready_override, ready < 0 ? -1 : ready ? 1 : 0); s_unready_since = 0; }
+
+static bool ready_now(char *why, size_t cap)
+{
+    int o = atomic_load(&s_ready_override);
+    if (o >= 0) { snprintf(why, cap, "override"); return o == 1; }
+    why[0] = '\0';
+    return !s_ready_fn || s_ready_fn(why, cap, s_ready_user);
+}
+
+static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && !s_shake_last; }   // no call, no timed mood, not a ball
+
+// Once a second: enter the puzzled rest after PUZZLED_AFTER of "not ready", leave it the moment it is ready.
+static void readiness_tick(void)
+{
+    char why[64]; bool ready = ready_now(why, sizeof why);
+    int64_t now = clock_us();
+    if (!ready) {
+        if (!s_unready_since) s_unready_since = now;
+        if (!s_puzzled && now - s_unready_since >= PUZZLED_AFTER_US) {
+            s_puzzled = true; atomic_store(&s_rest, UI_EMO_CURIOUS); s_last_look = now;
+            store_event("puzzled: %s", why);
+            LOGI("puzzled: %s", why);
+            if (resting()) { ui_set_emotion(UI_EMO_CURIOUS); ui_play_action(UI_ACT_LOOK_AROUND); }
+        } else if (s_puzzled && resting() && now - s_last_look >= LOOK_EVERY_US) {
+            s_last_look = now;
+            if (ui_get_emotion() != UI_EMO_CURIOUS) ui_set_emotion(UI_EMO_CURIOUS);
+            ui_play_action(UI_ACT_LOOK_AROUND);
+        }
+        return;
+    }
+    s_unready_since = 0;
+    if (!s_puzzled) return;
+    s_puzzled = false; atomic_store(&s_rest, UI_EMO_NEUTRAL);
+    store_event("ready again");
+    LOGI("ready again");
+    if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
+}
+
 // The pigeon whistle: Gugu answers one (a whistle back and a wave), flies a loop for a couple in a row,
 // and after five or more in quick succession gets dizzy, then cross for a moment, then is fine again.
 // At night it only stirs in its sleep.
@@ -178,6 +227,8 @@ void instinct_refuse(const char *why)
     ui_play_action(UI_ACT_SHAKE_HEAD);
     mood(UI_EMO_SAD, 2500);
     LOGW("refused: %s", why ? why : "");
+    char w[64];
+    if (!s_puzzled && !ready_now(w, sizeof w)) s_unready_since = clock_us() - PUZZLED_AFTER_US;   // known now: puzzled as soon as the sad face is over
 }
 
 static void shake_tick(void)
@@ -196,7 +247,7 @@ static void moods_tick(void)
     if (!s_mood_until || clock_us() < s_mood_until) return;
     if (s_mood_next != UI_EMO_COUNT) { ui_set_emotion(s_mood_next); s_mood_until = clock_us() + s_mood_next_until * 1000; s_mood_next = UI_EMO_COUNT; return; }
     s_mood_until = 0;
-    if (!atomic_load(&s_busy)) ui_set_emotion(UI_EMO_NEUTRAL);
+    if (!atomic_load(&s_busy)) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));
 }
 
 static void instinct_task(void *arg)
@@ -210,6 +261,7 @@ static void instinct_task(void *arg)
         shake_tick();
         moods_tick();
         if (++quarter % 4) continue;
+        readiness_tick();
         world_state(&st);
         world_tod_t now_tod = tod_of(&st);
         bool changed = st.away != away || now_tod != tod;
@@ -235,6 +287,7 @@ void instinct_set_busy(bool in_call)
 {
     atomic_store(&s_busy, in_call);
     ui_set_idle(!in_call);
+    if (!in_call && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
 
 // A touch: an object reacts in its own way (and the finger feels it), Gugu reacts when touched itself,
@@ -253,8 +306,8 @@ void instinct_touched(int x, int y)
         const char *sfx = b == UI_BEHAVE_TOGGLE ? "bell" : b == UI_BEHAVE_WIGGLE ? "tap" : b == UI_BEHAVE_BOUNCE || b == UI_BEHAVE_WAVE ? "chirp" :
                           !strcmp(id, "window") ? "whistle" : !strcmp(id, "shelf") ? "pop" : "tap";
         audio_sfx_play(sfx);
-        if (b == UI_BEHAVE_WAVE || b == UI_BEHAVE_BOUNCE) { ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
-        else if (!strcmp(id, "window")) { ui_play_action(UI_ACT_WHISTLE); ui_set_emotion(UI_EMO_CURIOUS); }
+        if (b == UI_BEHAVE_WAVE || b == UI_BEHAVE_BOUNCE) { ui_play_action(UI_ACT_WAVE); mood(UI_EMO_HAPPY, 2500); }
+        else if (!strcmp(id, "window")) { ui_play_action(UI_ACT_WHISTLE); mood(UI_EMO_CURIOUS, 2500); }
         else ui_play_action(UI_ACT_NOD);
         LOGI("touched %s → %s", id, sfx);
         return;
@@ -265,5 +318,5 @@ void instinct_touched(int x, int y)
     board_vibrate(30);
     audio_sfx_play("coo");
     ui_play_action(UI_ACT_COO);
-    ui_set_emotion(UI_EMO_HAPPY);
+    mood(UI_EMO_HAPPY, 2500);
 }

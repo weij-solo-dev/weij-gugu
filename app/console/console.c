@@ -282,6 +282,15 @@ static int cmd_selftest(int argc, char **argv)
     return 0;
 }
 
+static int cmd_ready(int argc, char **argv)   // ready auto|no|yes: what instinct hears when it asks whether a call could start
+{
+    if (argc < 2) { printf("usage: ready auto|no|yes\n"); return 1; }
+    int v = !strcmp(argv[1], "no") ? 0 : !strcmp(argv[1], "yes") ? 1 : -1;
+    instinct_set_ready_override(v);
+    printf("ready: %s\n", v < 0 ? "asks the network and keys" : v ? "forced yes" : "forced no (puzzled after 15 s)");
+    return 0;
+}
+
 static int cmd_tod(int argc, char **argv)
 {
     static const char *const N[] = { "night", "sunrise", "day", "dusk" };
@@ -345,6 +354,7 @@ static const cmd_t CMDS[] = {
     { "scan", "nearby Wi-Fi networks (what the pairing page offers)", cmd_scan },
     { "events", "events [n] — the last n lines of the persistent event log (keys, call states, failures)", cmd_events },
     { "logs", "the diagnostic bundle (boot record, events, console log, last calls), secrets masked", cmd_logs },
+    { "ready", "ready auto|no|yes — force what the puzzled face hears (no: puzzled after 15 s)", cmd_ready },
     { "selftest", "speaker → microphone loopback: does the microphone hear a beep?", cmd_selftest },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
     { "vol", "vol <0-100>", cmd_vol },

@@ -67,6 +67,9 @@ def same_region(a, b, bb):
     return all(a.px[y][x] == b.px[y][x] for y in range(y0, y1 + 1) for x in range(x0, x1 + 1))
 
 def main():
+    import check_faces                                    # every lens holds one mark: refuse to export a face that breaks it
+    bad = check_faces.problems()
+    if bad: sys.exit('faces not exported:\n  ' + '\n  '.join(bad))
     images = []
     for e in EMOTIONS:
         images.append((f'spr_gugu_{e}', pg.gugu(e), True))
@@ -94,7 +97,7 @@ def main():
     glasses, hat_y, camera_y = [], [], []
     for e in EMOTIONS:
         pg.gugu(e); g = pg.LAST_GEOM
-        gc, gx, gy = pg.acc_sunglasses(g['eye_boxes'])
+        gc, gx, gy = pg.acc_sunglasses(g['eye_boxes'], g['cx'], g['rx'])
         images.append((f'spr_acc_sunglasses_{e}', gc, True)); glasses.append((f'&spr_acc_sunglasses_{e}', gx, gy))
         hat_y.append(int(round(g['head_top'])) - 7); camera_y.append(int(round(g['cy'])) + 1)
 

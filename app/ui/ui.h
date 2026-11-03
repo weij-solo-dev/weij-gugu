@@ -25,7 +25,7 @@ void ui_set_emotion(ui_emotion_t e);
 ui_emotion_t ui_get_emotion(void);
 
 // ---- animation layer (ui_anim.c) ----
-typedef enum { UI_ACT_NOD, UI_ACT_WAVE, UI_ACT_COO, UI_ACT_WHISTLE, UI_ACT_PUFF, UI_ACT_PECK, UI_ACT_JUMP, UI_ACT_FLY, UI_ACT_SHAKE_HEAD } ui_action_t;   // fly: a loop around the window; shake_head: "no"
+typedef enum { UI_ACT_NOD, UI_ACT_WAVE, UI_ACT_COO, UI_ACT_WHISTLE, UI_ACT_PUFF, UI_ACT_PECK, UI_ACT_JUMP, UI_ACT_FLY, UI_ACT_SHAKE_HEAD, UI_ACT_LOOK_AROUND } ui_action_t;   // fly: a loop around the window; shake_head: "no"; look_around: leans one way, holds, the other way, holds
 void ui_play_action(ui_action_t a);          // short one-shot animation on top of the current emotion
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
