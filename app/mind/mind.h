@@ -36,9 +36,20 @@ const char *mind_dialog_last_user(void);                       // what the child
 
 // ---- language policy ----
 lang_t mind_reply_lang(lang_t asr_lang, const char *transcript);
+void   mind_set_language(lang_t lang);   // the interaction language from the pairing page: Gugu answers in it whatever it hears
 lang_t mind_primary_lang(void);   // the only enabled family language, or LANG_UNKNOWN when several / none
 // Fix systematic ASR slips ("姑姑" for "咕咕"); edits in place, returns the same pointer.
 char  *mind_normalize_transcript(char *text);
+
+// ---- what Gugu says on its own, from the bubble (mind_lines.c; content/prompts/hello.json, questions.json, share.md) ----
+esp_err_t mind_line_hello(lang_t lang, char *out, size_t cap);                     // the self-introduction, the child's name filled in
+esp_err_t mind_line_question(lang_t lang, unsigned pick, char *out, size_t cap);   // one of the questions for the child (pick % count)
+// The system prompt that retells one fact of the trip as a sentence Gugu tells the child in `lang`; where_phrase says
+// where Gugu is in relation to the place ("正在开罗", "过几天要去开罗", "刚从开罗回来").
+esp_err_t mind_share_request_build(lang_t lang, const char *where_phrase, const char *fact, char *system, size_t system_cap);
+void      mind_strip_tags(char *text);                                              // drop [tags] the model added anyway, trim
+// Gugu just asked the child `question` from the bubble: block C says so for the next ttl_ms, so the answer makes sense.
+void      mind_set_asked(const char *question, uint32_t ttl_ms);
 
 // ---- mood baseline (v1.0: a fixed sentence per time of day) ----
 const char *mind_mood_sentence(void);

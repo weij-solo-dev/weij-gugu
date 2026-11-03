@@ -29,9 +29,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 <section id="detail" style="display:none"><h2 id="detailTitle">通话</h2><div id="turns"></div></section>
 <section><h2>设置</h2>
 <div class="row"><div><label>孩子的名字</label><input id="child_name"></div><div><label>年龄（月）</label><input id="child_age_months" type="number"></div></div>
-<div class="row"><div><label>语言 1</label><select id="lang1"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div>
-<div><label>语言 2</label><select id="lang2"><option value="">（无）</option><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div>
-<div><label>语言 3</label><select id="lang3"><option value="">（无）</option><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
+<div class="row"><div><label>交互语种（听和说）</label><select id="lang"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
+<p class="muted">咕咕用这个语种听孩子说话、用它回答，自己说的话也用它；保存后立即生效，咕咕会用新语种再自我介绍一次。</p>
 <div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一通电话最长（分钟）</label><input id="max_call_min" type="number"></div></div>
 <button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
 <section><h2>网络与密钥</h2>
@@ -54,7 +53,7 @@ async function load(){
   try{const sec=await j('/api/secrets');loadedSecrets=sec;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key'])if(sec[k]!==undefined)$(k).value=sec[k]}catch(e){}
   try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
   scanWifi();
-  try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang1','lang2','lang3','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
+  try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
   try{const t=await j('/api/trip');if(!t){$('trip').textContent='还没有计划中的出门。'}else{const kind={deliver:'送信',vacation:'度假',visit:'探亲'}[t.kind]||t.kind;
     $('trip').innerHTML=`<div><b>${kind}</b> · ${t.place.name}（${t.place.country}）· ${t.depart_date} 出发，住 ${t.nights} 晚，${t.return_date} 回家</div><div style="margin:6px 0">${t.reason}${t.recipient?'<br>收件人：'+t.recipient:''}${t.letter?'<br>信里写：'+t.letter:''}</div><div><b>它会讲的事</b><ul>${(t.facts||[]).map(f=>`<li>${f}</li>`).join('')}</ul></div><div><b>每天</b><ol>${(t.days||[]).map(d=>`<li>${d}</li>`).join('')}</ol></div><div class="muted">朋友：${(t.friend||{}).name||''}（${(t.friend||{}).animal||''}）· 纪念品：${t.souvenir||''} · 生成于 ${t.generated_at||''}</div>`;
     $('tripDel').style.display='inline-block'}}catch(e){$('trip').textContent='读取失败'}
@@ -80,8 +79,8 @@ async function copyLogs(){$('logMsg').textContent='读取中…';try{const r=awa
   if(!ok&&navigator.clipboard){try{await navigator.clipboard.writeText(txt);ok=true}catch(e){}}
   $('logMsg').textContent=ok?`已复制 ${Math.round(txt.length/1024)} KB，去粘贴吧`:'已显示在下面的框里，长按全选后复制'}catch(e){$('logMsg').textContent='读取失败'}}
 async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
-async function saveSettings(){const b={};for(const k of ['child_name','lang1','lang2','lang3'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
-  const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});$('saveMsg').textContent=r.ok?'已保存':'失败'}
+async function saveSettings(){const b={};for(const k of ['child_name','lang'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
+  const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});$('saveMsg').textContent=r.ok?'已保存并生效':'失败'}
 let loadedSecrets={};
 async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++}
   const wifi=$('wifi_ssid').value!==(loadedSecrets.wifi_ssid||'')||$('wifi_pass').value!==(loadedSecrets.wifi_pass||'');

@@ -5,10 +5,10 @@
 #include "esp_err.h"
 #include "art/art.h"
 
-typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (worried, eyes on the gear bubble / on you)
+typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (worried, eyes on the bubble / on you) + peek (a calm look at the bubble)
     UI_EMO_NEUTRAL = 0, UI_EMO_HAPPY, UI_EMO_LAUGHING, UI_EMO_SURPRISED, UI_EMO_CURIOUS,
     UI_EMO_SHY, UI_EMO_SAD, UI_EMO_SLEEPY, UI_EMO_ANGRY, UI_EMO_SCARED, UI_EMO_PROUD, UI_EMO_DIZZY,
-    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_URGE_YOU, UI_EMO_COUNT
+    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_URGE_YOU, UI_EMO_PEEK, UI_EMO_COUNT
 } ui_emotion_t;
 
 typedef enum { UI_SCENE_HOME, UI_SCENE_AWAY } ui_scene_t;
@@ -29,7 +29,7 @@ typedef enum { UI_ACT_NOD, UI_ACT_WAVE, UI_ACT_COO, UI_ACT_WHISTLE, UI_ACT_PUFF,
 void ui_play_action(ui_action_t a);          // short one-shot animation on top of the current emotion
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
-typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠
+typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb
 void ui_show_bubble(ui_bubble_t b);          // the thought bubble at Gugu's upper right, bobbing gently (a call could not start)
 bool ui_bubble_hit(int x, int y);            // a touch on the bubble while it is up
 void ui_set_idle(bool on);                   // blink + breathe when nobody is talking to Gugu

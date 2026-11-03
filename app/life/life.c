@@ -17,13 +17,14 @@
 #include "art/art.h"
 #include "cJSON.h"
 #include <sys/stat.h>
+#include "foundation/wav.h"
 #include <string.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-enum { JOB_PLAN = 1, JOB_TICK, JOB_DIARY, JOB_RECAP, JOB_ART, JOB_CHECK };
+enum { JOB_PLAN = 1, JOB_TICK, JOB_DIARY, JOB_RECAP, JOB_ART, JOB_CHECK, JOB_LINE };
 struct job {
     int kind;
     char kind_hint[16], place_hint[64], depart[11];
@@ -43,9 +44,9 @@ MEM_BIG_BSS static char s_journey[2048], s_days[2048];
 #define WHY(...) do { if (j->why && j->why_cap) snprintf(j->why, j->why_cap, __VA_ARGS__); } while (0)
 
 // ---- one model call that must come back as a JSON object (asked twice when it does not) ----
-struct collect { strbuf_t text; bool failed; provider_error_t err; char stop[24]; uint32_t out_tokens; };
+struct collect { strbuf_t text; bool failed; provider_error_t err; char stop[24]; uint32_t out_tokens; provider_usage_t usage; };
 static void c_delta(const char *t, size_t n, void *u) { strbuf_append(&((struct collect *)u)->text, t, n); }
-static void c_done(const char *stop, const provider_usage_t *us, void *u) { struct collect *c = u; snprintf(c->stop, sizeof c->stop, "%s", stop ? stop : ""); c->out_tokens = us ? us->out_tokens : 0; }
+static void c_done(const char *stop, const provider_usage_t *us, void *u) { struct collect *c = u; snprintf(c->stop, sizeof c->stop, "%s", stop ? stop : ""); c->out_tokens = us ? us->out_tokens : 0; if (us) c->usage = *us; }
 static void c_error(const provider_error_t *e, void *u) { struct collect *c = u; c->err = *e; c->failed = true; }
 
 static bool extract_object(const char *s, const char **start, size_t *len)
@@ -332,6 +333,134 @@ static void do_check(void)
     if (cb) cb(ok, kind, why, user);
 }
 
+// ---- the bubble's lines ----
+static struct { atomic_bool pending; lang_t lang; life_line_cb cb; void *user; } s_line[2];   // 0: hello, 1: idea
+static struct job s_line_job = { .kind = JOB_LINE };
+static signal_t s_tts_done;
+
+struct tts_collect { int16_t *pcm; size_t n, cap; bool failed; provider_error_t err; uint32_t chars; };
+static void tc_audio(const int16_t *pcm, size_t samples, void *u)
+{
+    struct tts_collect *t = u;
+    size_t k = t->cap - t->n < samples ? t->cap - t->n : samples;
+    memcpy(t->pcm + t->n, pcm, k * sizeof(int16_t)); t->n += k;
+}
+static void tc_flushed(const provider_usage_t *us, void *u) { struct tts_collect *t = u; t->chars += us ? us->chars : 0; signal_set(s_tts_done); }
+static void tc_error(const provider_error_t *e, void *u) { struct tts_collect *t = u; t->err = *e; t->failed = true; signal_set(s_tts_done); }
+
+// Speak `text` in `lang` with the TTS role and keep it as a 16 kHz mono WAV at `path` (atomically). One ledger line.
+static esp_err_t synth_to_wav(const char *what, const char *text, lang_t lang, const char *path, const provider_usage_t *chat, char *why, size_t why_cap)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_TTS);
+    if (!v) { snprintf(why, why_cap, "no tts vendor assigned"); return ESP_ERR_INVALID_STATE; }
+    if (!s_tts_done) s_tts_done = signal_create();
+    while (signal_wait(s_tts_done, 0)) { }                    // drop a stale latch
+    struct tts_collect t = { 0 };
+    t.cap = 16000 * 40;                                       // 40 s at most
+    uint8_t *buf = mem_alloc_big(WAV_HEADER_BYTES + t.cap * sizeof(int16_t));
+    if (!buf) { snprintf(why, why_cap, "no memory for the clip"); return ESP_ERR_NO_MEM; }
+    t.pcm = (int16_t *)(buf + WAV_HEADER_BYTES);
+    tts_events_t ev = { NULL, tc_audio, NULL, tc_flushed, tc_error };
+    tts_params_t p = { .voice_id = NULL, .lang = lang, .speed = 1.0f, .sample_rate = 16000 };
+    tts_session_t *s = NULL;
+    int64_t t0 = clock_us();
+    esp_err_t err = v->tts_open(&p, &ev, &t, &s);
+    if (err == ESP_OK) {
+        err = v->tts_text(s, text, strlen(text));
+        if (err == ESP_OK) err = v->tts_flush(s);
+        if (err == ESP_OK && !signal_wait(s_tts_done, 30000)) err = ESP_ERR_TIMEOUT;
+        v->tts_close(s);
+    }
+    if (err == ESP_OK && t.failed) err = ESP_FAIL;
+    if (err == ESP_OK && t.n == 0) { err = ESP_ERR_INVALID_RESPONSE; snprintf(why, why_cap, "the voice came back empty"); }
+    else if (err != ESP_OK) snprintf(why, why_cap, "tts: %.60s (%s)", t.failed ? t.err.message : "", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        wav_write_header(buf, 16000, 1, (uint32_t)(t.n * sizeof(int16_t)));
+        if (!atomic_file_write(path, buf, WAV_HEADER_BYTES + t.n * sizeof(int16_t))) { err = ESP_FAIL; snprintf(why, why_cap, "could not write the clip (%.60s)", path); }
+        else {
+            provider_usage_t ut = { .chars = t.chars ? t.chars : (uint32_t)strlen(text) / 3 }, ua = { 0 }, uc = chat ? *chat : (provider_usage_t){ 0 };
+            char ledger[200], ts[24]; time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm); strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%S", &tm);
+            snprintf(ledger, sizeof ledger, "{\"t\":\"%s\",\"voice\":\"%s\",\"fen\":%.3f,\"tts_chars\":%u,\"in\":%u,\"out\":%u}", ts, what,
+                     (double)provider_turn_cost_fen(&ua, &uc, &ut), (unsigned)ut.chars, (unsigned)uc.in_tokens, (unsigned)uc.out_tokens);
+            store_ledger_add(ledger);
+            snprintf(why, why_cap, "%u ms of voice in %lld ms", (unsigned)(t.n * 1000 / 16000), (long long)((clock_us() - t0) / 1000));
+        }
+    }
+    mem_release(buf);
+    return err;
+}
+
+// One sentence from the chat role for a system prompt (no JSON): the share's retelling.
+static esp_err_t ask_line(const char *system, char *out, size_t cap, provider_usage_t *usage, char *why, size_t why_cap)
+{
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_CHAT);
+    if (!v) { snprintf(why, why_cap, "no chat vendor assigned"); return ESP_ERR_INVALID_STATE; }
+    struct collect c = { 0 }; strbuf_init(&c.text);
+    chat_events_t ev = { c_delta, c_done, c_error };
+    chat_block_t sys = { system, false };
+    chat_message_t m = { "user", "说吧。" };
+    chat_request_t cr = { .system = &sys, .system_count = 1, .messages = &m, .message_count = 1, .effort = CHAT_EFFORT_LOW, .max_tokens = 300, .temperature = 0.9f };
+    chat_session_t *s = NULL;
+    esp_err_t err = v->chat_open(&ev, &c, &s);
+    if (err == ESP_OK) { err = v->chat_send(s, &cr); v->chat_close(s); }
+    if (c.failed) { snprintf(why, why_cap, "chat: %.60s (http %d)", c.err.message, c.err.http_status); err = ESP_FAIL; }
+    else if (err == ESP_OK && (!c.text.s || !c.text.len)) { snprintf(why, why_cap, "chat: empty reply (stop %s)", c.stop); err = ESP_ERR_INVALID_RESPONSE; }
+    if (err == ESP_OK) { snprintf(out, cap, "%s", c.text.s); mind_strip_tags(out); *usage = c.usage; }
+    strbuf_free(&c.text);
+    return err;
+}
+
+static void do_line(int which)
+{
+    if (!atomic_exchange(&s_line[which].pending, false)) return;
+    life_line_cb cb = s_line[which].cb; void *user = s_line[which].user; lang_t lang = s_line[which].lang;
+    life_line_t L = { 0 };
+    provider_usage_t chat = { 0 };
+    esp_err_t err = ESP_OK;
+    if (which == 0) {
+        snprintf(L.path, sizeof L.path, "%s/voice/hello.wav", store_data_dir());
+        err = mind_line_hello(lang, L.text, sizeof L.text);
+        if (err != ESP_OK) snprintf(L.why, sizeof L.why, "no self-introduction for %s", lang_code(lang));
+    } else {
+        snprintf(L.path, sizeof L.path, "%s/voice/idea.wav", store_data_dir());
+        int n = store_setting_int("idea_n", 0);
+        char fact[200] = "", where[120] = "";
+        const world_trip_t *t = world_trip_lock();
+        if (t && t->fact_count > 0 && n % 2 == 0) {          // a share on even turns, while there is a trip to talk about
+            snprintf(fact, sizeof fact, "%s", t->facts[(n / 2) % t->fact_count]);
+            world_state_t st; world_state(&st);
+            snprintf(where, sizeof where, st.phase == WORLD_TRIP_AWAY ? "正在%s" : st.phase == WORLD_TRIP_PLANNED ? "过几天要去%s" : "刚从%s回来", t->place.name);
+        }
+        world_trip_unlock();
+        if (fact[0]) {
+            MEM_BIG_BSS static char system[2048];
+            err = mind_share_request_build(lang, where, fact, system, sizeof system);
+            if (err == ESP_OK) err = ask_line(system, L.text, sizeof L.text, &chat, L.why, sizeof L.why);
+        }
+        if (!fact[0] || err != ESP_OK) {                      // a question (also the fallback when the retelling failed)
+            L.question = true;
+            err = mind_line_question(lang, (unsigned)(n / 2), L.text, sizeof L.text);
+            if (err != ESP_OK) snprintf(L.why, sizeof L.why, "no questions for %s", lang_code(lang));
+        }
+        if (err == ESP_OK) store_setting_set_int("idea_n", n + 1);
+    }
+    if (err == ESP_OK) err = synth_to_wav(which == 0 ? "hello" : L.question ? "question" : "share", L.text, lang, L.path, which ? &chat : NULL, L.why, sizeof L.why);
+    L.ok = err == ESP_OK;
+    LOGI("line %s: %s (%s) %s", which == 0 ? "hello" : "idea", L.ok ? "ready" : "failed", L.why, L.text);
+    if (cb) cb(&L, user);
+}
+
+static void request_line(int which, lang_t lang, life_line_cb done, void *user)
+{
+    s_line[which].lang = lang; s_line[which].user = user; s_line[which].cb = done;
+    if (atomic_exchange(&s_line[which].pending, true)) return;
+    if (!s_worker) { do_line(which); return; }
+    struct job *pj = &s_line_job;
+    queue_send(s_q, &pj, 0);
+}
+void life_prepare_hello(lang_t lang, life_line_cb done, void *user) { request_line(0, lang, done, user); }
+void life_prepare_idea(lang_t lang, life_line_cb done, void *user) { request_line(1, lang, done, user); }
+
 void life_check_service(life_check_cb done, void *user)
 {
     s_check_user = user; s_check_cb = done;
@@ -375,8 +504,8 @@ static void life_task(void *arg)
     for (;;) {
         struct job *j;
         if (queue_recv(s_q, &j, 60 * 1000)) {
-            if (j->kind == JOB_CHECK) do_check(); else { run_job(j); signal_set(s_done); }
-            do_check();                           // one asked for while a long job ran
+            if (j->kind == JOB_CHECK) do_check(); else if (j->kind == JOB_LINE) { do_line(0); do_line(1); } else { run_job(j); signal_set(s_done); }
+            do_check(); do_line(0); do_line(1);   // ones asked for while a long job ran
             continue;
         }
         if (!store_setting_int("auto_plan", 1)) continue;

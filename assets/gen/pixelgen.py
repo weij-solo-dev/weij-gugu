@@ -289,6 +289,22 @@ def bubble(icon='setup'):
         for (x, y) in tri:
             if any((x + dx, y + dy) not in tri for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))): c.put(x, y, ink)
         c.rect(15, 7, 2, 5, ink); c.rect(15, 13, 2, 1, ink)
+    elif icon == 'hello':                                    # "Hi!" in fat two-pixel letters
+        c.rect(10, 6, 2, 7, ink); c.rect(14, 6, 2, 7, ink); c.rect(12, 9, 2, 1, ink)   # H
+        c.rect(17, 6, 2, 2, ink); c.rect(17, 9, 2, 4, ink)                              # i
+        c.rect(20, 6, 2, 5, ink); c.rect(20, 12, 2, 1, ink)                             # !
+    elif icon == 'idea':                                     # a lit bulb: glass, a neck, a screw base, short rays
+        glass = set()
+        for y in range(H):
+            for x in range(W):
+                if math.hypot(x + 0.5 - 16.0, y + 0.5 - 8.0) <= 4.3: glass.add((x, y))
+        glass |= {(15, 12), (16, 12), (15, 13), (16, 13)}  # the neck
+        for (x, y) in glass: c.put(x, y, P['glow'])
+        for (x, y) in glass:
+            if any((x + dx, y + dy) not in glass for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))): c.put(x, y, ink)
+        c.put(14, 6, P['eyew']); c.put(14, 7, P['eyew']); c.put(15, 5, P['eyew'])   # a glint
+        c.rect(14, 14, 4, 1, grey); c.rect(15, 15, 2, 1, grey)   # the screw base
+        for (x, y) in ((16, 2), (10, 3), (11, 4), (22, 3), (21, 4), (8, 8), (9, 8), (23, 8), (24, 8)): c.put(x, y, P['glow2'] if 'glow2' in P else P['straw2'])   # rays
     return c
 
 def lens_mask(x0, y0, w, h):
@@ -498,7 +514,7 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         body_paint(lo - 3, ey + 5, 3, 2, P['cheek']); body_paint(ro + 1, ey + 5, 3, 2, P['cheek'])
     elif emotion == 'angry':
         body_paint(lo - 3, ey + 5, 3, 3, P['red2']); body_paint(ro + 1, ey + 5, 3, 3, P['red2'])
-    elif emotion in ('neutral', 'curious', 'puff'):
+    elif emotion in ('neutral', 'curious', 'puff', 'peek'):
         body_paint(lo - 2, ey + 5, 2, 1, P['cheek']); body_paint(ro + 1, ey + 5, 2, 1, P['cheek'])
 
     if eyes_closed:
@@ -521,6 +537,8 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         (lx0, ly0, _, _), (rx0, ry0, _, _) = eye_boxes
         c.hline(rx0 + 1, rx0 + D - 3, ry0 - 3, P['line']); c.put(rx0 + D - 2, ry0 - 2, P['line'])   # the raised brow
         c.hline(lx0 + 2, lx0 + D - 3, ly0 - 3, P['line'])                                            # the other one flat and low
+    elif emotion == 'peek':                                                                # something to say: a calm look up at the bubble
+        eye_open(exl, ey, look=(2, -2)); eye_open(exr, ey, look=(2, -2))
     elif emotion in ('urge', 'urge_you'):                                                  # nothing is set up: in a hurry, eyes on you, then on the gear bubble
         look = (2, -2) if emotion == 'urge' else (0, 0)                                    # urge: hard up and right, at the bubble; urge_you: at you
         eye_open(exl, ey, look=look); eye_open(exr, ey, look=look)

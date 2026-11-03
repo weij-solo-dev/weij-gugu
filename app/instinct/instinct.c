@@ -35,6 +35,17 @@ static int64_t s_shake_last;                 // the ball keeps bouncing while sh
 static instinct_ready_fn s_ready_fn; static void *s_ready_user;
 static void (*s_bubble_cb)(void *user); static void *s_bubble_user;
 static instinct_ready_t s_reason;            // why it is not ready, while puzzled: the bubble's icon
+
+// The friendly bubbles. An offer is handed over by the app (from life's worker); the instinct task shows and plays it.
+#define IDEA_EXPIRE_US  (10 * 60 * 1000000LL)  // a light bulb nobody tapped fades after this long
+#define IDEA_RETRY_US   (2 * 60 * 1000000LL)   // asked for one and nothing came: ask again after this long
+#define PEEK_EVERY_US   (5 * 1000000LL)        // a glance at the bubble …
+#define PEEK_MS         1500                   // … this long
+static instinct_offer_cbs_t s_offer_cbs;
+static mutex_t s_offer_lock;
+static struct { instinct_offer_t kind; char path[160]; char text[240]; bool question; int64_t since; } s_offer;
+static bool s_speaking, s_speaking_question;
+static int64_t s_last_interaction, s_idea_asked, s_peek_next;
 static atomic_int s_ready_override = -1;
 static int64_t s_unready_since, s_gaze_next;
 static bool s_puzzled;
@@ -192,6 +203,7 @@ static void readiness_tick(void)
 void instinct_yellow_tap(void)
 {
     if (atomic_load(&s_busy)) return;
+    s_last_interaction = clock_us();
     int64_t now = clock_us();
     if (now - s_tap_last > 4 * 1000000LL) s_taps = 0;
     s_tap_last = now; s_taps++;
@@ -217,6 +229,7 @@ void instinct_yellow_tap(void)
 
 void instinct_shaken(int intensity)
 {
+    s_last_interaction = clock_us();
     if (atomic_load(&s_busy)) return;
     int64_t now = clock_us();
     if (!s_shake_last || now - s_shake_last > 1200000) { ui_bounce_start(); LOGI("shaken: into a ball"); }
@@ -227,6 +240,7 @@ void instinct_shaken(int intensity)
 
 void instinct_picked_up(void)
 {
+    s_last_interaction = clock_us();
     if (atomic_load(&s_busy) || s_shake_last) return;
     audio_sfx_play("chirp");
     ui_play_action(UI_ACT_WAVE);
@@ -264,6 +278,73 @@ static void moods_tick(void)
     if (!atomic_load(&s_busy)) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));
 }
 
+void instinct_set_offer_cbs(const instinct_offer_cbs_t *cbs) { if (cbs) s_offer_cbs = *cbs; }
+
+void instinct_offer(instinct_offer_t kind, const char *wav_path, const char *text, bool question)
+{
+    if (!s_offer_lock) return;
+    mutex_lock(s_offer_lock);
+    s_offer.kind = kind; s_offer.question = question; s_offer.since = clock_us();
+    snprintf(s_offer.path, sizeof s_offer.path, "%s", wav_path ? wav_path : "");
+    snprintf(s_offer.text, sizeof s_offer.text, "%s", text ? text : "");
+    mutex_unlock(s_offer_lock);
+    s_idea_asked = 0;
+    if (kind == INSTINCT_OFFER_IDEA) store_setting_set_int("idea_count", store_setting_int("idea_count", 0) + 1);
+    store_event("bubble offered: %s", kind == INSTINCT_OFFER_HELLO ? "hello" : question ? "question" : "share");
+    LOGI("offer %s: %s", kind == INSTINCT_OFFER_HELLO ? "hello" : "idea", text ? text : "");
+}
+
+void instinct_hush(void)
+{
+    if (!s_speaking) return;
+    audio_play_flush(); ui_set_mouth(0);
+    s_speaking = false;
+    LOGI("line hushed");
+}
+
+static void speak_tick(void)   // every 40 ms while a line plays: the beak follows the voice
+{
+    if (!s_speaking) return;
+    if (audio_play_idle()) {
+        s_speaking = false; ui_set_mouth(0);
+        if (s_speaking_question) mood(UI_EMO_CURIOUS, 8000);   // the "?" face: waiting for an answer (the blue key)
+        else mood(UI_EMO_HAPPY, 1500);
+        return;
+    }
+    ui_set_mouth(audio_play_level());
+}
+
+static void offer_tick(int64_t now)   // every 250 ms, when no problem bubble is up
+{
+    if (s_puzzled || !s_offer_lock) return;
+    mutex_lock(s_offer_lock);
+    if (s_offer.kind == INSTINCT_OFFER_IDEA && now - s_offer.since > IDEA_EXPIRE_US) { s_offer.kind = INSTINCT_OFFER_NONE; LOGI("light bulb faded"); }
+    instinct_offer_t kind = s_offer.kind;
+    mutex_unlock(s_offer_lock);
+    bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !s_shake_last && !s_speaking;
+    ui_show_bubble(show ? (kind == INSTINCT_OFFER_HELLO ? UI_BUBBLE_HELLO : UI_BUBBLE_IDEA) : UI_BUBBLE_NONE);
+    if (show && resting() && now >= s_peek_next) {       // a glance up at the bubble now and then
+        s_peek_next = now + PEEK_EVERY_US;
+        mood(UI_EMO_PEEK, PEEK_MS);
+    }
+}
+
+static void idea_schedule(int64_t now)   // every second: time to ask for a light bulb?
+{
+    if (s_puzzled || !s_offer_cbs.want_idea || s_speaking || atomic_load(&s_busy)) return;
+    if (s_offer.kind != INSTINCT_OFFER_NONE) return;
+    if (s_idea_asked && now - s_idea_asked < IDEA_RETRY_US) return;
+    world_state_t st; world_state(&st);
+    if (tod_of(&st) == WORLD_TOD_NIGHT) return;
+    if (now - s_last_interaction < (int64_t)store_setting_int("idea_idle_min", 20) * 60 * 1000000LL) return;
+    char today[11]; world_today(today, sizeof today);
+    if (strcmp(store_setting_str("idea_day", ""), today)) { store_setting_set_str("idea_day", today); store_setting_set_int("idea_count", 0); }
+    if (store_setting_int("idea_count", 0) >= store_setting_int("ideas_per_day", 3)) return;
+    s_idea_asked = now;
+    LOGI("asking for a light bulb");
+    s_offer_cbs.want_idea(s_offer_cbs.user);
+}
+
 static void urge_tick(void)
 {
     if (!s_puzzled) return;
@@ -283,14 +364,23 @@ static void instinct_task(void *arg)
     (void)arg;
     world_state_t st; world_state(&st);
     show(&st);
-    bool away = st.away; world_tod_t tod = tod_of(&st); int tick = 0, quarter = 0;
+    bool away = st.away; world_tod_t tod = tod_of(&st); int tick = 0;
+    int64_t next250 = 0, next1s = 0;
+    s_last_interaction = clock_us();
     for (;;) {
-        clock_sleep_ms(250);
+        clock_sleep_ms(40);
+        int64_t now = clock_us();
+        speak_tick();
+        if (now < next250) continue;
+        next250 = now + 250000;
         shake_tick();
         moods_tick();
         urge_tick();
-        if (++quarter % 4) continue;
+        offer_tick(now);
+        if (now < next1s) continue;
+        next1s = now + 1000000;
         readiness_tick();
+        idea_schedule(now);
         world_state(&st);
         world_tod_t now_tod = tod_of(&st);
         bool changed = st.away != away || now_tod != tod;
@@ -305,6 +395,7 @@ static void instinct_task(void *arg)
 
 esp_err_t instinct_init(void)
 {
+    if (!s_offer_lock) s_offer_lock = mutex_create();
     ui_set_idle(true);
     if (!task_spawn("gugu_instinct", instinct_task, NULL, 6144, 1, 0)) return ESP_FAIL;
     return ESP_OK;
@@ -315,6 +406,7 @@ void instinct_set_tod_override(int tod) { atomic_store(&s_tod_override, tod); }
 void instinct_set_busy(bool in_call)
 {
     atomic_store(&s_busy, in_call);
+    s_last_interaction = clock_us();
     ui_set_idle(!in_call);
     if (!in_call && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
@@ -326,11 +418,29 @@ void instinct_touched(int x, int y)
     if (atomic_load(&s_busy)) return;
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
+    s_last_interaction = now;
     if (s_puzzled && ui_bubble_hit(x, y)) {                 // the bubble: straight to pairing mode, where it gets fixed
         s_last_touch = now;
         board_vibrate(30); audio_sfx_play("pop");
         LOGI("bubble tapped (%s)", reason_name(s_reason));
         if (s_bubble_cb) s_bubble_cb(s_bubble_user);
+        return;
+    }
+    if (!s_puzzled && s_offer.kind != INSTINCT_OFFER_NONE && ui_bubble_hit(x, y)) {   // a friendly bubble: Gugu says its line
+        s_last_touch = now;
+        instinct_offer_t kind; char path[160], text[240]; bool q;
+        mutex_lock(s_offer_lock);
+        kind = s_offer.kind; q = s_offer.question; snprintf(path, sizeof path, "%s", s_offer.path); snprintf(text, sizeof text, "%s", s_offer.text);
+        s_offer.kind = INSTINCT_OFFER_NONE;
+        mutex_unlock(s_offer_lock);
+        ui_show_bubble(UI_BUBBLE_NONE);
+        board_vibrate(20);
+        if (audio_play_file(path) == ESP_OK) {
+            s_speaking = true; s_speaking_question = q;
+            s_mood_until = 0; ui_set_emotion(UI_EMO_HAPPY);
+        }
+        LOGI("bubble tapped: %s", text);
+        if (s_offer_cbs.heard) s_offer_cbs.heard(kind, text, q, s_offer_cbs.user);
         return;
     }
     int hit = ui_scene_hit(x, y);

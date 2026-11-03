@@ -29,7 +29,7 @@ esp_err_t store_init(const char *data_dir, const char *content_dir)
     snprintf(s_content, sizeof s_content, "%s", content_dir);
     store_mount_all();
     char sub[200];
-    const char *dirs[] = { "calls", "ledger", "memory", "diary", "trips", "postcards", "souvenirs", "art", "logs", NULL };
+    const char *dirs[] = { "calls", "ledger", "memory", "diary", "trips", "postcards", "souvenirs", "art", "logs", "voice", NULL };
     mkdirs(s_data);
     for (int i = 0; dirs[i]; i++) { snprintf(sub, sizeof sub, "%s/%s", s_data, dirs[i]); mkdirs(sub); }
     snprintf(sub, sizeof sub, "%s/settings.json", s_data);

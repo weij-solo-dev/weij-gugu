@@ -18,6 +18,7 @@
 #include "art/art.h"
 #include "instinct/instinct.h"
 #include <string.h>
+#include <stdint.h>
 #include <dirent.h>
 #include <time.h>
 #include <stdio.h>
@@ -293,6 +294,31 @@ static int cmd_ready(int argc, char **argv)   // ready auto|yes|setup|wifi|servi
     return 0;
 }
 
+static void console_line(const life_line_t *L, void *user)
+{
+    instinct_offer_t kind = (instinct_offer_t)(intptr_t)user;
+    printf("line %s: %s (%s) %s\n", kind == INSTINCT_OFFER_HELLO ? "hello" : "idea", L->ok ? "ready" : "failed", L->why, L->text);
+    if (L->ok) instinct_offer(kind, L->path, L->text, L->question);
+}
+
+static int cmd_bubble(int argc, char **argv)   // bubble hello|idea: make that line now and put its bubble up
+{
+    if (argc < 2 || (strcmp(argv[1], "hello") && strcmp(argv[1], "idea"))) { printf("usage: bubble hello|idea\n"); return 1; }
+    lang_t l = lang_from_code(store_setting_str("lang", "zh")); if (l == LANG_UNKNOWN) l = LANG_ZH;
+    bool hello = !strcmp(argv[1], "hello");
+    (hello ? life_prepare_hello : life_prepare_idea)(l, console_line, (void *)(intptr_t)(hello ? INSTINCT_OFFER_HELLO : INSTINCT_OFFER_IDEA));
+    printf("making the %s line in %s (the bubble appears when it is ready)\n", argv[1], lang_code(l));
+    return 0;
+}
+
+static int cmd_tap(int argc, char **argv)   // tap x y: a finger on the screen there (466×466), as the touch panel reports it
+{
+    if (argc < 3) { printf("usage: tap x y\n"); return 1; }
+    instinct_touched(atoi(argv[1]), atoi(argv[2]));
+    printf("tapped %s,%s\n", argv[1], argv[2]);
+    return 0;
+}
+
 static int cmd_tod(int argc, char **argv)
 {
     static const char *const N[] = { "night", "sunrise", "day", "dusk" };
@@ -357,6 +383,8 @@ static const cmd_t CMDS[] = {
     { "events", "events [n] — the last n lines of the persistent event log (keys, call states, failures)", cmd_events },
     { "logs", "the diagnostic bundle (boot record, events, console log, last calls), secrets masked", cmd_logs },
     { "ready", "ready auto|yes|setup|wifi|service — force the bubble's reason (it shows after 15 s)", cmd_ready },
+    { "bubble", "bubble hello|idea — make that line now (in the interaction language) and show its bubble", cmd_bubble },
+    { "tap", "tap x y — a touch at that screen point (the bubble sits around 340,165)", cmd_tap },
     { "selftest", "speaker → microphone loopback: does the microphone hear a beep?", cmd_selftest },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
     { "vol", "vol <0-100>", cmd_vol },

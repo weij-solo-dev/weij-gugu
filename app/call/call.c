@@ -302,6 +302,8 @@ void call_key(call_key_t key, bool down, int held_ms)
     update_ring();
 }
 
+void call_set_lang(lang_t lang) { s_cfg.lang_hint = lang; }
+
 void call_hangup(void)
 {
     call_state_t st = call_state();

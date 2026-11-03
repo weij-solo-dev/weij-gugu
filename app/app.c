@@ -22,6 +22,7 @@
 #include "foundation/atomic_file.h"
 #include "foundation/logcap.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,9 @@
 
 static engine_t *s_engine;
 static atomic_bool s_service_ok = true, s_check_due = true;   // the chat vendor's health (see on_service_checked)
+static lang_t s_lang = LANG_ZH;                               // the interaction language (pairing page: settings "lang")
+static enum { HELLO_IDLE, HELLO_MAKING, HELLO_OFFERED } s_hello_state;
+static int64_t s_hello_retry;
 static char s_service_why[120];
 static int64_t s_last_check;
 static bool can_dial(char *why, size_t cap);
@@ -59,6 +63,7 @@ static void on_board_event(const board_event_t *ev, void *user)
     case BOARD_EV_KEY_DOWN:
         store_event("key %s down", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow");
         if (ev->a == BOARD_KEY_BLUE) {
+            instinct_hush();                       // a line from the bubble stops: the child wants to talk
             char why[64];
             if (call_state() == CALL_IDLE && !can_dial(why, sizeof why)) {
                 store_event("call refused: %s", why); instinct_refuse(why);
@@ -127,6 +132,50 @@ static void on_apply(bool wifi_changed, void *user)   // the page saved secrets:
     }
     store_event("settings applied from the page (wifi %s)", wifi_changed ? "rejoined" : "unchanged");
     atomic_store(&s_check_due, true);              // new keys: is the service answering now?
+    lang_t l = lang_from_code(store_setting_str("lang", "zh"));
+    if (l == LANG_UNKNOWN) l = LANG_ZH;
+    if (l != s_lang) {                             // a new interaction language: answers, the voice, and a new self-introduction
+        s_lang = l; mind_set_language(l); call_set_lang(l);
+        s_hello_state = HELLO_IDLE; s_hello_retry = 0;
+        store_event("interaction language: %s", lang_code(l));
+    }
+    mind_set_child(store_setting_str("child_name", NULL), store_setting_int("child_age_months", 0));
+}
+
+// ---- the friendly bubbles: life makes the lines, instinct shows and plays them ----
+static void on_line(const life_line_t *L, void *user)   // on life's worker
+{
+    instinct_offer_t kind = (instinct_offer_t)(intptr_t)user;
+    if (!L->ok) {
+        store_event("line %s failed: %s", kind == INSTINCT_OFFER_HELLO ? "hello" : "idea", L->why);
+        if (kind == INSTINCT_OFFER_HELLO) { s_hello_state = HELLO_IDLE; s_hello_retry = clock_us() + 60 * 1000000LL; }
+        return;
+    }
+    instinct_offer(kind, L->path, L->text, L->question);
+    if (kind == INSTINCT_OFFER_HELLO) s_hello_state = HELLO_OFFERED;
+}
+static void on_want_idea(void *user)   // instinct: time for a light bulb
+{
+    (void)user;
+    char why[96];
+    if (readiness(why, sizeof why) == INSTINCT_READY) life_prepare_idea(s_lang, on_line, (void *)(intptr_t)INSTINCT_OFFER_IDEA);
+}
+static void on_heard(instinct_offer_t kind, const char *text, bool question, void *user)   // the child tapped and heard it
+{
+    (void)user;
+    if (kind == INSTINCT_OFFER_HELLO) { store_setting_set_str("hello_lang", lang_code(s_lang)); s_hello_state = HELLO_IDLE; }
+    if (question) mind_set_asked(text, 3 * 60 * 1000);   // the next three minutes of calls know what the child is answering
+    char said[100]; snprintf(said, sizeof said, "%s", text); mind_utf8_cut(said, 80);
+    store_event("bubble heard (%s): %s", kind == INSTINCT_OFFER_HELLO ? "hello" : question ? "question" : "share", said);
+}
+static void hello_tick(void)   // once a second: the self-introduction, the first time everything works in this language
+{
+    char why[96];
+    if (s_hello_state != HELLO_IDLE || clock_us() < s_hello_retry) return;
+    if (!strcmp(store_setting_str("hello_lang", ""), lang_code(s_lang))) return;
+    if (readiness(why, sizeof why) != INSTINCT_READY || call_state() != CALL_IDLE) return;
+    s_hello_state = HELLO_MAKING;
+    life_prepare_hello(s_lang, on_line, (void *)(intptr_t)INSTINCT_OFFER_HELLO);
 }
 
 // Can a call start right now, and if not, why: setup unfinished (no Wi-Fi configured, a vendor or key missing), Wi-Fi
@@ -243,21 +292,34 @@ void app_main(void)
 #endif
     provider_assign(PROVIDER_ROLE_ASR, asr); provider_assign(PROVIDER_ROLE_CHAT, chat); provider_assign(PROVIDER_ROLE_TTS, tts);
 
+    s_lang = lang_from_code(store_setting_str("lang", "zh"));
+    if (s_lang == LANG_UNKNOWN) s_lang = LANG_ZH;
     mind_config_t mc = { .content_dir = CONTENT_DIR, .child_name = store_setting_str("child_name", NULL),
                          .child_age_months = store_setting_int("child_age_months", 0),
-                         .family_langs = { lang_from_code(store_setting_str("lang1", "zh")), lang_from_code(store_setting_str("lang2", "yue")), lang_from_code(store_setting_str("lang3", "en")) } };
+                         .family_langs = { s_lang, LANG_UNKNOWN, LANG_UNKNOWN } };   // one interaction language (pairing page)
     mind_init(&mc);
 
     s_engine = engine_cascade_create(call_engine_event, NULL);
     call_config_t cc = { .idle_timeout_ms = (uint32_t)store_setting_int("idle_timeout_ms", 12000),
                          .max_call_ms = (uint32_t)store_setting_int("max_call_ms", 10 * 60 * 1000),
-                         .lang_hint = LANG_UNKNOWN, .where = NULL,     // NULL: the mind takes "where" from the world
+                         .lang_hint = s_lang, .where = NULL,           // NULL: the mind takes "where" from the world
                          .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_trouble = on_call_trouble };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
     parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply, .user = NULL };
     parent_set_hooks(&ph);
     life_init();
+    {
+        instinct_offer_cbs_t oc = { .want_idea = on_want_idea, .heard = on_heard, .user = NULL };
+        instinct_set_offer_cbs(&oc);
+    }
+#ifdef GUGU_HOST
+    if (getenv("GUGU_BUBBLE")) {                   // host screenshots: a friendly bubble right away (hello | idea)
+        bool hello = !strcmp(getenv("GUGU_BUBBLE"), "hello");
+        if (hello) s_hello_state = HELLO_MAKING;
+        (hello ? life_prepare_hello : life_prepare_idea)(s_lang, on_line, (void *)(intptr_t)(hello ? INSTINCT_OFFER_HELLO : INSTINCT_OFFER_IDEA));
+    }
+#endif
     call_set_state_listener(on_call_state, NULL);
     if (getenv("GUGU_YELLOW_HOLD")) { board_event_t ev = { .kind = BOARD_EV_KEY_HOLD, .a = BOARD_KEY_YELLOW, .b = BOARD_HOLD_MS }; on_board_event(&ev, NULL); }   // host: the pairing card, for a screenshot
     if (getenv("GUGU_TOD")) instinct_set_tod_override(atoi(getenv("GUGU_TOD")));   // host screenshots: 0 night, 1 sunrise, 2 day, 3 dusk
@@ -310,6 +372,7 @@ void app_main(void)
     for (unsigned sec = 1;; sec++) {
         clock_sleep_ms(1000);
         service_tick();
+        hello_tick();
         if (sec % 10) continue;
         if (sec % 30 == 0) store_logs_flush();   // the captured log reaches flash every 30 s
         LOGI("heartbeat: internal free %u B (min %u B), big free %u B, vbat %d mV%s, call %s",

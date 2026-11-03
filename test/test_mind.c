@@ -101,8 +101,39 @@ TEST(test_mind_memory_books)
     char e[] = "hello"; mind_utf8_cut(e, 10); CHECK_EQ_STR(e, "hello");
 }
 
+TEST(test_mind_lines_and_language)
+{
+    mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .child_age_months = 42, .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
+    CHECK(mind_init(&cfg) == ESP_OK);
+    char s[400];
+    CHECK(mind_line_hello(LANG_ZH, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我是咕咕") != NULL);
+    CHECK(mind_line_hello(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我係咕咕") != NULL);
+    CHECK(mind_line_hello(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "Hi, 小满! I'm Gugu") != NULL);
+    char a[200], b[200];
+    CHECK(mind_line_question(LANG_EN, 0, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_EN, 1, b, sizeof b) == ESP_OK); CHECK(strcmp(a, b) != 0);
+    CHECK(mind_line_question(LANG_YUE, 15, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_YUE, 0, b, sizeof b) == ESP_OK); CHECK_EQ_STR(a, b);   // 15 questions: wraps
+    MEM_BIG_BSS static char sys[2048];
+    CHECK(mind_share_request_build(LANG_EN, "正在开罗", "金字塔是用大石块盖的。", sys, sizeof sys) == ESP_OK);
+    CHECK(strstr(sys, "English") != NULL && strstr(sys, "正在开罗") != NULL && strstr(sys, "金字塔是用大石块盖的。") != NULL && strstr(sys, "小满") != NULL);
+    char t[] = " [happy] 你知道吗？[wave]金字塔很高！ ";
+    mind_strip_tags(t); CHECK_EQ_STR(t, "你知道吗？金字塔很高！");
+    mind_set_language(LANG_EN);                                  // one interaction language: Gugu answers in it whatever it hears
+    CHECK_EQ_INT(mind_reply_lang(LANG_ZH, "你好"), LANG_EN);
+    CHECK_EQ_INT(mind_reply_lang(LANG_UNKNOWN, "你好"), LANG_EN);
+    mind_set_language(LANG_YUE);
+    CHECK_EQ_INT(mind_reply_lang(LANG_EN, "hello"), LANG_YUE);
+    mind_set_asked("你最喜欢什么颜色？", 60000);                 // the question just asked is in block C while fresh
+    mind_prompt_t pr; mind_prompt_build(&pr, LANG_ZH, "在家里", NULL);
+    CHECK(strstr(pr.blocks[3].text, "你最喜欢什么颜色？") != NULL);
+    mind_set_asked("", 0);
+    mind_prompt_build(&pr, LANG_ZH, "在家里", NULL);
+    CHECK(strstr(pr.blocks[3].text, "你最喜欢什么颜色？") == NULL);
+    CHECK(mind_init(&cfg) == ESP_OK);                            // back to the three family languages for the other tests
+}
+
 void test_mind(void)
 {
+    RUN(test_mind_lines_and_language);
     RUN(test_mind_prompt_blocks);
     RUN(test_mind_dialog_ring);
     RUN(test_mind_language_and_normalize);

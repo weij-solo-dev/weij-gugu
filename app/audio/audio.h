@@ -43,3 +43,4 @@ esp_err_t audio_selftest(audio_selftest_t *out);           // ESP_ERR_INVALID_ST
 
 // ---- local sound effects (16 kHz mono PCM / WAV files under content/sfx) ----
 esp_err_t audio_sfx_play(const char *name);                        // "dial", "coo", "whistle", "nosignal" …
+esp_err_t audio_play_file(const char *path);                       // a 16 kHz mono WAV anywhere (data/voice/…): queued like an sfx

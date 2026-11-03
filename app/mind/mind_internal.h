@@ -6,6 +6,8 @@ esp_err_t mind_prompt_load(const char *content_dir);
 void mind_fill(char *dst, size_t cap, const char *tpl, const char *const *pairs);
 const char *mind_block_a(void);           // persona + seed canon + tags, placeholders filled (mind_prompt.c)
 const char *mind_child_name(void);
+bool mind_child_named(void);             // the pairing page set a name (mind_child_name() is otherwise a stand-in)
+void mind_lines_init(const char *content_dir);   // mind_lines.c
 // mind_trip.c
 extern char *mind_trip_tpl;               // content/prompts/trip_card.md
 void mind_trip_block(char *dst, size_t cap);        // the trip part of block B; empty without a card

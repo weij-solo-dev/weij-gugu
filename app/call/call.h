@@ -27,6 +27,7 @@ void         call_key(call_key_t key, bool down, int held_ms);           // app 
 void         call_hangup(void);
 call_state_t call_state(void);
 const char  *call_state_name(call_state_t s);
+void         call_set_lang(lang_t lang);   // the interaction language for the next call (the pairing page changed it)
 typedef void (*call_state_cb)(call_state_t state, void *user);
 void         call_set_state_listener(call_state_cb cb, void *user);
 // Replay harness: dial, feed a 16 kHz WAV as the utterance, release, wait for the turn to finish.

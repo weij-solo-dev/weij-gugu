@@ -18,6 +18,7 @@ esp_err_t mind_init(const mind_config_t *cfg)
 {
     esp_err_t err = mind_prompt_load(cfg->content_dir);
     mind_set_child(cfg->child_name, cfg->child_age_months);
+    mind_lines_init(cfg->content_dir);
     mind_language_set_family(cfg->family_langs);
     mind_memory_init(store_data_dir());
     mind_dialog_reset();

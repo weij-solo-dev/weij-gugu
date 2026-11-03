@@ -8,6 +8,7 @@
 #include "store/store.h"
 #include "provider/provider.h"
 #include "foundation/atomic_file.h"
+#include "foundation/mem.h"
 #include "art/art.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -272,8 +273,40 @@ TEST(test_life_service_check)
     CHECK(s_chk_ok);
 }
 
+static life_line_t s_line; static int s_line_calls;
+static void line_done(const life_line_t *L, void *user) { (void)user; s_line = *L; s_line_calls++; }
+
+TEST(test_life_bubble_lines)
+{
+    fresh();
+    provider_assign(PROVIDER_ROLE_TTS, "fake");
+    mind_set_child("小满", 42);
+    s_line_calls = 0;
+    life_prepare_hello(LANG_ZH, line_done, NULL);                  // tests run it at once (no worker)
+    CHECK_EQ_INT(s_line_calls, 1); CHECK(s_line.ok); CHECK(!s_line.question); CHECK(strstr(s_line.text, "小满") != NULL);
+    size_t n = 0; char *w = file_read_all(s_line.path, &n);
+    CHECK(w != NULL && n > 44 + 16000 * 2); mem_release(w);         // a WAV with more than a second of voice
+    store_setting_set_int("idea_n", 0);
+    life_prepare_idea(LANG_EN, line_done, NULL);                   // no trip yet: a question
+    CHECK(s_line.ok); CHECK(s_line.question); CHECK(strstr(s_line.text, "?") != NULL);
+    provider_fake_script_queue(CARD1);                             // a trip with facts: shares take turns with questions
+    char why[200]; life_plan_t p = { .kind_hint = "deliver", .nights = 2 };
+    CHECK(life_plan_trip(&p, why, sizeof why) == ESP_OK);
+    store_setting_set_int("idea_n", 0);
+    provider_fake_script_queue("[happy]你知道吗？那里的灯塔晚上会一闪一闪！");
+    life_prepare_idea(LANG_ZH, line_done, NULL);
+    CHECK(s_line.ok); CHECK(!s_line.question); CHECK_EQ_STR(s_line.text, "你知道吗？那里的灯塔晚上会一闪一闪！");
+    life_prepare_idea(LANG_ZH, line_done, NULL);
+    CHECK(s_line.ok); CHECK(s_line.question);
+    provider_fake_script_queue("!error 500");                      // the retelling fails: a question instead
+    life_prepare_idea(LANG_ZH, line_done, NULL);
+    CHECK(s_line.ok); CHECK(s_line.question);
+    CHECK_EQ_INT(store_setting_int("idea_n", 0), 3);
+}
+
 void test_life(void)
 {
+    RUN(test_life_bubble_lines);
     RUN(test_life_service_check);
     RUN(test_life_plan_trip_fake);
     RUN(test_life_story_chain);

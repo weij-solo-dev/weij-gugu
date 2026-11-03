@@ -179,8 +179,13 @@ esp_err_t audio_capture_inject_wav(const char *path, bool realtime)
 esp_err_t audio_sfx_play(const char *name)
 {
     char path[200]; snprintf(path, sizeof path, "%s/%s.wav", s_sfx_dir, name);
+    return audio_play_file(path);
+}
+
+esp_err_t audio_play_file(const char *path)
+{
     size_t n; char *buf = file_read_all(path, &n);
-    if (!buf) { LOGW("sfx %s missing", name); return ESP_ERR_NOT_FOUND; }
+    if (!buf) { LOGW("sound %s missing", path); return ESP_ERR_NOT_FOUND; }
     uint32_t sr, bytes; uint16_t ch; size_t off;
     esp_err_t err = ESP_ERR_INVALID_ARG;
     if (wav_parse_header((uint8_t *)buf, n, &sr, &ch, &bytes, &off) && sr == AUDIO_SAMPLE_RATE && ch == 1) {

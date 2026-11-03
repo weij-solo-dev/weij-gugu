@@ -6,7 +6,7 @@ gugu (咕咕) is an electronic pet for children aged 3–5. It is an anthropomor
 in a birdhouse on the child's windowsill, played by an M5Stack StopWatch: a 52 mm round AMOLED with a
 microphone, a speaker, a motion sensor and a battery. Gugu leaves for a trip every few days, mails a
 postcard home each day it is away, can be phoned any time, and comes back with one small souvenir and
-a story. The child speaks English, Mandarin or Cantonese; Gugu answers in the child's language, in one
+a story. The family picks English, Mandarin or Cantonese; Gugu listens and answers in it, in one
 warm, slightly husky voice.
 
 [中文说明 → README_CN.md](README_CN.md)

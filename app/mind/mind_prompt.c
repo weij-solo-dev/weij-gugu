@@ -9,11 +9,19 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include "foundation/clock.h"
 
 static char *s_persona, *s_canon, *s_tags, *s_today_tpl;
 static char *s_examples[4];          // indexed by lang_t
 static char s_child_name[32] = "小朋友";
 static int s_child_age_months;
+static char s_asked[240]; static int64_t s_asked_until;   // the question Gugu just asked from the bubble
+
+void mind_set_asked(const char *question, uint32_t ttl_ms)
+{
+    snprintf(s_asked, sizeof s_asked, "%s", question ? question : "");
+    s_asked_until = clock_us() + (int64_t)ttl_ms * 1000;
+}
 MEM_BIG_BSS static char s_block_a[6144], s_block_a2[2048], s_block_b[8192], s_block_c[1024];
 
 static char *load(const char *dir, const char *rel)
@@ -39,11 +47,14 @@ esp_err_t mind_prompt_load(const char *content_dir)
     return s_persona ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
+static bool s_child_named;
 void mind_set_child(const char *name, int age_months)
 {
     if (name && *name) snprintf(s_child_name, sizeof s_child_name, "%s", name);
+    s_child_named = s_child_named || (name && *name);
     s_child_age_months = age_months;
 }
+bool mind_child_named(void) { return s_child_named; }
 
 const char *mind_child_name(void) { return s_child_name; }
 
@@ -136,6 +147,10 @@ esp_err_t mind_prompt_build(mind_prompt_t *out, lang_t reply_lang, const char *w
                                     "age_phrase", age_phrase, "where", where ? where : "在家里", "mood", mind_mood_sentence(),
                                     "events", events ? events : "", NULL };
     mind_fill(s_block_c, sizeof s_block_c, s_today_tpl ? s_today_tpl : "今天是{date}。你现在{where}。{mood}{events}", pairs_c);
+    if (s_asked[0] && clock_us() < s_asked_until) {   // the child is probably answering what Gugu just asked
+        size_t o = strlen(s_block_c);
+        snprintf(s_block_c + o, sizeof s_block_c - o, "\n你刚才主动问了孩子：「%s」孩子接下来说的话，多半是在回答这个问题。", s_asked);
+    }
 
     out->count = 4;
     out->blocks[0] = (chat_block_t){ s_block_a, true };

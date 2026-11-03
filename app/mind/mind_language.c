@@ -10,6 +10,13 @@ static lang_t s_last = LANG_ZH;
 void mind_language_set_family(const lang_t langs[3])
 {
     memcpy(s_family, langs, sizeof s_family);
+    for (int i = 0; i < 3; i++) if (s_family[i] != LANG_UNKNOWN) { s_last = s_family[i]; break; }   // the fallback starts in the family
+}
+
+void mind_set_language(lang_t lang)
+{
+    lang_t f[3] = { lang, LANG_UNKNOWN, LANG_UNKNOWN };
+    mind_language_set_family(f);
 }
 
 lang_t mind_primary_lang(void)

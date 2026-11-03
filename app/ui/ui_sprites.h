@@ -22,6 +22,7 @@ extern const lv_image_dsc_t spr_gugu_puff;
 extern const lv_image_dsc_t spr_gugu_wave;
 extern const lv_image_dsc_t spr_gugu_urge;
 extern const lv_image_dsc_t spr_gugu_urge_you;
+extern const lv_image_dsc_t spr_gugu_peek;
 extern const lv_image_dsc_t spr_gugu_neutral_open;
 extern const lv_image_dsc_t spr_gugu_happy_open;
 extern const lv_image_dsc_t spr_gugu_laughing_open;
@@ -38,6 +39,7 @@ extern const lv_image_dsc_t spr_gugu_puff_open;
 extern const lv_image_dsc_t spr_gugu_wave_open;
 extern const lv_image_dsc_t spr_gugu_urge_open;
 extern const lv_image_dsc_t spr_gugu_urge_you_open;
+extern const lv_image_dsc_t spr_gugu_peek_open;
 extern const lv_image_dsc_t spr_gugu_blink;
 extern const lv_image_dsc_t spr_case_up;
 extern const lv_image_dsc_t spr_case_down;
@@ -67,6 +69,8 @@ extern const lv_image_dsc_t spr_acc_camera;
 extern const lv_image_dsc_t spr_bubble_setup;
 extern const lv_image_dsc_t spr_bubble_wifi;
 extern const lv_image_dsc_t spr_bubble_service;
+extern const lv_image_dsc_t spr_bubble_hello;
+extern const lv_image_dsc_t spr_bubble_idea;
 extern const lv_image_dsc_t spr_acc_sunglasses_neutral;
 extern const lv_image_dsc_t spr_acc_sunglasses_happy;
 extern const lv_image_dsc_t spr_acc_sunglasses_laughing;
@@ -83,6 +87,7 @@ extern const lv_image_dsc_t spr_acc_sunglasses_puff;
 extern const lv_image_dsc_t spr_acc_sunglasses_wave;
 extern const lv_image_dsc_t spr_acc_sunglasses_urge;
 extern const lv_image_dsc_t spr_acc_sunglasses_urge_you;
+extern const lv_image_dsc_t spr_acc_sunglasses_peek;
 extern const lv_image_dsc_t spr_beak_neutral;
 extern const lv_image_dsc_t spr_beak_happy;
 extern const lv_image_dsc_t spr_beak_curious;
@@ -97,10 +102,11 @@ extern const lv_image_dsc_t spr_beak_puff;
 extern const lv_image_dsc_t spr_beak_wave;
 extern const lv_image_dsc_t spr_beak_urge;
 extern const lv_image_dsc_t spr_beak_urge_you;
+extern const lv_image_dsc_t spr_beak_peek;
 extern const lv_image_dsc_t spr_eyes_blink;
 
-// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, angry, scared, proud, dizzy, puff, wave, urge, urge_you
-#define UI_EMOTION_COUNT 16
+// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, angry, scared, proud, dizzy, puff, wave, urge, urge_you, peek
+#define UI_EMOTION_COUNT 17
 extern const lv_image_dsc_t *const ui_emotion_sprites[UI_EMOTION_COUNT];
 extern const lv_image_dsc_t *const ui_emotion_sprites_open[UI_EMOTION_COUNT];   // same emotions, beak open
 
