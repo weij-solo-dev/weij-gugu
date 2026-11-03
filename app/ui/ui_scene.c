@@ -104,6 +104,14 @@ void ui_show_bubble(ui_bubble_t b)
     ui_unlock();
 }
 
+ui_bubble_t ui_bubble_shown(void)
+{
+    ui_lock();
+    ui_bubble_t b = s_bubble_img && !lv_obj_has_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN) ? s_bubble : UI_BUBBLE_NONE;
+    ui_unlock();
+    return b;
+}
+
 bool ui_bubble_hit(int x, int y)          // the whole sprite, a little generous for small fingers
 {
     ui_lock();
@@ -211,6 +219,20 @@ const char *ui_scene_object_id(int index)
 {
     if (index >= 100 && index < 100 + HOME_N) return HOME[index - 100].id;
     return index >= 0 && index < s_n ? s_obj[index].def.id : "";
+}
+
+int ui_scene_next_visible(int after)
+{
+    int found = -1;
+    ui_lock();
+    if (!ui_scene_is_home && s_n > 0) {
+        for (int k = 1; k <= s_n; k++) {
+            int i = (((after < 0 ? -1 : after) + k) % s_n + s_n) % s_n;
+            if (!lv_obj_has_flag(s_obj[i].img, LV_OBJ_FLAG_HIDDEN)) { found = i; break; }
+        }
+    }
+    ui_unlock();
+    return found;
 }
 
 bool ui_scene_hit_gugu(int sx, int sy)

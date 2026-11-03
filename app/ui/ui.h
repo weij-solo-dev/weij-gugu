@@ -5,10 +5,10 @@
 #include "esp_err.h"
 #include "art/art.h"
 
-typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (worried, eyes on the bubble / on you) + peek (a calm look at the bubble)
+typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (worried, eyes on the bubble / on you) + peek (a calm look at the bubble) + eyeroll (无语)
     UI_EMO_NEUTRAL = 0, UI_EMO_HAPPY, UI_EMO_LAUGHING, UI_EMO_SURPRISED, UI_EMO_CURIOUS,
     UI_EMO_SHY, UI_EMO_SAD, UI_EMO_SLEEPY, UI_EMO_ANGRY, UI_EMO_SCARED, UI_EMO_PROUD, UI_EMO_DIZZY,
-    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_URGE_YOU, UI_EMO_PEEK, UI_EMO_COUNT
+    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_URGE_YOU, UI_EMO_PEEK, UI_EMO_EYEROLL, UI_EMO_COUNT
 } ui_emotion_t;
 
 typedef enum { UI_SCENE_HOME, UI_SCENE_AWAY } ui_scene_t;
@@ -32,6 +32,11 @@ void ui_set_listening(bool on);              // thin pulsing ring while the key 
 typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb
 void ui_show_bubble(ui_bubble_t b);          // the thought bubble at Gugu's upper right, bobbing gently (a call could not start)
 bool ui_bubble_hit(int x, int y);            // a touch on the bubble while it is up
+ui_bubble_t ui_bubble_shown(void);          // the bubble on screen now, or UI_BUBBLE_NONE
+
+// ---- the yellow key's food (ui_feed.c): one item falls from the top and lands beside Gugu's feet ----
+void ui_feed_drop(int food, int land_x);     // food: an index into ui_food_sprites; land_x: the item's left edge, base pixels (116 grid)
+void ui_feed_clear(void);                    // pecked up, or pushed away: gone
 void ui_set_idle(bool on);                   // blink + breathe when nobody is talking to Gugu
 // Shaken: Gugu rolls into a ball and bounces off the round window's rim (a vibration per hit) until stopped.
 void ui_bounce_start(void);
@@ -54,6 +59,7 @@ void ui_scene_set_tod(art_tod_t tod);           // living things leave at night,
 int  ui_scene_hit(int sx, int sy);              // screen px → an object index (home fittings are 100+), or -1
 const char *ui_scene_object_id(int index);
 ui_behave_t ui_scene_poke(int index);           // plays the object's behaviour and returns it, so the caller can pick a sound
+int  ui_scene_next_visible(int after);          // the next trip object after `after` (-1: the first) that is on screen, wrapping; -1 if none (home: none)
 bool ui_scene_hit_gugu(int sx, int sy);
 void ui_home_lamp(bool on);                     // the room's lamp (a touch on it toggles)
 bool ui_home_lamp_is_on(void);

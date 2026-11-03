@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pixelgen as pg
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'app', 'ui')
-EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek']   # ui_emotion_t order
+EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek', 'eyeroll']   # ui_emotion_t order
 
 def rgb565(c):
     r, g, b = c
@@ -90,6 +90,8 @@ def main():
     # v1.1: built-in props (fallbacks behind generated ones), the window pane at four times of day, accessories
     for pid, fn in pg.PROPS.items():
         images.append((f'spr_prop_{pid}', fn(), True))
+    for fid, fn in pg.FOODS.items():                                # the yellow key's food
+        images.append((f'spr_food_{fid}', fn(), True))
     for tod in ('night', 'sunrise', 'day', 'dusk'):
         images.append((f'spr_win_{tod}', pg.window(tod), True))
     images.append(('spr_acc_sun_hat', pg.acc_sun_hat(), True))
@@ -159,6 +161,8 @@ def main():
     h_parts.append('typedef struct { const char *id; const lv_image_dsc_t *img; } ui_prop_sprite_t;')
     h_parts.append('extern const ui_prop_sprite_t ui_prop_sprites[];')
     h_parts.append('extern const int ui_prop_sprite_count;')
+    h_parts.append(f'#define UI_FOOD_COUNT {len(pg.FOODS)}')
+    h_parts.append('extern const ui_prop_sprite_t ui_food_sprites[UI_FOOD_COUNT];   // the yellow key\'s food, by id: ' + ', '.join(pg.FOODS))
     h_parts.append('extern const lv_image_dsc_t *const ui_window_sprites[4];      // night, sunrise, day, dusk')
     h_parts.append('extern const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT];   // dark lenses over that face\'s eyes')
     h_parts.append('extern const int16_t ui_hat_y[UI_EMOTION_COUNT];               // base y of the sun hat for that face (x = 12)')
@@ -167,6 +171,9 @@ def main():
     c_parts.append('    ' + ', '.join(f'{{ "{pid}", &spr_prop_{pid} }}' for pid in pg.PROPS) + ',')
     c_parts.append('};')
     c_parts.append(f'const int ui_prop_sprite_count = {len(pg.PROPS)};')
+    c_parts.append('const ui_prop_sprite_t ui_food_sprites[UI_FOOD_COUNT] = {')
+    c_parts.append('    ' + ', '.join(f'{{ "{fid}", &spr_food_{fid} }}' for fid in pg.FOODS) + ',')
+    c_parts.append('};')
     c_parts.append('const lv_image_dsc_t *const ui_window_sprites[4] = { &spr_win_night, &spr_win_sunrise, &spr_win_day, &spr_win_dusk };')
     c_parts.append('const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT] = {')
     c_parts.append('    ' + ', '.join(f'{{ {img}, {x}, {y} }}' for img, x, y in glasses) + ',')

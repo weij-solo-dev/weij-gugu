@@ -16,6 +16,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static atomic_bool s_busy;                   // a turn is on: the child talks or Gugu answers
 static atomic_bool s_line_open;              // the conversation window is open (s_busy, or the 12 s after an answer)
@@ -23,7 +24,6 @@ static int64_t s_last_touch;
 static atomic_int s_tod_override = -1;
 // timed moods: the face set by play goes back to neutral by itself (checked by the instinct task every 250 ms)
 static int64_t s_mood_until; static ui_emotion_t s_mood_next = UI_EMO_COUNT; static int64_t s_mood_next_until;
-static int s_taps; static int64_t s_tap_last;
 static int64_t s_shake_last;                 // the ball keeps bouncing while shakes keep coming
 
 // Not ready to call (no Wi-Fi, offline, no key): a gear in a thought bubble at Gugu's upper right; Gugu, in a hurry,
@@ -47,6 +47,39 @@ static mutex_t s_offer_lock;
 static struct { instinct_offer_t kind; char path[160]; char text[240]; bool question; int64_t since; } s_offer;
 static bool s_speaking, s_speaking_question;
 static int64_t s_last_interaction, s_idea_asked, s_peek_next;
+
+// The feed key (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等），然后 gugu 完成拾起作出相关反应").
+// Each item has two reactions and a chance for the first; `then` is a second face after then_ms (UI_EMO_COUNT: none).
+typedef struct { ui_emotion_t face, then; uint16_t then_ms; const char *sfx; int act; uint8_t pct; } feed_react_t;   // act: a ui_action_t, -1 none
+typedef struct { const char *id; uint8_t weight; feed_react_t r[2]; } food_t;
+#define NO_ACT (-1)
+static const food_t FOOD[] = {   // the order of ui_food_sprites
+    { "corn",     22, { { UI_EMO_HAPPY,     UI_EMO_COUNT,    0,    "crunch", UI_ACT_JUMP, 75 }, { UI_EMO_LAUGHING, UI_EMO_COUNT, 0, "crunch", NO_ACT, 0 } } },
+    { "nut",      18, { { UI_EMO_HAPPY,     UI_EMO_COUNT,    0,    "crunch", NO_ACT,      70 }, { UI_EMO_PROUD,    UI_EMO_COUNT, 0, "crunch", NO_ACT, 0 } } },
+    { "burger",   10, { { UI_EMO_SURPRISED, UI_EMO_LAUGHING, 1200, "crunch", NO_ACT,      70 }, { UI_EMO_PUFF,     UI_EMO_COUNT, 0, "pop",    NO_ACT, 0 } } },
+    { "cake",     10, { { UI_EMO_LAUGHING,  UI_EMO_COUNT,    0,    "chirp",  NO_ACT,      70 }, { UI_EMO_SHY,      UI_EMO_COUNT, 0, "chirp",  NO_ACT, 0 } } },
+    { "broccoli", 10, { { UI_EMO_EYEROLL,   UI_EMO_COUNT,    0,    NULL,     NO_ACT,      70 }, { UI_EMO_ANGRY,    UI_EMO_COUNT, 0, NULL,     NO_ACT, 0 } } },
+    { "chili",     8, { { UI_EMO_SURPRISED, UI_EMO_ANGRY,    900,  "pop",    NO_ACT,      80 }, { UI_EMO_DIZZY,    UI_EMO_COUNT, 0, "pop",    NO_ACT, 0 } } },
+    { "coin",     12, { { UI_EMO_PROUD,     UI_EMO_COUNT,    0,    "bell",   NO_ACT,      70 }, { UI_EMO_HAPPY,    UI_EMO_COUNT, 0, "bell",   UI_ACT_FLY, 0 } } },
+    { "sock",     10, { { UI_EMO_EYEROLL,   UI_EMO_COUNT,    0,    NULL,     UI_ACT_SHAKE_HEAD, 60 }, { UI_EMO_ANGRY, UI_EMO_COUNT, 0, NULL,  NO_ACT, 0 } } },
+};
+#define FOOD_N ((int)(sizeof FOOD / sizeof FOOD[0]))
+#define FEED_LAND_MS   450              // ui_feed.c's fall
+#define FEED_PECK_MS   650
+#define FEED_GONE_MS   900
+#define FEED_REACT_MS  2000
+#define FEED_FULL_N    5                // this many eaten within FEED_FULL_US and it pushes the next one away
+#define FEED_FULL_US   (60 * 1000000LL)
+static int s_feed_food = -1;            // the item falling or on the ground, -1 none
+static int64_t s_feed_t0, s_feed_done_at;
+static uint8_t s_feed_step; static bool s_feed_full;
+static int s_feed_queue;                // presses waiting for the current item (at most 3)
+static int64_t s_eaten[FEED_FULL_N]; static int s_eaten_i;
+static int s_prop_last = -1;            // the yellow key pokes the trip's props in turn
+// One random stream for the feeding, whatever task presses: newlib keeps rand() per FreeRTOS task, so a seed in the
+// key's task left the instinct task (queued drops) replaying the same feast after every boot.
+static uint32_t s_rng = 2463534242u;
+static uint32_t rng(void) { uint32_t x = s_rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; return s_rng = x ? x : 2463534242u; }
 static atomic_int s_ready_override = -1;
 static int64_t s_unready_since, s_gaze_next;
 static bool s_puzzled;
@@ -201,31 +234,123 @@ static void readiness_tick(void)
 // The pigeon whistle: Gugu answers one (a whistle back and a wave), flies a loop for a couple in a row,
 // and after five or more in quick succession gets dizzy, then cross for a moment, then is fine again.
 // At night it only stirs in its sleep.
+static void feed_abort(void)
+{
+    if (s_feed_food < 0 && !s_feed_queue) return;
+    ui_feed_clear();
+    s_feed_food = -1; s_feed_queue = 0;
+}
+
+static void feed_start(int64_t now)
+{
+    int roll = (int)(rng() % 100), food = 0;
+    for (int acc = 0; food < FOOD_N - 1; food++) { acc += FOOD[food].weight; if (roll < acc) break; }
+    int oldest = s_eaten[s_eaten_i % FEED_FULL_N];          // the fifth-last bite: within a minute means full
+    s_feed_full = oldest && now - oldest < FEED_FULL_US;
+    ui_feed_drop(food, (rng() & 1) ? 20 : 79);            // beside the feet, left or right
+    board_vibrate(15);
+    s_feed_food = food; s_feed_t0 = now; s_feed_step = 0;
+    LOGI("fed: a %s falls%s", FOOD[food].id, s_feed_full ? " (Gugu is full)" : "");
+}
+
+static int64_t feed_react(int food)   // returns how long the reaction lasts, µs
+{
+    const feed_react_t *r = &FOOD[food].r[(int)(rng() % 100) < FOOD[food].r[0].pct ? 0 : 1];
+    s_mood_until = 0;
+    mood(r->face, r->then != UI_EMO_COUNT ? r->then_ms : FEED_REACT_MS);
+    if (r->then != UI_EMO_COUNT) { s_mood_next = r->then; s_mood_next_until = 1800; }
+    if (r->sfx) audio_sfx_play(r->sfx);
+    if (r->act != NO_ACT) ui_play_action((ui_action_t)r->act);
+    if (r->face == UI_EMO_SURPRISED && r->then == UI_EMO_ANGRY) board_vibrate(60);   // spicy!
+    store_event("fed a %s", FOOD[food].id);
+    return (int64_t)((r->then != UI_EMO_COUNT ? r->then_ms + 1800 : FEED_REACT_MS)) * 1000;
+}
+
+static void feed_tick(int64_t now)   // every 40 ms while something is falling, on the ground or being reacted to
+{
+    if (s_feed_food < 0) return;
+    int64_t t = (now - s_feed_t0) / 1000;
+    if (s_feed_step == 0 && t >= FEED_LAND_MS) { audio_sfx_play("tap"); s_feed_step = 1; }
+    if (s_feed_step == 1 && t >= FEED_PECK_MS) {
+        s_feed_step = 2;
+        if (s_feed_full) { s_mood_until = 0; mood(UI_EMO_EYEROLL, 1800); ui_play_action(UI_ACT_SHAKE_HEAD); LOGI("fed: full, the %s is pushed away", FOOD[s_feed_food].id); }
+        else ui_play_action(UI_ACT_PECK);
+    }
+    if (s_feed_step == 2 && t >= (s_feed_full ? 1900 : FEED_GONE_MS)) {
+        ui_feed_clear();
+        s_feed_step = 3;
+        if (s_feed_full) s_feed_done_at = now + 300000;
+        else { s_feed_done_at = now + feed_react(s_feed_food); s_eaten[s_eaten_i++ % FEED_FULL_N] = now; }
+    }
+    if (s_feed_step == 3 && now >= s_feed_done_at) {
+        s_feed_food = -1;
+        if (s_feed_queue > 0) { s_feed_queue--; feed_start(now); }
+    }
+}
+
+// An object of the scene reacts (a touch on it, or the yellow key): its behaviour, a buzz, a sound, a look from Gugu.
+static void poke_object(int hit)
+{
+    const char *id = ui_scene_object_id(hit);
+    ui_behave_t b = ui_scene_poke(hit);
+    board_vibrate(30);
+    const char *sfx = b == UI_BEHAVE_TOGGLE ? "bell" : b == UI_BEHAVE_WIGGLE ? "tap" : b == UI_BEHAVE_BOUNCE || b == UI_BEHAVE_WAVE ? "chirp" :
+                      !strcmp(id, "window") ? "whistle" : !strcmp(id, "shelf") ? "pop" : "tap";
+    audio_sfx_play(sfx);
+    if (b == UI_BEHAVE_WAVE || b == UI_BEHAVE_BOUNCE) { ui_play_action(UI_ACT_WAVE); mood(UI_EMO_HAPPY, 2500); }
+    else if (!strcmp(id, "window")) { ui_play_action(UI_ACT_WHISTLE); mood(UI_EMO_CURIOUS, 2500); }
+    else ui_play_action(UI_ACT_NOD);
+    LOGI("poked %s → %s", id, sfx);
+}
+
+// A bubble is up: the problem one opens pairing mode, a friendly one plays its line. False when no bubble is shown.
+static bool bubble_press(int64_t now)
+{
+    ui_bubble_t b = ui_bubble_shown();
+    if (b == UI_BUBBLE_NONE) return false;
+    s_last_touch = now;
+    if (b == UI_BUBBLE_SETUP || b == UI_BUBBLE_WIFI || b == UI_BUBBLE_SERVICE) {
+        board_vibrate(30); audio_sfx_play("pop");
+        LOGI("bubble pressed (%s)", reason_name(s_reason));
+        if (s_bubble_cb) s_bubble_cb(s_bubble_user);
+        return true;
+    }
+    instinct_offer_t kind; char path[160], text[240]; bool q;
+    mutex_lock(s_offer_lock);
+    kind = s_offer.kind; q = s_offer.question; snprintf(path, sizeof path, "%s", s_offer.path); snprintf(text, sizeof text, "%s", s_offer.text);
+    s_offer.kind = INSTINCT_OFFER_NONE;
+    mutex_unlock(s_offer_lock);
+    if (kind == INSTINCT_OFFER_NONE) return false;
+    ui_show_bubble(UI_BUBBLE_NONE);
+    board_vibrate(20);
+    if (audio_play_file(path) == ESP_OK) {
+        s_speaking = true; s_speaking_question = q;
+        s_mood_until = 0; ui_set_emotion(UI_EMO_HAPPY);
+    }
+    LOGI("bubble pressed: %s", text);
+    if (s_offer_cbs.heard) s_offer_cbs.heard(kind, text, q, s_offer_cbs.user);
+    return true;
+}
+
 void instinct_yellow_tap(void)
 {
-    if (atomic_load(&s_busy)) return;
-    s_last_interaction = clock_us();
+    if (atomic_load(&s_busy) || s_speaking) return;
     int64_t now = clock_us();
-    if (now - s_tap_last > 4 * 1000000LL) s_taps = 0;
-    s_tap_last = now; s_taps++;
+    s_last_interaction = now;
+    static bool seeded;
+    if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
+    if (bubble_press(now)) return;                            // 1. a bubble: the same as tapping it
+    int i = ui_scene_next_visible(s_prop_last);               // 2. the trip's props, each press the next
+    if (i >= 0) { s_prop_last = i; poke_object(i); return; }
     world_state_t st; world_state(&st);
-    if (tod_of(&st) == WORLD_TOD_NIGHT) {
+    if (tod_of(&st) == WORLD_TOD_NIGHT) {                     // asleep: it only stirs
         audio_sfx_play("coo"); ui_play_action(UI_ACT_NOD); mood(UI_EMO_SLEEPY, 2500);
-        LOGI("yellow tap at night: stirs");
+        LOGI("yellow at night: stirs");
         return;
     }
-    board_vibrate(20);
-    if (s_taps >= 5) {
-        audio_sfx_play("pop");
-        mood(UI_EMO_DIZZY, 1800); s_mood_next = UI_EMO_ANGRY; s_mood_next_until = 2000;
-        LOGI("yellow tap x%d: dizzy, then cross", s_taps);
-    } else if (s_taps >= 2) {
-        audio_sfx_play("whistle"); ui_play_action(UI_ACT_FLY); mood(UI_EMO_HAPPY, 2000);
-        LOGI("yellow tap x%d: a loop", s_taps);
-    } else {
-        audio_sfx_play("whistle"); ui_play_action(UI_ACT_WAVE); mood(UI_EMO_HAPPY, 1500);
-        LOGI("yellow tap: whistles back");
-    }
+    if (s_shake_last) return;                                 // a ball does not eat
+    if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // 3. the feed key: one more is coming
+    feed_start(now);
 }
 
 void instinct_shaken(int intensity)
@@ -233,7 +358,7 @@ void instinct_shaken(int intensity)
     s_last_interaction = clock_us();
     if (atomic_load(&s_busy)) return;
     int64_t now = clock_us();
-    if (!s_shake_last || now - s_shake_last > 1200000) { ui_bounce_start(); LOGI("shaken: into a ball"); }
+    if (!s_shake_last || now - s_shake_last > 1200000) { feed_abort(); ui_bounce_start(); LOGI("shaken: into a ball"); }
     else ui_bounce_kick(intensity);
     s_shake_last = now;
     s_mood_until = 0;
@@ -372,6 +497,7 @@ static void instinct_task(void *arg)
         clock_sleep_ms(40);
         int64_t now = clock_us();
         speak_tick();
+        feed_tick(now);
         if (now < next250) continue;
         next250 = now + 250000;
         shake_tick();
@@ -410,6 +536,7 @@ void instinct_set_busy(bool in_turn)
     s_last_interaction = clock_us();
     ui_set_idle(!in_turn);
     if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
+    if (in_turn) feed_abort();                                // and whatever was falling goes
     if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
 
@@ -423,45 +550,9 @@ void instinct_touched(int x, int y)
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
     s_last_interaction = now;
-    if (s_puzzled && ui_bubble_hit(x, y)) {                 // the bubble: straight to pairing mode, where it gets fixed
-        s_last_touch = now;
-        board_vibrate(30); audio_sfx_play("pop");
-        LOGI("bubble tapped (%s)", reason_name(s_reason));
-        if (s_bubble_cb) s_bubble_cb(s_bubble_user);
-        return;
-    }
-    if (!s_puzzled && s_offer.kind != INSTINCT_OFFER_NONE && ui_bubble_hit(x, y)) {   // a friendly bubble: Gugu says its line
-        s_last_touch = now;
-        instinct_offer_t kind; char path[160], text[240]; bool q;
-        mutex_lock(s_offer_lock);
-        kind = s_offer.kind; q = s_offer.question; snprintf(path, sizeof path, "%s", s_offer.path); snprintf(text, sizeof text, "%s", s_offer.text);
-        s_offer.kind = INSTINCT_OFFER_NONE;
-        mutex_unlock(s_offer_lock);
-        ui_show_bubble(UI_BUBBLE_NONE);
-        board_vibrate(20);
-        if (audio_play_file(path) == ESP_OK) {
-            s_speaking = true; s_speaking_question = q;
-            s_mood_until = 0; ui_set_emotion(UI_EMO_HAPPY);
-        }
-        LOGI("bubble tapped: %s", text);
-        if (s_offer_cbs.heard) s_offer_cbs.heard(kind, text, q, s_offer_cbs.user);
-        return;
-    }
+    if (ui_bubble_hit(x, y) && bubble_press(now)) return;    // the bubble: pairing mode, or Gugu says its line
     int hit = ui_scene_hit(x, y);
-    if (hit >= 0) {
-        s_last_touch = now;
-        const char *id = ui_scene_object_id(hit);
-        ui_behave_t b = ui_scene_poke(hit);
-        board_vibrate(30);
-        const char *sfx = b == UI_BEHAVE_TOGGLE ? "bell" : b == UI_BEHAVE_WIGGLE ? "tap" : b == UI_BEHAVE_BOUNCE || b == UI_BEHAVE_WAVE ? "chirp" :
-                          !strcmp(id, "window") ? "whistle" : !strcmp(id, "shelf") ? "pop" : "tap";
-        audio_sfx_play(sfx);
-        if (b == UI_BEHAVE_WAVE || b == UI_BEHAVE_BOUNCE) { ui_play_action(UI_ACT_WAVE); mood(UI_EMO_HAPPY, 2500); }
-        else if (!strcmp(id, "window")) { ui_play_action(UI_ACT_WHISTLE); mood(UI_EMO_CURIOUS, 2500); }
-        else ui_play_action(UI_ACT_NOD);
-        LOGI("touched %s → %s", id, sfx);
-        return;
-    }
+    if (hit >= 0) { s_last_touch = now; poke_object(hit); return; }
     if (!ui_scene_hit_gugu(x, y)) return;
     if (now - s_last_touch < 1500000) return;     // one reaction per 1.5 s
     s_last_touch = now;

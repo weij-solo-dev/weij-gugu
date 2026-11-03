@@ -29,6 +29,7 @@ rnd = random.Random(5)
 write('tap', [5000 * env(i, int(SR * 0.05), 0.002, 0.03) * math.sin(2 * math.pi * 1900 * i / SR) for i in range(int(SR * 0.05))])
 write('bell', [6000 * math.exp(-6 * i / SR) * (math.sin(2 * math.pi * 1318 * i / SR) + 0.5 * math.sin(2 * math.pi * 2637 * i / SR)) / 1.5 for i in range(int(SR * 0.45))])
 write('beep', tone([1046], 0.16, 9500))
+write('crunch', [5200 * env(i % int(SR * 0.07), int(SR * 0.07), 0.003, 0.05) * rnd.uniform(-1, 1) * (1 if (i // int(SR * 0.07)) % 2 == 0 else 0) for i in range(int(SR * 0.28))])   # two bites: nom nom
 write('static', [4200 * env(i, int(SR * 0.35), 0.01, 0.12) * rnd.uniform(-1, 1) for i in range(int(SR * 0.35))])
 write('pop', [5500 * env(i, int(SR * 0.08), 0.003, 0.05) * math.sin(2 * math.pi * (600 - 400 * i / (SR * 0.08)) * i / SR) for i in range(int(SR * 0.08))])
 print('sfx written to', OUT)

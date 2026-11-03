@@ -11,7 +11,10 @@ void instinct_set_busy(bool in_turn);       // a turn is on (the line opening, l
 void instinct_set_line_open(bool open);     // the conversation window, the 12 s after an answer included: no bubbles meanwhile
 void instinct_touched(int x, int y);        // app forwards touch events
 void instinct_set_tod_override(int tod);    // -1 follows the clock; else a world_tod_t, for screenshots and tests
-void instinct_yellow_tap(void);             // the yellow key's play: a pigeon whistle it answers; press it a lot and it gets dizzy, then cross
+// The yellow key, in order: a bubble is up → the same as tapping it; the trip's scene has props → the next one reacts
+// (each press the next); otherwise it feeds Gugu: something falls (corn, a nut, a burger … a coin, a sock), Gugu pecks it
+// up and reacts (happy, laughing, an eye-roll, cross …); five in a minute and it is full. At night it only stirs.
+void instinct_yellow_tap(void);
 void instinct_shaken(int intensity);        // IMU: rolls into a ball and bounces off the rim; when it stops, dizzy, then cross, then fine
 void instinct_picked_up(void);              // IMU: looks up at you
 void instinct_refuse(const char *why);      // the blue key when a call cannot start (offline, no key): a buzz, a head shake, a sad face

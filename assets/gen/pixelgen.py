@@ -537,6 +537,9 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         (lx0, ly0, _, _), (rx0, ry0, _, _) = eye_boxes
         c.hline(rx0 + 1, rx0 + D - 3, ry0 - 3, P['line']); c.put(rx0 + D - 2, ry0 - 2, P['line'])   # the raised brow
         c.hline(lx0 + 2, lx0 + D - 3, ly0 - 3, P['line'])                                            # the other one flat and low
+    elif emotion == 'eyeroll':                                                             # 无语: the eyes rolled up out of sight, a "…"
+        eye_open(exl, ey, look=(0, -3)); eye_open(exr, ey, look=(0, -3))
+        for i in range(3): c.put(int(cx) + 14 + 3 * i, ey - 9, P['hi'])
     elif emotion == 'peek':                                                                # something to say: a calm look up at the bubble
         eye_open(exl, ey, look=(2, -2)); eye_open(exr, ey, look=(2, -2))
     elif emotion in ('urge', 'urge_you'):                                                  # nothing is set up: in a hurry, eyes on you, then on the gear bubble
@@ -859,6 +862,72 @@ def prop_seagull():
 
 PROPS = {'lamp': prop_lamp, 'bench': prop_bench, 'mailbox': prop_mailbox, 'tree': prop_tree, 'palm': prop_palm, 'umbrella': prop_umbrella,
          'lounger': prop_lounger, 'boat': prop_boat, 'lantern': prop_lantern, 'flag': prop_flag, 'cat': prop_cat, 'seagull': prop_seagull}
+
+# ---- the yellow key's food: what falls from the top for Gugu to peck up (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等）") ----
+def food_corn():
+    c = Canvas(12, 14); P = PAL
+    c.ellipse(6, 5.5, 3.2, 5.2, P['glow'])
+    for y in range(1, 11, 2):
+        for x in range(4, 9, 2): c.put(x, y, P['straw2'])
+    c.ellipse(3.2, 10, 2.6, 3.8, P['green'], pred=lambda x, y: x <= 5); c.ellipse(8.8, 10, 2.6, 3.8, P['green2'], pred=lambda x, y: x >= 6)
+    return outline(c)
+
+def food_nut():
+    c = Canvas(12, 12); P = PAL
+    c.ellipse(6, 7.5, 4.0, 4.0, P['brown']); c.ellipse(5, 6.5, 1.4, 1.6, P['wood'] if 'wood' in P else P['straw'])
+    c.ellipse(6, 4.0, 5.0, 2.4, P['brown2']); c.rect(5, 0, 2, 2, P['brown2'])
+    return outline(c)
+
+def food_burger():
+    c = Canvas(14, 12); P = PAL
+    c.ellipse(7, 3.5, 6.0, 3.2, P['straw'], pred=lambda x, y: y <= 4)
+    for (x, y) in ((4, 2), (7, 1), (10, 2), (6, 3), (9, 3)): c.put(x, y, P['white'])
+    c.rect(1, 5, 12, 1, P['green']); c.put(0, 5, P['green']); c.put(13, 5, P['green'])
+    c.rect(1, 6, 12, 1, P['glow']); c.put(10, 7, P['glow'])
+    c.rect(1, 7, 12, 2, P['brown2'])
+    c.rect(1, 9, 12, 2, P['straw']); c.rect(2, 10, 10, 1, P['straw2'])
+    return outline(c)
+
+def food_cake():
+    c = Canvas(12, 14); P = PAL
+    for y in range(8, 13):
+        inset = (y - 8) // 2
+        c.hline(2 + inset, 9 - inset, y, P['red'] if (y % 2) else P['red2'])
+    c.ellipse(6, 6.5, 4.6, 2.6, P['cheek']); c.ellipse(6, 4.5, 3.2, 2.0, P['white'])
+    c.rect(5, 1, 2, 2, P['red']); c.put(6, 0, P['green2'])
+    return outline(c)
+
+def food_broccoli():
+    c = Canvas(12, 14); P = PAL
+    c.rect(5, 8, 2, 5, P['green3']); c.put(4, 12, P['green3']); c.put(7, 12, P['green3'])
+    c.ellipse(3.6, 5.5, 2.8, 2.8, P['green2']); c.ellipse(8.4, 5.5, 2.8, 2.8, P['green2']); c.ellipse(6, 3.6, 3.2, 3.0, P['green'])
+    c.put(5, 2, P['green3']); c.put(8, 4, P['green3'])
+    return outline(c)
+
+def food_chili():
+    c = Canvas(12, 14); P = PAL
+    rot_ellipse(c, 6.2, 7.8, 5.4, 2.4, math.radians(62), P['red'])     # a plump pod, leaning
+    rot_ellipse(c, 5.0, 6.6, 2.6, 0.9, math.radians(62), P['white'])   # the shine
+    c.put(8, 12, P['red2']); c.put(8, 13, P['red2']); c.put(7, 11, P['red2'])   # the tip curling
+    c.rect(3, 1, 4, 2, P['green']); c.put(4, 0, P['green2'])           # the cap and stalk
+    return outline(c)
+
+def food_coin():
+    c = Canvas(12, 12); P = PAL
+    c.ellipse(6, 6, 5.0, 5.0, P['straw2']); c.ellipse(6, 6, 3.9, 3.9, P['glow'])
+    c.rect(5, 3, 2, 6, P['straw2']); c.rect(3, 5, 6, 2, P['straw2'])    # a plus pressed into it
+    c.put(3, 3, P['white']); c.put(4, 2, P['white'])
+    return outline(c)
+
+def food_sock():
+    c = Canvas(12, 14); P = PAL
+    c.rect(3, 0, 5, 9, P['white']); c.rect(3, 8, 8, 4, P['white']); c.ellipse(9.5, 10, 1.6, 2.0, P['white'])
+    for y in (2, 5): c.rect(3, y, 5, 1, P['red'])
+    c.rect(3, 0, 5, 1, P['red2']); c.rect(9, 9, 2, 3, P['grey'])
+    return outline(c)
+
+FOODS = {'corn': food_corn, 'nut': food_nut, 'burger': food_burger, 'cake': food_cake, 'broccoli': food_broccoli,
+         'chili': food_chili, 'coin': food_coin, 'sock': food_sock}
 
 def acc_sun_hat():
     c = Canvas(24, 9); P = PAL

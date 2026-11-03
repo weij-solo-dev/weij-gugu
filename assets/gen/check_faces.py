@@ -9,7 +9,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 import pixelgen as pg
 
-EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek']
+EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek', 'eyeroll']
 CLOSED = {'happy', 'laughing', 'sleepy', 'proud', 'dizzy', 'puff', 'blink'}   # marks that must keep clear of the frame
 
 

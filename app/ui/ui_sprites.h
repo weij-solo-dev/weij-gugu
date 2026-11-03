@@ -23,6 +23,7 @@ extern const lv_image_dsc_t spr_gugu_wave;
 extern const lv_image_dsc_t spr_gugu_urge;
 extern const lv_image_dsc_t spr_gugu_urge_you;
 extern const lv_image_dsc_t spr_gugu_peek;
+extern const lv_image_dsc_t spr_gugu_eyeroll;
 extern const lv_image_dsc_t spr_gugu_neutral_open;
 extern const lv_image_dsc_t spr_gugu_happy_open;
 extern const lv_image_dsc_t spr_gugu_laughing_open;
@@ -40,6 +41,7 @@ extern const lv_image_dsc_t spr_gugu_wave_open;
 extern const lv_image_dsc_t spr_gugu_urge_open;
 extern const lv_image_dsc_t spr_gugu_urge_you_open;
 extern const lv_image_dsc_t spr_gugu_peek_open;
+extern const lv_image_dsc_t spr_gugu_eyeroll_open;
 extern const lv_image_dsc_t spr_gugu_blink;
 extern const lv_image_dsc_t spr_case_up;
 extern const lv_image_dsc_t spr_case_down;
@@ -60,6 +62,14 @@ extern const lv_image_dsc_t spr_prop_lantern;
 extern const lv_image_dsc_t spr_prop_flag;
 extern const lv_image_dsc_t spr_prop_cat;
 extern const lv_image_dsc_t spr_prop_seagull;
+extern const lv_image_dsc_t spr_food_corn;
+extern const lv_image_dsc_t spr_food_nut;
+extern const lv_image_dsc_t spr_food_burger;
+extern const lv_image_dsc_t spr_food_cake;
+extern const lv_image_dsc_t spr_food_broccoli;
+extern const lv_image_dsc_t spr_food_chili;
+extern const lv_image_dsc_t spr_food_coin;
+extern const lv_image_dsc_t spr_food_sock;
 extern const lv_image_dsc_t spr_win_night;
 extern const lv_image_dsc_t spr_win_sunrise;
 extern const lv_image_dsc_t spr_win_day;
@@ -88,6 +98,7 @@ extern const lv_image_dsc_t spr_acc_sunglasses_wave;
 extern const lv_image_dsc_t spr_acc_sunglasses_urge;
 extern const lv_image_dsc_t spr_acc_sunglasses_urge_you;
 extern const lv_image_dsc_t spr_acc_sunglasses_peek;
+extern const lv_image_dsc_t spr_acc_sunglasses_eyeroll;
 extern const lv_image_dsc_t spr_beak_neutral;
 extern const lv_image_dsc_t spr_beak_happy;
 extern const lv_image_dsc_t spr_beak_curious;
@@ -103,10 +114,11 @@ extern const lv_image_dsc_t spr_beak_wave;
 extern const lv_image_dsc_t spr_beak_urge;
 extern const lv_image_dsc_t spr_beak_urge_you;
 extern const lv_image_dsc_t spr_beak_peek;
+extern const lv_image_dsc_t spr_beak_eyeroll;
 extern const lv_image_dsc_t spr_eyes_blink;
 
-// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, angry, scared, proud, dizzy, puff, wave, urge, urge_you, peek
-#define UI_EMOTION_COUNT 17
+// Emotion sprites indexed by ui_emotion_t order: neutral, happy, laughing, surprised, curious, shy, sad, sleepy, angry, scared, proud, dizzy, puff, wave, urge, urge_you, peek, eyeroll
+#define UI_EMOTION_COUNT 18
 extern const lv_image_dsc_t *const ui_emotion_sprites[UI_EMOTION_COUNT];
 extern const lv_image_dsc_t *const ui_emotion_sprites_open[UI_EMOTION_COUNT];   // same emotions, beak open
 
@@ -120,6 +132,8 @@ extern const bool ui_blink_fits[UI_EMOTION_COUNT];          // that face equals 
 typedef struct { const char *id; const lv_image_dsc_t *img; } ui_prop_sprite_t;
 extern const ui_prop_sprite_t ui_prop_sprites[];
 extern const int ui_prop_sprite_count;
+#define UI_FOOD_COUNT 8
+extern const ui_prop_sprite_t ui_food_sprites[UI_FOOD_COUNT];   // the yellow key's food, by id: corn, nut, burger, cake, broccoli, chili, coin, sock
 extern const lv_image_dsc_t *const ui_window_sprites[4];      // night, sunrise, day, dusk
 extern const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT];   // dark lenses over that face's eyes
 extern const int16_t ui_hat_y[UI_EMOTION_COUNT];               // base y of the sun hat for that face (x = 12)
