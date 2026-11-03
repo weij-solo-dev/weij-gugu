@@ -21,7 +21,8 @@ typedef struct {
 static slot_t s_obj[UI_MAX_OBJECTS];
 static int s_n;
 static art_tod_t s_tod = ART_TOD_DAY;
-static lv_obj_t *s_win_img, *s_acc_img;
+static lv_obj_t *s_win_img, *s_acc_img, *s_bubble_img;
+static lv_timer_t *s_bubble_timer; static bool s_bubble_up;
 static char s_acc[16];
 static bool s_lamp_on = true;
 bool ui_scene_is_home = true;
@@ -61,9 +62,39 @@ void ui_scene_init(lv_obj_t *scr)
     for (int i = 0; i < UI_MAX_OBJECTS; i++) s_obj[i].img = mk(scr);
 }
 
-void ui_scene_init_accessory(void)   // after the pigeon exists: the overlay is its child
+void ui_scene_init_accessory(void)   // after the pigeon exists: the overlay is its child; the bubble sits above it on the screen
 {
     s_acc_img = mk(ui_gugu_img);
+    s_bubble_img = mk(lv_obj_get_parent(ui_gugu_img));
+    lv_image_set_src(s_bubble_img, &spr_bubble_gear);
+}
+
+// ---- the gear bubble: up at Gugu's upper right while nothing is set up, bobbing a pixel every 600 ms ----
+#define BUBBLE_X 70                          // base pixels on the 116 grid: its trailing puffs end near the head
+#define BUBBLE_Y 31
+static void bubble_bob(lv_timer_t *t)
+{
+    (void)t;
+    s_bubble_up = !s_bubble_up;
+    lv_obj_set_pos(s_bubble_img, BUBBLE_X * UI_SPRITE_SCALE + 1, (BUBBLE_Y - (s_bubble_up ? 1 : 0)) * UI_SPRITE_SCALE + 1);
+}
+
+void ui_show_bubble(bool on)
+{
+    ui_lock();
+    if (s_bubble_img) {
+        if (on && lv_obj_has_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN)) {
+            s_bubble_up = true; bubble_bob(NULL);
+            lv_obj_remove_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_bubble_img);
+            if (!s_bubble_timer) s_bubble_timer = lv_timer_create(bubble_bob, 600, NULL);
+            lv_timer_resume(s_bubble_timer);
+        } else if (!on && !lv_obj_has_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(s_bubble_img, LV_OBJ_FLAG_HIDDEN);
+            if (s_bubble_timer) lv_timer_pause(s_bubble_timer);
+        }
+    }
+    ui_unlock();
 }
 
 // ---- generated sprites ----

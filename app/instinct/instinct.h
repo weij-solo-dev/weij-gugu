@@ -15,8 +15,9 @@ void instinct_shaken(int intensity);        // IMU: rolls into a ball and bounce
 void instinct_picked_up(void);              // IMU: looks up at you
 void instinct_refuse(const char *why);      // the blue key when a call cannot start (offline, no key): a buzz, a head shake, a sad face
 // Can Gugu make a call right now? The app answers (only it sees the network and the keys); NULL = always yes.
-// While the answer stays no for PUZZLED_AFTER, Gugu wears its puzzled face (the one with the "?") as its resting
-// face and looks around now and then; when it turns yes, a happy hop and back to normal.
+// While the answer stays no for PUZZLED_AFTER, a thought bubble with a settings gear sits at Gugu's upper right and
+// Gugu points at it in a hurry (the urge face), muttering in bursts with two quick stamps each; when the answer turns
+// yes, the bubble goes, a happy hop, back to normal.
 typedef bool (*instinct_ready_fn)(char *why, size_t cap, void *user);
 void instinct_set_ready_probe(instinct_ready_fn fn, void *user);
 void instinct_set_ready_override(int ready);  // -1 asks the probe; 0 / 1 force the answer (console, tests)

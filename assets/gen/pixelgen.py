@@ -235,6 +235,41 @@ def draw_vest(c, cx, cy, rx, ry, color='red'):
             c.put(x, y, col)
     c.outline_of({base, dark, light}, P['line'])
 
+def rot_ellipse(c, ecx, ecy, a, b, ang, col):
+    """A filled ellipse with semi-axes a (along ang, radians) and b, centred at (ecx, ecy)."""
+    ca, sa = math.cos(ang), math.sin(ang)
+    r = int(max(a, b)) + 2
+    for y in range(int(ecy) - r, int(ecy) + r + 1):
+        for x in range(int(ecx) - r, int(ecx) + r + 1):
+            dx, dy = x + 0.5 - ecx, y + 0.5 - ecy
+            u, v = dx * ca + dy * sa, -dx * sa + dy * ca
+            if (u / a) ** 2 + (v / b) ** 2 <= 1.0: c.put(x, y, col)
+
+def bubble_gear():
+    """The thought bubble Gugu points at while nothing is set up: a white cloud with a settings gear, two little
+    puffs trailing down-left toward its head (2026-11-03, owner: "右上角出现一个云泡泡，里面有个配置 icon")."""
+    P = PAL
+    W, H = 30, 26
+    c = Canvas(W, H)
+    white, ink, gear = P['eyew'], P['line'], P['grey2']
+    blobs = [(14.0, 9.0, 8.5, 7.0), (21.5, 8.5, 6.5, 6.0), (9.5, 10.5, 5.5, 4.8), (17.0, 13.0, 8.0, 4.5), (22.0, 4.5, 4.0, 3.5), (12.5, 4.5, 4.5, 3.8)]
+    inside = lambda x, y: any(((x + 0.5 - bx) / rx_) ** 2 + ((y + 0.5 - by_) / ry_) ** 2 <= 1.0 for (bx, by_, rx_, ry_) in blobs)
+    puff_px = {(x, y) for (x, y) in ((4, 18), (5, 18), (3, 19), (4, 19), (5, 19), (6, 19), (3, 20), (4, 20), (5, 20), (6, 20), (4, 21), (5, 21))}   # a round 4×4 puff
+    puff_px |= {(1, 23), (2, 23), (1, 24), (2, 24)}         # and a 2×2 one, trailing down-left toward the head
+    in_puff = lambda x, y: (x, y) in puff_px
+    for y in range(H):
+        for x in range(W):
+            if inside(x, y) or in_puff(x, y): c.put(x, y, white)
+    c.outline_of({white}, ink)
+    gx, gy = 16.0, 9.5                                       # the gear: a ring with eight teeth and a hole
+    for y in range(H):
+        for x in range(W):
+            dx, dy = x + 0.5 - gx, y + 0.5 - gy
+            r = math.hypot(dx, dy); t = (math.degrees(math.atan2(dy, dx)) + 360 + 22.5) % 45
+            if r <= 1.6: continue
+            if r <= 3.9 or (r <= 5.4 and abs(t - 22.5) <= 9.5): c.put(x, y, gear)
+    return c
+
 def lens_mask(x0, y0, w, h):
     """A round lens: the pixels whose centres fall inside the ellipse in the eye box, a touch inside so a 7×7 lens is the
     classic 3-5-7-7-7-5-3 pixel circle (2026-11-03, owner: "镜片是否也可以改为圆框")."""
@@ -465,6 +500,11 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         (lx0, ly0, _, _), (rx0, ry0, _, _) = eye_boxes
         c.hline(rx0 + 1, rx0 + D - 3, ry0 - 3, P['line']); c.put(rx0 + D - 2, ry0 - 2, P['line'])   # the raised brow
         c.hline(lx0 + 2, lx0 + D - 3, ly0 - 3, P['line'])                                            # the other one flat and low
+    elif emotion == 'urge':                                                                # nothing is set up: eyes on the gear bubble, in a hurry
+        eye_open(exl, ey, look=(2, -2)); eye_open(exr, ey, look=(2, -2))                    # looking hard up and right, at the bubble
+        brows(outer_low=True, steps=3)                                                     # worried: inner ends up
+        sx, sy = int(cx) - 16, ey - 3                                                      # a bead of sweat
+        c.put(sx, sy, P['skyd']); c.rect(sx - 1, sy + 1, 3, 2, P['skyd']); c.put(sx - 1, sy + 1, P['cloud'])
     elif emotion == 'shy':                                                                 # peeking from behind a wing
         eye_open(exl, ey + 1, look=(-1, 1)); eye_open(exr, ey + 1, look=(-1, 1))             # eyes down and away
         body_paint(lo - 6, ey + 5, 6, 3, P['cheek']); body_paint(ro + 1, ey + 5, 6, 3, P['cheek'])   # enormous blush
