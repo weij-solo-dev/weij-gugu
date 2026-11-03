@@ -284,6 +284,8 @@ struct net_ws {
     net_ws_events_t ev; void *user;
     atomic_bool connected;
     uint8_t *msg; size_t msg_len, msg_cap, max_message; int op;
+    size_t frame_base;         // where the current frame's bytes start inside msg
+    bool dropping;             // the current message outgrew max_message: skip its remaining frames
     EventGroupHandle_t eg;
 };
 
@@ -308,20 +310,34 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     case WEBSOCKET_EVENT_DATA:
         if (e->op_code == 0x8) { if (atomic_exchange(&w->connected, false) && w->ev.on_closed) w->ev.on_closed(1000, "", w->user); break; }
         if (e->op_code == 0x9 || e->op_code == 0xA) break;      // ping / pong handled by the client
-        if ((size_t)e->payload_len > w->max_message) { if (w->ev.on_error) w->ev.on_error("message too large", w->user); break; }
-        if (e->payload_offset == 0) { w->msg_len = 0; if (e->op_code == 0x1 || e->op_code == 0x2) w->op = e->op_code; }
-        if (w->msg_cap < (size_t)e->payload_len + 1) {
-            size_t ncap = (size_t)e->payload_len + 1;
-            uint8_t *nb = mem_alloc_big(ncap);
-            if (!nb) break;
-            if (w->msg) { memcpy(nb, w->msg, w->msg_len); mem_release(w->msg); }
-            w->msg = nb; w->msg_cap = ncap;
+        // A message is one or more frames: the first carries opcode 1 (text) or 2 (binary), the rest opcode 0
+        // (continuation), the last one FIN. A frame may itself arrive in several events (payload_offset). The
+        // vendor's TTS server splits every audio message into a 4096-byte frame plus a continuation, so joining
+        // only within a frame handed the voice on in halves that the JSON scan threw away (踩坑 27).
+        if (e->payload_offset == 0) {
+            if (e->op_code == 0x1 || e->op_code == 0x2) { w->op = e->op_code; w->msg_len = 0; w->dropping = false; }
+            else if (e->op_code != 0x0) break;
+            w->frame_base = w->msg_len;
         }
-        memcpy(w->msg + e->payload_offset, e->data_ptr, (size_t)e->data_len);
-        w->msg_len = (size_t)e->payload_offset + (size_t)e->data_len;
-        if (w->msg_len >= (size_t)e->payload_len) {
-            if (w->op == 0x1 && w->ev.on_text) { w->msg[w->msg_len] = '\0'; w->ev.on_text((const char *)w->msg, w->msg_len, w->user); }
-            else if (w->op == 0x2 && w->ev.on_binary) w->ev.on_binary(w->msg, w->msg_len, w->user);
+        if (w->dropping || !w->op) break;
+        {
+            size_t need = w->frame_base + (size_t)e->payload_len;
+            if (need > w->max_message) { w->dropping = true; if (w->ev.on_error) w->ev.on_error("message too large", w->user); break; }
+            if (w->msg_cap < need + 1) {
+                size_t ncap = need + 1 > w->msg_cap * 2 ? need + 1 : w->msg_cap * 2;
+                uint8_t *nb = mem_alloc_big(ncap);
+                if (!nb) { w->dropping = true; break; }
+                if (w->msg) { memcpy(nb, w->msg, w->msg_len); mem_release(w->msg); }
+                w->msg = nb; w->msg_cap = ncap;
+            }
+            memcpy(w->msg + w->frame_base + (size_t)e->payload_offset, e->data_ptr, (size_t)e->data_len);
+            size_t frame_got = (size_t)e->payload_offset + (size_t)e->data_len;
+            w->msg_len = w->frame_base + frame_got;
+            if (frame_got >= (size_t)e->payload_len && e->fin) {        // the last frame is complete: the message is whole
+                if (w->op == 0x1 && w->ev.on_text) { w->msg[w->msg_len] = '\0'; w->ev.on_text((const char *)w->msg, w->msg_len, w->user); }
+                else if (w->op == 0x2 && w->ev.on_binary) w->ev.on_binary(w->msg, w->msg_len, w->user);
+                w->op = 0;
+            }
         }
         break;
     default:

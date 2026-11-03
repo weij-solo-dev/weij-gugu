@@ -6,6 +6,7 @@
 #include "provider_internal.h"
 #include "foundation/mem.h"
 #include "foundation/strbuf.h"
+#include "foundation/clock.h"
 #include "foundation/atomic_file.h"
 #include <string.h>
 #include <stdlib.h>
@@ -37,6 +38,8 @@ static esp_err_t f_asr_feed(asr_session_t *s, const int16_t *pcm, size_t n) { s-
 static esp_err_t f_asr_finish(asr_session_t *s)
 {
     provider_usage_t u = { .audio_ms = (uint32_t)(s->samples / 16) };
+    const char *delay = getenv("GUGU_FAKE_ASR_DELAY_MS");   // tests: a slow recognizer
+    if (delay) clock_sleep_ms((uint32_t)atoi(delay));
     const char *env = getenv("GUGU_FAKE_ASR");
     s->ev.on_final(env ? env : s_asr_text, LANG_ZH, &u, s->user);
     s->samples = 0;

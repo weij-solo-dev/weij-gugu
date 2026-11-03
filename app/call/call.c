@@ -22,7 +22,7 @@ static engine_t *s_engine;
 static call_config_t s_cfg;
 static atomic_int s_state = CALL_IDLE;
 static atomic_bool s_blue_down;
-static int64_t s_call_t0, s_waiting_since;
+static int64_t s_call_t0, s_waiting_since, s_thinking_since;
 static store_call_t s_log;
 static ringbuf_t s_preroll; static uint8_t *s_preroll_mem;
 static atomic_bool s_turn_active;
@@ -31,6 +31,7 @@ static int64_t s_t5_first_play;
 static engine_timing_t s_last_timing;
 static mind_tag_t s_seg_emotion[32];
 static bool s_seg_marker_pending[32];
+static atomic_uint s_voice_samples;  // PCM the engine delivered for the current turn: proof the answer had sound
 static atomic_int s_turns_done, s_turns_failed, s_turns_empty;   // empty: the key was held but no words were heard
 static call_state_cb s_state_cb; static void *s_state_user;
 
@@ -62,6 +63,7 @@ static void set_state(call_state_t s)
     if (old != s) {
         LOGI("state %s -> %s", call_state_name(old), call_state_name(s));
         if (s == CALL_WAITING) s_waiting_since = clock_us();
+        if (s == CALL_THINKING) s_thinking_since = clock_us();
         update_ring();
         if (s_state_cb) s_state_cb(s, s_state_user);
     }
@@ -104,6 +106,7 @@ static void start_turn(void)
     LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
     store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
     atomic_store(&s_turn_active, true);
+    atomic_store(&s_voice_samples, 0);
     set_state(CALL_THINKING);
     ui_set_emotion(UI_EMO_CURIOUS);
     audio_sfx_play("static");                                      // the walkie-talkie: over, the answer is on its way
@@ -154,6 +157,15 @@ static void log_turn(const engine_event_t *ev)
     s_last_timing = *t;
 }
 
+// A turn failed or the service is too slow: the child hears and feels it at once (the app's reaction), and the
+// event log says why.
+static void trouble(const char *why)
+{
+    store_event("trouble: %s", why);
+    if (s_cfg.on_trouble) s_cfg.on_trouble(why, s_cfg.trouble_user);
+    else audio_sfx_play("nosignal");
+}
+
 // ---- engine events (engine task / vendor threads) ----
 void call_engine_event(const engine_event_t *ev, void *user)
 {
@@ -194,13 +206,22 @@ void call_engine_event(const engine_event_t *ev, void *user)
             audio_play_marker(MARKER_BASE + ev->u.audio.segment);   // fires when this audio starts sounding
         }
         audio_play_pcm(ev->u.audio.pcm, ev->u.audio.samples);
+        atomic_fetch_add(&s_voice_samples, (unsigned)ev->u.audio.samples);
         break;
     case ENGINE_EV_SEGMENT_END:
         break;
     case ENGINE_EV_TURN_DONE:
         log_turn(ev);
-        store_event("answered: %d segment(s), first sound %lld ms after release, done %lld ms", ev->u.done.segments,
-                    (long long)((ev->u.done.timing.t3_first_audio - ev->u.done.timing.t0_release) / 1000), (long long)((ev->u.done.timing.t4_turn_done - ev->u.done.timing.t0_release) / 1000));
+        {
+            unsigned voice_ms = atomic_exchange(&s_voice_samples, 0) * 1000u / AUDIO_SAMPLE_RATE;
+            LOGI("voice delivered: %u ms for %u characters", voice_ms, (unsigned)ev->u.done.tts.chars);
+            if (ev->u.done.tts.chars > 4 && voice_ms < ev->u.done.tts.chars * 60u) {   // speech runs ~150–300 ms a character: this much less means audio went missing
+                LOGW("voice looks truncated: %u ms for %u characters", voice_ms, (unsigned)ev->u.done.tts.chars);
+                store_event("voice looks truncated: %u ms for %u characters", voice_ms, (unsigned)ev->u.done.tts.chars);
+            }
+            store_event("answered: %d segment(s), %u ms of voice, first sound %lld ms after release, done %lld ms", ev->u.done.segments, voice_ms,
+                        (long long)((ev->u.done.timing.t3_first_audio - ev->u.done.timing.t0_release) / 1000), (long long)((ev->u.done.timing.t4_turn_done - ev->u.done.timing.t0_release) / 1000));
+        }
         atomic_fetch_add(&s_turns_done, 1);
         atomic_store(&s_turn_active, false);
         if (call_state() == CALL_THINKING) set_state(CALL_SPEAKING);   // audio still draining
@@ -219,7 +240,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         atomic_fetch_add(&s_turns_failed, 1);
         atomic_store(&s_turn_active, false);
         store_event("turn failed at %s: %s (http %d)", ev->u.error.stage, ev->u.error.err.message, ev->u.error.err.http_status);
-        audio_sfx_play("nosignal");
+        { char why[64]; snprintf(why, sizeof why, "%s failed", ev->u.error.stage); trouble(why); }
         if (call_state() == CALL_CONNECTING) call_hangup();
         else if (call_state() == CALL_THINKING || call_state() == CALL_SPEAKING) set_state(CALL_WAITING);
         break;
@@ -312,7 +333,16 @@ static void call_task(void *arg)
         if (st == CALL_SPEAKING && audio_play_idle() && !atomic_load(&s_turn_active)) set_state(CALL_WAITING);
         if (st == CALL_WAITING && s_cfg.idle_timeout_ms && now - s_waiting_since > (int64_t)s_cfg.idle_timeout_ms * 1000) { LOGI("idle timeout"); call_hangup(); }
         if (s_cfg.max_call_ms && now - s_call_t0 > (int64_t)s_cfg.max_call_ms * 1000) { LOGI("call time cap"); call_hangup(); }
-        if (st == CALL_CONNECTING && now - s_call_t0 > 25 * 1000000LL) { LOGW("connect timeout"); call_hangup(); }
+        if (st == CALL_CONNECTING && now - s_call_t0 > 25 * 1000000LL) { LOGW("connect timeout"); trouble("the line did not open"); call_hangup(); }
+        uint32_t deadline = s_cfg.answer_deadline_ms ? s_cfg.answer_deadline_ms : 15000;
+        if (st == CALL_THINKING && atomic_load(&s_turn_active) && now - s_thinking_since > (int64_t)deadline * 1000) {
+            LOGW("no answer %u ms after release: giving up on the turn", (unsigned)deadline);
+            engine_abort(s_engine);                 // the late reply, if any, is dropped by the engine's abort flag
+            atomic_store(&s_turn_active, false);
+            atomic_fetch_add(&s_turns_failed, 1);
+            trouble("no answer in time");
+            set_state(CALL_WAITING);
+        }
     }
 }
 

@@ -82,11 +82,15 @@ static esp_err_t mm_asr_finish(asr_session_t *s)
     strbuf_printf(&body, "--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n%s\r\n", BOUNDARY, preset()->asr_model);
     strbuf_printf(&body, "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n", BOUNDARY);
     uint8_t hdr[WAV_HEADER_BYTES];
-    size_t pcm_bytes = s->samples * sizeof(int16_t);
+    size_t samples = s->samples, pcm_bytes = samples * sizeof(int16_t);
     wav_write_header(hdr, s->p.sample_rate, 1, (uint32_t)pcm_bytes);
     strbuf_append(&body, (const char *)hdr, sizeof hdr);
     strbuf_append(&body, (const char *)s->pcm, pcm_bytes);
     strbuf_printf(&body, "\r\n--%s--\r\n", BOUNDARY);
+    // The audio is in the body now: empty the buffer before the request goes out. A child who presses again
+    // while a slow request is still out speaks into a clean buffer; clearing it after the reply wiped that
+    // new utterance down to its last moments (seen in an exported log: 180 ms heard as "You.").
+    s->samples = 0;
 
     char ctype[80], bearer[160];
     snprintf(ctype, sizeof ctype, "multipart/form-data; boundary=%s", BOUNDARY);
@@ -98,14 +102,13 @@ static esp_err_t mm_asr_finish(asr_session_t *s)
     int64_t t0 = clock_us();
     esp_err_t err = net_http_perform(s->http, &req, &resp);
     strbuf_free(&body);
-    LOGI("asr upload %u ms audio: http %d in %lld ms (connect %lld, reused %d)", (unsigned)(s->samples * 1000 / s->p.sample_rate),
+    LOGI("asr upload %u ms audio: http %d in %lld ms (connect %lld, reused %d)", (unsigned)(samples * 1000 / s->p.sample_rate),
          resp.status, (long long)((clock_us() - t0) / 1000), (long long)(resp.t_connect_us / 1000), (int)resp.reused_connection);
     provider_error_t e;
     if (err != ESP_OK || resp.status != 200) {
         provider_error_set(&e, err == ESP_ERR_TIMEOUT ? PERR_TIMEOUT : provider_classify_http(resp.status), resp.status, 0,
                            resp.body ? resp.body : "asr request failed");
         mem_release(resp.body);
-        s->samples = 0;
         s->ev.on_error(&e, s->user);
         return ESP_FAIL;
     }
@@ -118,14 +121,13 @@ static esp_err_t mm_asr_finish(asr_session_t *s)
         provider_error_set(&e, code == 1026 || code == 1027 ? PERR_CONTENT_REJECTED : PERR_PROTOCOL, 200, code, msg);
         s->ev.on_error(&e, s->user);
     } else {
-        provider_usage_t u = { .audio_ms = (uint32_t)(s->samples * 1000 / s->p.sample_rate) };
+        provider_usage_t u = { .audio_ms = (uint32_t)(samples * 1000 / s->p.sample_rate) };
         const char *lang = cJSON_GetStringValue(cJSON_GetObjectItem(j, "language"));
         lang_t l = lang ? lang_from_code(lang) : guess_lang(text);
         s->ev.on_final(text, l, &u, s->user);
     }
     if (j) cJSON_Delete(j);
     mem_release(resp.body);
-    s->samples = 0;                 // ready for the next utterance of this call
     return ESP_OK;
 }
 

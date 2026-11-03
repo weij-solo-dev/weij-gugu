@@ -83,6 +83,7 @@ static void on_call_state(call_state_t s, void *user)
 }
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
+static void on_call_trouble(const char *why, void *user) { (void)user; instinct_refuse(why); }   // a failed or late turn: a buzz, a head shake, a sad face
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
 static int on_test_audio(char *json, size_t cap, void *user)
 {
@@ -200,7 +201,8 @@ void app_main(void)
     s_engine = engine_cascade_create(call_engine_event, NULL);
     call_config_t cc = { .idle_timeout_ms = (uint32_t)store_setting_int("idle_timeout_ms", 12000),
                          .max_call_ms = (uint32_t)store_setting_int("max_call_ms", 10 * 60 * 1000),
-                         .lang_hint = LANG_UNKNOWN, .where = NULL };   // NULL: the mind takes "where" from the world
+                         .lang_hint = LANG_UNKNOWN, .where = NULL,     // NULL: the mind takes "where" from the world
+                         .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_trouble = on_call_trouble };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
     parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply, .user = NULL };
