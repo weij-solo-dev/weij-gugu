@@ -5,10 +5,10 @@
 #include "esp_err.h"
 #include "art/art.h"
 
-typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (pointing at the gear bubble)
+typedef enum {   // order matches ui_emotion_sprites (generated): the 12 emotions + puff + wave + urge (worried, eyes on the gear bubble / on you)
     UI_EMO_NEUTRAL = 0, UI_EMO_HAPPY, UI_EMO_LAUGHING, UI_EMO_SURPRISED, UI_EMO_CURIOUS,
     UI_EMO_SHY, UI_EMO_SAD, UI_EMO_SLEEPY, UI_EMO_ANGRY, UI_EMO_SCARED, UI_EMO_PROUD, UI_EMO_DIZZY,
-    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_COUNT
+    UI_EMO_PUFF, UI_EMO_WAVE, UI_EMO_URGE, UI_EMO_URGE_YOU, UI_EMO_COUNT
 } ui_emotion_t;
 
 typedef enum { UI_SCENE_HOME, UI_SCENE_AWAY } ui_scene_t;

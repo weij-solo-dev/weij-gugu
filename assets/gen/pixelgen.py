@@ -500,8 +500,9 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         (lx0, ly0, _, _), (rx0, ry0, _, _) = eye_boxes
         c.hline(rx0 + 1, rx0 + D - 3, ry0 - 3, P['line']); c.put(rx0 + D - 2, ry0 - 2, P['line'])   # the raised brow
         c.hline(lx0 + 2, lx0 + D - 3, ly0 - 3, P['line'])                                            # the other one flat and low
-    elif emotion == 'urge':                                                                # nothing is set up: eyes on the gear bubble, in a hurry
-        eye_open(exl, ey, look=(2, -2)); eye_open(exr, ey, look=(2, -2))                    # looking hard up and right, at the bubble
+    elif emotion in ('urge', 'urge_you'):                                                  # nothing is set up: in a hurry, eyes on you, then on the gear bubble
+        look = (2, -2) if emotion == 'urge' else (0, 0)                                    # urge: hard up and right, at the bubble; urge_you: at you
+        eye_open(exl, ey, look=look); eye_open(exr, ey, look=look)
         brows(outer_low=True, steps=3)                                                     # worried: inner ends up
         sx, sy = int(cx) - 16, ey - 3                                                      # a bead of sweat
         c.put(sx, sy, P['skyd']); c.rect(sx - 1, sy + 1, 3, 2, P['skyd']); c.put(sx - 1, sy + 1, P['cloud'])

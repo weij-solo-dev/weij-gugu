@@ -73,7 +73,7 @@ void ui_anim_emotion_changed(ui_emotion_t e)
     case UI_EMO_SCARED: wobble(jitter_exec, 900); break;
     case UI_EMO_DIZZY: wobble(sway_exec, 2000); break;
     case UI_EMO_ANGRY: bob(3 * UI_SPRITE_SCALE, 120, 0); break;
-    case UI_EMO_URGE: bob(2 * UI_SPRITE_SCALE, 100, 1); break;                          // two quick stamps: hurry!
+    case UI_EMO_URGE: bob(2 * UI_SPRITE_SCALE, 100, 1); break;                          // eyes back on the bubble: two quick stamps, "that!"
     default: break;
     }
 }

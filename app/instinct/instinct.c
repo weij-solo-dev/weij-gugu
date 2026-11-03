@@ -25,15 +25,16 @@ static int64_t s_mood_until; static ui_emotion_t s_mood_next = UI_EMO_COUNT; sta
 static int s_taps; static int64_t s_tap_last;
 static int64_t s_shake_last;                 // the ball keeps bouncing while shakes keep coming
 
-// Not ready to call (no Wi-Fi, offline, no key): a gear in a thought bubble, Gugu pointing at it, muttering, in a
-// hurry (2026-11-03, owner: "云泡泡，里面有个配置 icon，gugu 一直指着它，嘴里念念有词，并且很着急"). The muttering is the
-// beak moving without a sound: bursts of MUTTER_ON, pauses of MUTTER_OFF.
+// Not ready to call (no Wi-Fi, offline, no key): a gear in a thought bubble at Gugu's upper right; Gugu, in a hurry,
+// looks at you, then hard at the bubble, and back (2026-11-03, owner: "云泡泡，里面有个配置 icon … 很着急"; then "不需要
+// 用手指指它，可以眼睛看着它", "嘴巴也不用动，眼睛可以暗示用户看右上角的东西"). A gaze that leaves you for something is
+// the hint people follow.
 #define PUZZLED_AFTER_US  (15 * 1000000LL)   // the answer must stay "no" this long: the Wi-Fi joining at boot is not a reason
-#define MUTTER_ON_MS      1800
-#define MUTTER_OFF_MS     1400
+#define GAZE_YOU_MS       1200               // eyes on you …
+#define GAZE_BUBBLE_MS    2600               // … then on the bubble
 static instinct_ready_fn s_ready_fn; static void *s_ready_user;
 static atomic_int s_ready_override = -1;
-static int64_t s_unready_since, s_mutter_next; static bool s_muttering;
+static int64_t s_unready_since, s_gaze_next;
 static bool s_puzzled;
 static atomic_int s_rest = UI_EMO_NEUTRAL;  // the face a timed mood returns to
 
@@ -156,7 +157,7 @@ static void readiness_tick(void)
     if (!ready) {
         if (!s_unready_since) s_unready_since = now;
         if (!s_puzzled && now - s_unready_since >= PUZZLED_AFTER_US) {
-            s_puzzled = true; atomic_store(&s_rest, UI_EMO_URGE); s_mutter_next = now;
+            s_puzzled = true; atomic_store(&s_rest, UI_EMO_URGE); s_gaze_next = now + GAZE_BUBBLE_MS * 1000LL;
             store_event("puzzled: %s", why);
             LOGI("puzzled: %s", why);
             if (resting()) ui_set_emotion(UI_EMO_URGE);
@@ -166,7 +167,6 @@ static void readiness_tick(void)
     s_unready_since = 0;
     if (!s_puzzled) return;
     s_puzzled = false; atomic_store(&s_rest, UI_EMO_NEUTRAL);
-    if (s_muttering) { s_muttering = false; ui_set_mouth(0); }
     ui_show_bubble(false);
     store_event("ready again");
     LOGI("ready again");
@@ -257,17 +257,12 @@ static void urge_tick(void)
     bool show = !atomic_load(&s_busy) && !s_shake_last;
     ui_show_bubble(show);
     int64_t now = clock_us();
-    if (!resting()) { if (s_muttering) { s_muttering = false; ui_set_mouth(0); } s_mutter_next = now + 600000; return; }
-    if (now < s_mutter_next) return;
-    s_muttering = !s_muttering;
-    if (s_muttering) {                                   // a burst: two quick stamps and the beak going
-        if (ui_get_emotion() != UI_EMO_URGE) ui_set_emotion(UI_EMO_URGE); else ui_play_action(UI_ACT_PECK);
-        ui_set_mouth(160);
-        s_mutter_next = now + MUTTER_ON_MS * 1000LL;
-    } else {
-        ui_set_mouth(0);
-        s_mutter_next = now + MUTTER_OFF_MS * 1000LL;
-    }
+    if (!resting()) { s_gaze_next = now + 800000; return; }        // a timed mood is on: pick the gaze up after it
+    if (now < s_gaze_next) return;
+    bool to_bubble = atomic_load(&s_rest) != UI_EMO_URGE;          // eyes on you → on the bubble, and back
+    atomic_store(&s_rest, to_bubble ? UI_EMO_URGE : UI_EMO_URGE_YOU);
+    ui_set_emotion(to_bubble ? UI_EMO_URGE : UI_EMO_URGE_YOU);
+    s_gaze_next = now + (to_bubble ? GAZE_BUBBLE_MS : GAZE_YOU_MS) * 1000LL;
 }
 
 static void instinct_task(void *arg)
