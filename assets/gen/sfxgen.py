@@ -20,7 +20,6 @@ def tone(freqs, dur, amp=6000, vib=0.0):
         out.append(amp * env(i, n) * v)
     return out
 sil = lambda d: [0] * int(SR * d)
-write('dial', tone([350, 440], 0.9, 4500) + sil(0.25) + tone([350, 440], 0.9, 4500))
 write('nosignal', tone([330], 0.12, 6000) + sil(0.08) + tone([330], 0.12, 6000) + sil(0.08) + tone([262], 0.25, 6000))
 write('coo', tone([392], 0.16, 5000, vib=6) + tone([330], 0.28, 5000, vib=6))
 write('whistle', [6000 * env(i, int(SR * 0.5)) * math.sin(2 * math.pi * (900 + 1400 * (i / (SR * 0.5))) * (i / SR)) for i in range(int(SR * 0.5))])

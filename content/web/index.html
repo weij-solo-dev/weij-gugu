@@ -24,14 +24,14 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 <p class="muted">出了问题：先点"导出日志"（下载一个 txt 文件），把文件发给开发者；手机上不方便发文件就点"复制日志"再粘贴。日志里不含密码和密钥。</p></section>
 <section><h2>这一趟</h2><div id="trip" class="muted">加载中…</div><button class="secondary" id="tripDel" style="display:none" onclick="deleteTrip()">删除这张趟卡（咕咕就不去了）</button></section>
 <section><h2>记忆</h2><div class="muted" style="margin-bottom:6px">旅程志</div><div id="journey" class="muted">加载中…</div><div class="muted" style="margin:10px 0 6px">关于孩子</div><div id="about_child" class="muted"></div><div class="muted" style="margin:10px 0 6px">它后来知道的（生长正典）</div><div id="canon_grown" class="muted"></div></section>
-<section><h2>通话记录</h2><div id="calls" class="muted">加载中…</div>
+<section><h2>聊天记录</h2><div id="calls" class="muted">加载中…</div>
 <button class="secondary" onclick="location.href='/api/export'">导出全部记录</button></section>
-<section id="detail" style="display:none"><h2 id="detailTitle">通话</h2><div id="turns"></div></section>
+<section id="detail" style="display:none"><h2 id="detailTitle">聊天</h2><div id="turns"></div></section>
 <section><h2>设置</h2>
 <div class="row"><div><label>孩子的名字</label><input id="child_name"></div><div><label>年龄（月）</label><input id="child_age_months" type="number"></div></div>
 <div class="row"><div><label>交互语种（听和说）</label><select id="lang"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
 <p class="muted">咕咕用这个语种听孩子说话、用它回答，自己说的话也用它；保存后立即生效，咕咕会用新语种再自我介绍一次。</p>
-<div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一通电话最长（分钟）</label><input id="max_call_min" type="number"></div></div>
+<div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一次连续聊天最长（分钟）</label><input id="max_call_min" type="number"></div></div>
 <button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
 <section><h2>网络与密钥</h2>
 <label>附近的 Wi-Fi <a href="#" class="muted" onclick="scanWifi();return false" id="scanLink">（扫描中…）</a></label>
@@ -61,11 +61,11 @@ async function load(){
     const kind={deliver:'送信',vacation:'度假',visit:'探亲'};
     $('journey').innerHTML=Object.values(trips).reverse().map(t=>`<div style="margin:8px 0;padding:8px;border:1px solid #eee;border-radius:8px"><b>${kind[t.meta.kind]||t.meta.kind} · ${t.meta.place}</b> <span class="muted">${t.meta.depart} 到 ${t.meta.return}${t.meta.friend?' · 朋友 '+t.meta.friend:''}</span>${t.items.map(e=>`<div style="margin-top:4px">${e.t==='planned'?'出发前':e.t==='day'?'第 '+e.day+' 天':'回来后'}：${e.text}${e.hooks&&e.hooks.length?'<div class="muted">线头：'+e.hooks.join('；')+'</div>':''}</div>`).join('')}<button class="secondary" style="margin-top:6px;padding:5px 10px;font-size:12px" onclick="forget('journey','${t.meta.trip}')">忘掉这一趟</button></div>`).join('')}}catch(e){$('journey').textContent='读取失败'}
   for(const b of ['about_child','canon_grown']){try{const arr=await j('/api/memory?book='+b);$(b).innerHTML=arr.length?arr.map((e,i)=>`<div>· ${typeof e==='string'?e:e.text} <a href="#" class="muted" onclick="forget('${b}','${i}');return false">删</a></div>`).join(''):'还没有。'}catch(e){}}
-  try{const calls=await j('/api/calls');if(!calls.length){$('calls').textContent='还没有通话。';return}
+  try{const calls=await j('/api/calls');if(!calls.length){$('calls').textContent='还没有聊过。';return}
     calls.reverse();const rows=calls.map(c=>`<tr class="call" onclick="showCall('${c.file}','${c.id}')"><td>${new Date(c.started_ms).toLocaleString()}</td><td>${c.turns} 轮</td><td class="muted">${c.summary?(c.summary.seconds+' 秒'):''}</td></tr>`).join('');
     $('calls').innerHTML=`<table>${rows}</table>`}catch(e){$('calls').textContent='读取失败'}
 }
-async function showCall(file,id){const turns=await j('/api/call?file='+encodeURIComponent(file));$('detail').style.display='block';$('detailTitle').textContent='通话 '+id;
+async function showCall(file,id){const turns=await j('/api/call?file='+encodeURIComponent(file));$('detail').style.display='block';$('detailTitle').textContent='聊天 '+id;
   $('turns').innerHTML=turns.map(t=>`<div style="margin:8px 0"><div><b>孩子</b>（${t.lang}）：${t.transcript}</div><div><b>咕咕</b>：${t.reply}</div><div class="muted">首次出声 ${t.ms.first_play} ms · 识别 ${t.ms.asr} ms · 首字 ${t.ms.first_token} ms · 结束 ${t.ms.done} ms</div></div>`).join('')||'<span class="muted">空</span>';
   $('detail').scrollIntoView()}
 async function forget(book,key){if(!confirm('删除后咕咕就忘了这件事。确定？'))return;await j('/api/memory/forget',{method:'POST',body:JSON.stringify({book,key})});load()}

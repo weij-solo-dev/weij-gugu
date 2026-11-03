@@ -7,7 +7,8 @@
 #include "esp_err.h"
 
 esp_err_t instinct_init(void);
-void instinct_set_busy(bool in_call);       // app wires the call state here
+void instinct_set_busy(bool in_turn);       // a turn is on (the line opening, listening, thinking, speaking): play and touches wait
+void instinct_set_line_open(bool open);     // the conversation window, the 12 s after an answer included: no bubbles meanwhile
 void instinct_touched(int x, int y);        // app forwards touch events
 void instinct_set_tod_override(int tod);    // -1 follows the clock; else a world_tod_t, for screenshots and tests
 void instinct_yellow_tap(void);             // the yellow key's play: a pigeon whistle it answers; press it a lot and it gets dizzy, then cross

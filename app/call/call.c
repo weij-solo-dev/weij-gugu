@@ -259,7 +259,7 @@ static void dial(void)
     atomic_store(&s_captured, 0);
     s_t5_first_play = 0;
     set_state(CALL_CONNECTING);
-    audio_sfx_play("dial");
+    audio_sfx_play("beep");                                        // the walkie-talkie, from the first press on (no dial tone: 2026-11-04)
     audio_capture_start(capture_cb, NULL);
     engine_start_call(s_engine, s_cfg.lang_hint, s_cfg.where);
     ui_set_emotion(UI_EMO_CURIOUS);
@@ -279,6 +279,7 @@ void call_key(call_key_t key, bool down, int held_ms)
             engine_abort(s_engine); audio_play_flush();
             /* fall through */
         case CALL_WAITING:
+            audio_play_flush();                                    // a whistle from the yellow key in the open line stops: the child's turn
             s_t5_first_play = 0;
             atomic_store(&s_captured, 0);
             audio_capture_start(capture_cb, NULL);

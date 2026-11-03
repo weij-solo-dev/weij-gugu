@@ -42,7 +42,7 @@ typedef struct {
     bool reused_connection;      // served on the keep-alive connection left by the previous request / pre-warm
 } net_http_response_t;
 
-// A client keeps one connection to one host alive across requests (open it during the dial tone).
+// A client keeps one connection to one host alive across requests (open it while the line opens).
 esp_err_t net_http_open(const char *base_url, net_http_t **out);
 esp_err_t net_http_prewarm(net_http_t *c, uint32_t timeout_ms);        // TLS handshake now, nothing sent
 esp_err_t net_http_perform(net_http_t *c, const net_http_request_t *req, net_http_response_t *resp);

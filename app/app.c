@@ -93,7 +93,8 @@ static void on_call_state(call_state_t s, void *user)
 {
     (void)user;
     store_event("call %s", call_state_name(s));
-    instinct_set_busy(s != CALL_IDLE && s != CALL_ENDED);
+    instinct_set_line_open(s != CALL_IDLE && s != CALL_ENDED);   // the 12 s after an answer included: no bubbles
+    instinct_set_busy(s == CALL_CONNECTING || s == CALL_LISTENING || s == CALL_THINKING || s == CALL_SPEAKING);   // a turn: play waits
 }
 
 static void on_trip_delete(void *user) { (void)user; world_trip_clear(); }   // the parent page cancels a trip
@@ -180,7 +181,7 @@ static void hello_tick(void)   // once a second: the self-introduction, the firs
 
 // Can a call start right now, and if not, why: setup unfinished (no Wi-Fi configured, a vendor or key missing), Wi-Fi
 // down (configured, not joined), or the service down (the last check failed). Checked before dialling so the child
-// gets an answer at once instead of a dial tone and twenty seconds of silence; the reason picks the bubble's icon.
+// gets an answer at once instead of a beep and twenty seconds of silence; the reason picks the bubble's icon.
 static bool keys_ok(char *why, size_t cap)
 {
     const char *roles[] = { "chat", "asr", "tts" }; provider_role_t ids[] = { PROVIDER_ROLE_CHAT, PROVIDER_ROLE_ASR, PROVIDER_ROLE_TTS };

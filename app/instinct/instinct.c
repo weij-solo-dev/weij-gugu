@@ -17,7 +17,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static atomic_bool s_busy;
+static atomic_bool s_busy;                   // a turn is on: the child talks or Gugu answers
+static atomic_bool s_line_open;              // the conversation window is open (s_busy, or the 12 s after an answer)
 static int64_t s_last_touch;
 static atomic_int s_tod_override = -1;
 // timed moods: the face set by play goes back to neutral by itself (checked by the instinct task every 250 ms)
@@ -321,7 +322,7 @@ static void offer_tick(int64_t now)   // every 250 ms, when no problem bubble is
     if (s_offer.kind == INSTINCT_OFFER_IDEA && now - s_offer.since > IDEA_EXPIRE_US) { s_offer.kind = INSTINCT_OFFER_NONE; LOGI("light bulb faded"); }
     instinct_offer_t kind = s_offer.kind;
     mutex_unlock(s_offer_lock);
-    bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !s_shake_last && !s_speaking;
+    bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_shake_last && !s_speaking;
     ui_show_bubble(show ? (kind == INSTINCT_OFFER_HELLO ? UI_BUBBLE_HELLO : UI_BUBBLE_IDEA) : UI_BUBBLE_NONE);
     if (show && resting() && now >= s_peek_next) {       // a glance up at the bubble now and then
         s_peek_next = now + PEEK_EVERY_US;
@@ -331,7 +332,7 @@ static void offer_tick(int64_t now)   // every 250 ms, when no problem bubble is
 
 static void idea_schedule(int64_t now)   // every second: time to ask for a light bulb?
 {
-    if (s_puzzled || !s_offer_cbs.want_idea || s_speaking || atomic_load(&s_busy)) return;
+    if (s_puzzled || !s_offer_cbs.want_idea || s_speaking || atomic_load(&s_busy) || atomic_load(&s_line_open)) return;
     if (s_offer.kind != INSTINCT_OFFER_NONE) return;
     if (s_idea_asked && now - s_idea_asked < IDEA_RETRY_US) return;
     world_state_t st; world_state(&st);
@@ -348,7 +349,7 @@ static void idea_schedule(int64_t now)   // every second: time to ask for a ligh
 static void urge_tick(void)
 {
     if (!s_puzzled) return;
-    bool show = !atomic_load(&s_busy) && !s_shake_last;
+    bool show = !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_shake_last;
     ui_show_bubble(show ? bubble_of(s_reason) : UI_BUBBLE_NONE);
     int64_t now = clock_us();
     if (!resting()) { s_gaze_next = now + 800000; return; }        // a timed mood is on: pick the gaze up after it
@@ -403,13 +404,16 @@ esp_err_t instinct_init(void)
 
 void instinct_set_tod_override(int tod) { atomic_store(&s_tod_override, tod); }
 
-void instinct_set_busy(bool in_call)
+void instinct_set_busy(bool in_turn)
 {
-    atomic_store(&s_busy, in_call);
+    bool was = atomic_exchange(&s_busy, in_turn);
     s_last_interaction = clock_us();
-    ui_set_idle(!in_call);
-    if (!in_call && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
+    ui_set_idle(!in_turn);
+    if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
+    if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
+
+void instinct_set_line_open(bool open) { atomic_store(&s_line_open, open); s_last_interaction = clock_us(); }
 
 // A touch: an object reacts in its own way (and the finger feels it), Gugu reacts when touched itself,
 // empty wall and sky do nothing.
