@@ -24,8 +24,9 @@ warm, slightly husky voice.
 
 - **Idle by design.** Like Tabikaeru, the fun is in waiting and being surprised. No tasks, no streaks,
   no numbers, no levels. Gugu never dies and never nags.
-- **One voice, three languages.** The child talks by holding a key; Gugu replies in colloquial
-  Cantonese, Mandarin or English with the same voice and the same personality.
+- **Three languages, one personality.** The child talks by holding a key; the family picks the language
+  (Hong Kong Cantonese, Mandarin or English) and the voice for it on the pairing page, where any voice can be tried out
+  first. Gugu understands all three and answers only in the chosen one.
 - **A story that grows.** Gugu has a seed canon (a grandmother who gave it the little suitcase, animal
   friends in the cities it visits) and a slowly growing one: whatever it says out loud becomes true,
   one or two new facts a week, never contradicting itself.
@@ -44,22 +45,24 @@ warm, slightly husky voice.
 The whole product is **firmware plus the AI vendors' APIs**. There is no server, proxy, account or app.
 
 ```text
- StopWatch (ESP32-S3, ESP-IDF C) ──TLS──▶ MiniMax · Alibaba Qwen · Volcengine
+ StopWatch (ESP32-S3, ESP-IDF C) ──TLS──▶ MiniMax · Alibaba Qwen · Volcengine · OpenAI · Google Gemini
    ├─ push-to-talk call: ASR → LLM → expression tags → TTS, first sound ≤ 2 s
    ├─ the pet's life: model-planned trip cards, real-time calendar and sun, postcards, souvenirs, memory books, all on LittleFS
    ├─ pixel-art home and generated places on a 466×466 round display, 19 expressions driven by the model
-   ├─ pictures per trip: image-01 → JPEG decoded and shrunk on the ESP32 → 116-grid palette art, four times of day
-   └─ pairing mode: hotspot + web page served by the device: Wi-Fi picker, keys, calls, the trip card, the memory books, the event log
+   ├─ pictures per trip: the image role → JPEG decoded and shrunk on the ESP32 → 116-grid palette art, four times of day
+   └─ pairing mode: hotspot + web page served by the device: Wi-Fi picker, a vendor per role with its keys (saved and tested at once), the voice per language (try it out), calls, the trip card, the memory books, the event log
 ```
 
 - **Hardware:** M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB PSRAM, 466×466 AMOLED,
   ES8311 codec, BMI270, RX8130 RTC, M5PM1 power management, 450 mAh.
 - **Firmware:** ESP-IDF v5.5, C, LVGL. One `app.c` assembles flat modules with strictly downward
   dependencies; see [`CLAUDE.md`](CLAUDE.md) for the architecture contract.
-- **Vendors (bring your own keys):** a single provider protocol with MiniMax first (verified live) and
-  Alibaba Bailian (Qwen, Qwen realtime) and Volcengine as alternates (implemented to their public
-  protocols, awaiting keys), selectable per role (ASR / chat / TTS / speech-to-speech / image) from
-  declarative presets in `content/providers/`.
+- **Vendors (bring your own keys):** one provider protocol, a vendor chosen per role (listening, talking,
+  speaking, drawing) on the pairing page: MiniMax (verified live), Alibaba Bailian (Qwen, Qwen realtime),
+  Volcengine, OpenAI and Google Gemini (implemented to their public docs; OpenAI and Gemini requests checked
+  against the real endpoints, awaiting keys). Endpoints, models, voices, regions and keys are declarative presets in
+  `content/providers/`; the code outside the provider module names no vendor. OpenAI and Gemini do not serve mainland
+  China, Hong Kong or Macao.
 - **Mind without a framework:** four fixed loops (a conversation turn, a post-call extraction, a
   daily life tick, a weekly reflection), three small memory books kept in the prompt. No agent
   framework, no vector database.
