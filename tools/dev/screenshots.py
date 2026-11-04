@@ -81,7 +81,7 @@ def main():
         trip_id = stage_trip(art)
         try:
             for i, t in enumerate(TOD): names.append(shot(a.out, f'away_{t}', 1800, {'GUGU_TOD': str(i)}))
-            names.append(shot(a.out, 'away_friend_touch', 2000, {'GUGU_TOD': '2', 'GUGU_TAP': '380,380,1200'}))
+            names.append(shot(a.out, 'away_friend_touch', 2000, {'GUGU_TOD': '2', 'GUGU_TAP': '380,340,1200'}))   # the friend, 6 rows higher since 2026-11-04
         finally: unstage(trip_id)
     else: print('away: skipped (no backdrop.art; run gugu_tests or pass --art)')
     names = [n for n in names if n]

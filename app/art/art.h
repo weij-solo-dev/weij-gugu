@@ -12,7 +12,8 @@
 #define ART_GRID        116
 #define ART_MAX_COLORS  32
 #define ART_TRANSPARENT 255
-#define ART_GROUND_TOP  98      // the strip under Gugu's feet starts on this row (the pigeon at (34, 46) is 54 rows tall)
+#define ART_GROUND_TOP  92      // the strip under Gugu's feet starts on this row (the pigeon at (34, 40) is 54 rows tall; 98 before
+                                // the 6-row lift of 2026-11-04: a backdrop saved for another line is moved to this one on load)
 
 typedef struct { uint8_t r, g, b; } art_rgb_t;
 typedef enum { ART_TOD_NIGHT = 0, ART_TOD_SUNRISE, ART_TOD_DAY, ART_TOD_DUSK } art_tod_t;   // the same order as world_tod_t

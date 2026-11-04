@@ -638,14 +638,21 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     return c
 
 # ---------- home scene ----------
-def room(state='home', night=False, moons=2, W=116, H=116, lamp_on=None):
-    c = Canvas(W, H, PAL['black'])
+# The room sits ROOM_LIFT rows higher than its coordinates below say (2026-11-04, the owner: Gugu sat too low in the round
+# window). It is drawn on a canvas that much taller with the circle moved down, then the top is cropped: every object
+# keeps its numbers, the floor gains rows at the bottom. app/ui (GUGU_BASE_Y, the fittings' hit boxes, the pane, the
+# case, the bubble, the food's ground) and art.h (ART_GROUND_TOP) moved by the same amount.
+ROOM_LIFT = 6
+
+def room(state='home', night=False, moons=2, W=116, H=116, lamp_on=None, lift=ROOM_LIFT):
+    T = H + lift
+    c = Canvas(W, T, PAL['black'])
     P = PAL
-    cx, cy, R = W / 2, H / 2, W / 2
+    cx, cy, R = W / 2, T - H / 2, W / 2
     # wall + floor
     c.ellipse(cx, cy, R, R, P['wall'])
     c.ellipse(cx, cy, R, R, P['floor'], pred=lambda x, y: y >= 84)
-    for y in range(84, H):
+    for y in range(84, T):
         for x in range(W):
             if c.get(x, y) == P['floor'] and ((x // 6 + y // 4) % 2 == 0): c.put(x, y, P['floor2'])
     # wall paneling hint
@@ -695,23 +702,25 @@ def room(state='home', night=False, moons=2, W=116, H=116, lamp_on=None):
     # nest (bottom centre)
     c.ellipse(58, 98, 22, 8, P['nest']); c.ellipse(58, 98, 22, 8, P['nest2'], pred=lambda x, y: (x + y) % 3 == 0)
     c.ellipse(58, 95, 16, 5, P['floor2'])
-    return c
+    out = Canvas(W, H, PAL['black'])
+    out.px = c.px[lift:lift + H]
+    return out
 
 def compose_home(night=False, accessory='scarf', worn='glasses', hook='case', case_color='red'):
     scene = room('home', night=night, moons=0)
     g = gugu('neutral', scarf=False, bag=False, accessory=worn)
-    scene.blit(g, 58 - 24, 96 - 54 + 4)
+    scene.blit(g, 58 - 24, 96 - 54 + 4 - ROOM_LIFT)
     # the accessory hangs on the hook when home
     c = scene; P = PAL
     if hook == 'case':
-        draw_case(c, 94, 70, color=case_color, handle_up=False)   # parked in the corner by the chalkboard
+        draw_case(c, 94, 70 - ROOM_LIFT, color=case_color, handle_up=False)   # parked in the corner by the chalkboard
     elif hook == 'bag':
-        hook_bag(c, 71, 44)
+        hook_bag(c, 71, 44 - ROOM_LIFT)
     elif hook != 'none':
-        hook_item(c, 72, 44, accessory)
+        hook_item(c, 72, 44 - ROOM_LIFT, accessory)
     # redraw nest front rim over gugu's feet
-    c.ellipse(58, 100, 22, 6, P['nest'], pred=lambda x, y: y >= 100)
-    c.ellipse(58, 100, 22, 6, P['nest2'], pred=lambda x, y: y >= 100 and (x + y) % 3 == 0)
+    c.ellipse(58, 100 - ROOM_LIFT, 22, 6, P['nest'], pred=lambda x, y: y >= 100 - ROOM_LIFT)
+    c.ellipse(58, 100 - ROOM_LIFT, 22, 6, P['nest2'], pred=lambda x, y: y >= 100 - ROOM_LIFT and (x + y) % 3 == 0)
     return scene
 
 def compose_away(night=True):

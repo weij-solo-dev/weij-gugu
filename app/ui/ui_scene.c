@@ -29,11 +29,11 @@ bool ui_scene_is_home = true;
 
 // Home fittings baked into the room picture: base-grid boxes and what a touch does.
 static const struct { const char *id; int x0, y0, x1, y1; ui_behave_t behave; } HOME[] = {
-    { "lamp",   84, 8, 100, 28, UI_BEHAVE_TOGGLE },
-    { "window", 17, 17, 51, 51, UI_BEHAVE_SOUND },
-    { "shelf",  48, 6, 74, 20, UI_BEHAVE_SOUND },
-    { "board",  82, 50, 106, 68, UI_BEHAVE_WIGGLE },
-    { "table",  6, 62, 36, 92, UI_BEHAVE_SOUND },
+    { "lamp",   84, 2, 100, 22, UI_BEHAVE_TOGGLE },       // the room's art sits 6 rows higher than pixelgen's numbers (ROOM_LIFT)
+    { "window", 17, 11, 51, 45, UI_BEHAVE_SOUND },
+    { "shelf",  48, 0, 74, 14, UI_BEHAVE_SOUND },
+    { "board",  82, 44, 106, 62, UI_BEHAVE_WIGGLE },
+    { "table",  6, 56, 36, 86, UI_BEHAVE_SOUND },
 };
 #define HOME_N ((int)(sizeof HOME / sizeof HOME[0]))
 
@@ -57,7 +57,7 @@ static lv_obj_t *mk(lv_obj_t *parent)
 void ui_scene_init(lv_obj_t *scr)
 {
     s_win_img = mk(scr);
-    lv_obj_set_pos(s_win_img, 17 * UI_SPRITE_SCALE + 1, 17 * UI_SPRITE_SCALE + 1);
+    lv_obj_set_pos(s_win_img, 17 * UI_SPRITE_SCALE + 1, 11 * UI_SPRITE_SCALE + 1);   // the window, lifted with the room
     lv_image_set_src(s_win_img, ui_window_sprites[ART_TOD_DAY]);
     for (int i = 0; i < UI_MAX_OBJECTS; i++) s_obj[i].img = mk(scr);
 }
@@ -71,7 +71,7 @@ void ui_scene_init_accessory(void)   // after the pigeon exists: the overlay is 
 
 // ---- the gear bubble: up at Gugu's upper right while nothing is set up, bobbing a pixel every 600 ms ----
 #define BUBBLE_X 70                          // base pixels on the 116 grid: its trailing puffs end near the head
-#define BUBBLE_Y 31
+#define BUBBLE_Y 25                          // 31 before the 6-row lift (pixelgen ROOM_LIFT)
 static void bubble_bob(lv_timer_t *t)
 {
     (void)t;

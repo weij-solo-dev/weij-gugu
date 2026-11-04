@@ -6,7 +6,7 @@
 #include "lvgl.h"
 
 #define GUGU_BASE_X (34 * UI_SPRITE_SCALE + 1)   // the pigeon's home position in screen pixels
-#define GUGU_BASE_Y (46 * UI_SPRITE_SCALE + 1)
+#define GUGU_BASE_Y (40 * UI_SPRITE_SCALE + 1)   // 46 until 2026-11-04: lifted 6 rows with the floor (pixelgen ROOM_LIFT)
 
 extern lv_obj_t *ui_gugu_img;                    // the pigeon: a pre-scaled base sprite; overlays are its children
 

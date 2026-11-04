@@ -218,7 +218,8 @@ esp_err_t art_save(const art_image_t *img, const char *path)
     uint8_t *buf = mem_alloc_big(total);
     if (!buf) return ESP_ERR_NO_MEM;
     art_header_t h; memset(&h, 0, sizeof h);
-    memcpy(h.magic, ART_MAGIC, 4); h.version = 1; h.ncolors = img->ncolors; h.flags = img->alpha ? 1 : 0; h.w = img->w; h.h = img->h; h.sky_mask = img->sky_mask;
+    memcpy(h.magic, ART_MAGIC, 4); h.version = 2; h.ncolors = img->ncolors; h.flags = img->alpha ? 1 : 0; h.w = img->w; h.h = img->h; h.sky_mask = img->sky_mask;
+    h.pad = img->alpha ? 0 : ART_GROUND_TOP;              // version 2: a backdrop names the ground line it was cut for
     memcpy(buf, &h, sizeof h);
     for (int i = 0; i < img->ncolors; i++) { buf[sizeof h + i * 3] = img->pal[i].r; buf[sizeof h + i * 3 + 1] = img->pal[i].g; buf[sizeof h + i * 3 + 2] = img->pal[i].b; }
     memcpy(buf + sizeof h + pal_bytes, img->idx, n);
@@ -226,6 +227,27 @@ esp_err_t art_save(const art_image_t *img, const char *path)
     bool ok = atomic_file_write(path, buf, total);
     mem_release(buf);
     return ok ? ESP_OK : ESP_FAIL;
+}
+
+// A backdrop is cut for one ground line. One cut for another (a trip planned before the line moved) is moved on load,
+// so Gugu, the props and the strip still meet: rows shift by the difference, the strip repeats into the freed rows
+// (a whole number of its 4-row pattern higher), or the sky's first row repeats at the top.
+static void refit_ground(art_image_t *img, int from)
+{
+    int d = from - ART_GROUND_TOP;
+    if (!d || img->alpha || img->w != ART_GRID || img->h != ART_GRID || d > 16 || d < -16) return;
+    LOGI("backdrop cut for ground row %d: moved to row %d", from, ART_GROUND_TOP);
+    size_t w = img->w; int h = img->h;
+    if (d > 0) {
+        memmove(img->idx, img->idx + (size_t)d * w, (size_t)(h - d) * w);
+        int period = (d + 3) / 4 * 4;
+        if (period == d) period += 4;
+        for (int y = h - d; y < h; y++) memcpy(img->idx + (size_t)y * w, img->idx + (size_t)(y - period) * w, w);
+    } else {
+        d = -d;
+        memmove(img->idx + (size_t)d * w, img->idx, (size_t)(h - d) * w);
+        for (int y = 0; y < d; y++) memcpy(img->idx + (size_t)y * w, img->idx + (size_t)d * w, w);
+    }
 }
 
 esp_err_t art_load(const char *path, art_image_t *out)
@@ -237,13 +259,14 @@ esp_err_t art_load(const char *path, art_image_t *out)
     if (n < sizeof h) { mem_release(buf); return ESP_ERR_INVALID_SIZE; }
     memcpy(&h, buf, sizeof h);
     size_t pixels = (size_t)h.w * h.h, pal_bytes = (size_t)h.ncolors * 3;
-    if (memcmp(h.magic, ART_MAGIC, 4) || h.version != 1 || h.ncolors > ART_MAX_COLORS || n < sizeof h + pal_bytes + pixels) { mem_release(buf); return ESP_ERR_INVALID_RESPONSE; }
+    if (memcmp(h.magic, ART_MAGIC, 4) || h.version < 1 || h.version > 2 || h.ncolors > ART_MAX_COLORS || n < sizeof h + pal_bytes + pixels) { mem_release(buf); return ESP_ERR_INVALID_RESPONSE; }
     out->w = h.w; out->h = h.h; out->ncolors = h.ncolors; out->alpha = h.flags & 1; out->sky_mask = h.sky_mask;
     for (int i = 0; i < h.ncolors; i++) out->pal[i] = (art_rgb_t){ (uint8_t)buf[sizeof h + i * 3], (uint8_t)buf[sizeof h + i * 3 + 1], (uint8_t)buf[sizeof h + i * 3 + 2] };
     out->idx = mem_alloc_big(pixels);
     if (!out->idx) { mem_release(buf); return ESP_ERR_NO_MEM; }
     memcpy(out->idx, buf + sizeof h + pal_bytes, pixels);
     mem_release(buf);
+    if (!out->alpha) refit_ground(out, h.version >= 2 ? h.pad : 98);   // version 1 backdrops were all cut for row 98
     return ESP_OK;
 }
 

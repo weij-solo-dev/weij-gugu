@@ -282,7 +282,7 @@ esp_err_t ui_init(void)
     lv_obj_set_pos(s_scene_img, 1, 1);
     show_scene_src(&scn_home_day);
     ui_scene_init(scr);                                     // window pane and props: above the backdrop, below the pigeon
-    s_case_img = make_sprite(scr, &spr_case_down, 93 * UI_SPRITE_SCALE + 1, 62 * UI_SPRITE_SCALE + 1);
+    s_case_img = make_sprite(scr, &spr_case_down, 93 * UI_SPRITE_SCALE + 1, 56 * UI_SPRITE_SCALE + 1);   // by the chalkboard, lifted with the room
     ui_gugu_img = lv_image_create(scr);
     lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, GUGU_BASE_Y);

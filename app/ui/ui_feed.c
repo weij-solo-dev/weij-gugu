@@ -5,7 +5,7 @@
 #include "ui_internal.h"
 #include "foundation/log.h"
 
-#define FEED_GROUND 95            // base y where Gugu's feet stand: the item's bottom lands on it
+#define FEED_GROUND 89            // base y where Gugu's feet stand: the item's bottom lands on it (95 before the 6-row lift)
 #define FEED_FALL_MS 450
 static lv_obj_t *s_item;
 static int32_t s_land_y;
