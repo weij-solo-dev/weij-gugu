@@ -231,7 +231,7 @@ rebuild). A crash leaves a core dump; the next boot writes its summary to the ev
 `xtensa-esp32s3-elf-addr2line -pfiaC -e .derived_data/build/gugu.elf <addresses>`.
 Target `esp32s3`. The application component is `app/`, not `main/`: the root `CMakeLists.txt` adds it
 through `EXTRA_COMPONENT_DIRS`, and `app/CMakeLists.txt` lists its IDF dependencies explicitly in `REQUIRES`.
-After adding or renaming source files run `idf.py reconfigure` (the glob is evaluated at configure time).
+After adding or renaming source files run `idf.py reconfigure` (the glob is evaluated at configure time); `./gugu.sh` does it by itself when the list of files under `app/` changes (a git pull that adds one).
 
 To drive `idf.py` by hand, use the same environment and paths the script uses:
 

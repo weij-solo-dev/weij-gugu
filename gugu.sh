@@ -114,9 +114,18 @@ if [ -f "$SDKCONFIG" ] && [ "$(cat "$DEFAULTS_STAMP" 2>/dev/null)" != "$DEFAULTS
     say "sdkconfig.defaults changed: regenerating sdkconfig (one full rebuild, a few minutes)"
     rm -f "$SDKCONFIG"
 fi
+# app/CMakeLists.txt finds the sources with a glob, which CMake evaluates only when it configures: a git pull that
+# adds or removes a source file would otherwise build without it (and fail to link). Re-configure when the list changes.
+SOURCES_SUM="$(cd "$HERE" && find app \( -name '*.c' -o -name '*.h' \) | LC_ALL=C sort | cksum | awk '{print $1}')"
+SOURCES_STAMP="$DD/.app-sources-sum"
+if [ -d "$BUILD_DIR" ] && [ "$(cat "$SOURCES_STAMP" 2>/dev/null)" != "$SOURCES_SUM" ]; then
+    say "source files added or removed: re-running the CMake configure"
+    idf.py -B "$BUILD_DIR" -DSDKCONFIG="$SDKCONFIG" -DIDF_TARGET="$TARGET" reconfigure
+fi
 say "building into .derived_data/build (incremental)"
 idf.py -B "$BUILD_DIR" -DSDKCONFIG="$SDKCONFIG" -DIDF_TARGET="$TARGET" build
 echo "$DEFAULTS_SUM" > "$DEFAULTS_STAMP"
+echo "$SOURCES_SUM" > "$SOURCES_STAMP"
 say "flashing $PORT: bootloader, partition table, app, content image (Wi-Fi, keys and data on the device are kept)"
 idf.py -B "$BUILD_DIR" -p "$PORT" flash
 
