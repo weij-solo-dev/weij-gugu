@@ -27,6 +27,26 @@ ui_emotion_t ui_get_emotion(void);
 // ---- animation layer (ui_anim.c) ----
 typedef enum { UI_ACT_NOD, UI_ACT_WAVE, UI_ACT_COO, UI_ACT_WHISTLE, UI_ACT_PUFF, UI_ACT_PECK, UI_ACT_JUMP, UI_ACT_FLY, UI_ACT_SHAKE_HEAD } ui_action_t;   // fly: a loop around the window; shake_head: "no"
 void ui_play_action(ui_action_t a);          // short one-shot animation on top of the current emotion
+// ---- poses: the body doing something (idle life, the food), over the current expression until the next pose ----
+typedef enum {
+    UI_POSE_NONE = 0,
+    UI_POSE_LOOK_L, UI_POSE_LOOK_R,              // eyes on something to one side
+    UI_POSE_READ,                                // the newspaper, eyes along the lines, a page turned now and then
+    UI_POSE_PECK,                                // bowed to the ground, beak open
+    UI_POSE_HOLD,                                // upright, cross-eyed at what is in the beak
+    UI_POSE_CHEW,                                // eating: the beak works
+    UI_POSE_PREEN,                               // grooming the lifted wing
+    UI_POSE_STRETCH,                             // wings up, a yawn
+    UI_POSE_WALK_L, UI_POSE_WALK_R,              // stepping, the feet in turn
+    UI_POSE_KICK_L, UI_POSE_KICK_R,              // a foot swung out to that side
+    UI_POSE_SLY,                                 // 偷摸: glancing left, then right
+    UI_POSE_TUCK,                                // slipping something under the lifted wing
+    UI_POSE_COUNT
+} ui_pose_t;
+void ui_pose(ui_pose_t p);                   // UI_POSE_NONE: back to the expression
+ui_pose_t ui_get_pose(void);
+void ui_walk_to(int dx, uint32_t ms);        // stand dx base pixels from home (0 = home), getting there in ms (0: at once)
+int  ui_gugu_dx(void);                       // where Gugu stands now, base pixels from home
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
 typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb
@@ -36,8 +56,13 @@ ui_bubble_t ui_bubble_shown(void);          // the bubble on screen now, or UI_B
 
 // ---- the yellow key's food (ui_feed.c): one item falls from the top and lands beside Gugu's feet ----
 void ui_feed_drop(int food, int land_x);     // food: an index into ui_food_sprites; land_x: the item's left edge, base pixels (116 grid)
-void ui_feed_clear(void);                    // pecked up, or pushed away: gone
-void ui_set_idle(bool on);                   // blink + breathe when nobody is talking to Gugu
+void ui_feed_pick(void);                     // from the ground into Gugu's beak (in front of it), wherever it stands
+void ui_feed_raise(void);                    // held up beside the glasses for a good look
+void ui_feed_kick(int dir);                  // off the ground in an arc, out of the round window (dir -1 left, +1 right)
+void ui_feed_tuck(void);                     // slipped under the lifted wing: gone
+void ui_feed_clear(void);                    // eaten, or otherwise gone
+int  ui_feed_width(int food);                // the item's width in base pixels
+void ui_set_idle(bool on);                   // blink when nobody is talking to Gugu (the body keeps still: no breathing bob)
 // Shaken: Gugu rolls into a ball and bounces off the round window's rim (a vibration per hit) until stopped.
 void ui_bounce_start(void);
 void ui_bounce_kick(int intensity);          // another shake while bouncing: more speed

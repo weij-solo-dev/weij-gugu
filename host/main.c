@@ -1,6 +1,7 @@
 // host/main.c — the simulator process. SDL must own the main thread on macOS, so the window, input
 // pump and presentation live here; app_main() (the same code as on the device) runs in a worker
-// thread. Flags: --scale N (window scale), --shot path.bmp --after ms (screenshot then exit),
+// thread. Flags: --scale N (window scale), --shot path.bmp --after ms (screenshot then exit), --shots dir --every ms
+// --count n (from --after on, n frames every ms into dir/frame_NNN.bmp, then exit: an animation to look at),
 // --quit-after ms, --replay file.wav [--turns N] (replay the utterance through a real call, then exit).
 #include <SDL.h>
 #include <stdio.h>
@@ -26,13 +27,16 @@ static void *app_thread(void *arg)
 
 int main(int argc, char **argv)
 {
-    int scale = 1, quit_after = 0, shot_after = 0;
-    const char *shot = NULL;
+    int scale = 1, quit_after = 0, shot_after = 0, shot_every = 100, shot_count = 0;
+    const char *shot = NULL, *shots = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--quit-after") && i + 1 < argc) quit_after = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--after") && i + 1 < argc) shot_after = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--shots") && i + 1 < argc) shots = argv[++i];
+        else if (!strcmp(argv[i], "--every") && i + 1 < argc) shot_every = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--count") && i + 1 < argc) shot_count = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc) { setenv("GUGU_REPLAY_WAV", argv[++i], 1); setenv("GUGU_NO_MIC", "1", 1); }
         else if (!strcmp(argv[i], "--turns") && i + 1 < argc) setenv("GUGU_REPLAY_TURNS", argv[++i], 1);
         else if (!strcmp(argv[i], "--replay-list") && i + 1 < argc) { setenv("GUGU_REPLAY_WAVS", argv[++i], 1); setenv("GUGU_NO_MIC", "1", 1); }
@@ -54,6 +58,7 @@ int main(int argc, char **argv)
 
     Uint32 t0 = SDL_GetTicks();
     bool shot_done = false;
+    int shots_taken = 0;
     for (;;) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -66,6 +71,11 @@ int main(int argc, char **argv)
             board_host_screenshot(ren, shot);
             shot_done = true;
             if (!quit_after) goto out;
+        }
+        if (shots && shots_taken < shot_count && el >= (Uint32)(shot_after + shots_taken * shot_every)) {
+            char path[512]; snprintf(path, sizeof path, "%s/frame_%03d.bmp", shots, shots_taken);
+            board_host_screenshot(ren, path);
+            if (++shots_taken == shot_count && !quit_after) goto out;
         }
         if (quit_after && el >= (Uint32)quit_after) goto out;
         SDL_Delay(8);

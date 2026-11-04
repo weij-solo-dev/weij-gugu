@@ -406,12 +406,18 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     if emotion == 'sad':       ry = 18.5; cy = 31.0
     if emotion == 'scared':    rx, ry = 16.0, 20.0; cy = 29.0
     if emotion == 'proud':     ry = 20.5; cy = 28.0
+    # poses (2026-11-04, the owner: idle life without bobbing, food handled with the beak and the feet): not tags,
+    # frames the UI strings together. peck bows (body lower and wider, the face low); stretch stands tall.
+    if emotion == 'peck':      rx, ry = 18.5, 16.5; cy = 33.0
+    if emotion == 'stretch':   ry = 21.0; cy = 28.0
     body_set = {P['body'], P['shade'], P['belly'], P['hi']}
 
     # wings (behind body)
-    wing_dy = {'wave': -9, 'happy': -6, 'laughing': -10, 'surprised': -8, 'proud': -4, 'scared': -12, 'sad': 4, 'angry': -5, 'shy': 2}.get(emotion, 0)
+    wing_dy = {'wave': -9, 'happy': -6, 'laughing': -10, 'surprised': -8, 'proud': -4, 'scared': -12, 'sad': 4, 'angry': -5, 'shy': 2,
+               'stretch': -13, 'read_l': -3, 'read_r': -3, 'peck': -4, 'kick_l': -6, 'kick_r': -6}.get(emotion, 0)
     for side in (-1, 1):
         dy = wing_dy if side == 1 or emotion != 'wave' else 0
+        if emotion in ('preen_a', 'preen_b', 'tuck'): dy = (-5 if emotion == 'preen_b' else -8) if side == 1 else 0   # the right wing lifted (groomed, or something slipped under it)
         if emotion == 'puff':
             continue
         c.ellipse(cx + side * (rx - 1.5), cy + 3 + dy, 4.5, 8.0, P['shade'])
@@ -427,10 +433,21 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
             x = int(cx + math.cos(a) * (rx + 0.8)); y = int(cy + math.sin(a) * (ry + 0.8))
             c.put(x, y, P['body'])
 
-    # feet
-    for fx in (int(cx) - 6, int(cx) + 3):
-        c.rect(fx, int(cy + ry) - 1, 3, 2, P['foot'])
-        c.put(fx - 1, int(cy + ry), P['foot']); c.put(fx + 3, int(cy + ry), P['foot'])
+    # feet: (x, lift); a walking frame lifts one, a kick swings one out on a short leg
+    feet = [[int(cx) - 6, 0], [int(cx) + 3, 0]]
+    if emotion in ('walk_l_a', 'walk_r_b'): feet[0] = [feet[0][0] - 1, 2]
+    if emotion in ('walk_l_b', 'walk_r_a'): feet[1] = [feet[1][0] + 1, 2]
+    gy = int(cy + ry)
+    for i, (fx, lift) in enumerate(feet):
+        if (emotion == 'kick_l' and i == 0) or (emotion == 'kick_r' and i == 1):
+            k = -1 if i == 0 else 1                                   # the leg swings out and up, the foot flat at its end
+            base = fx + 1
+            for t in range(1, 6): c.rect(base + k * t, gy - 1 - t // 2, 1, 2, P['foot'])
+            tip = base + k * 6
+            c.rect(tip - 1 if k < 0 else tip - 1, gy - 5, 3, 2, P['foot']); c.put(tip + k * 2, gy - 4, P['foot'])
+            continue
+        c.rect(fx, gy - 1 - lift, 3, 2, P['foot'])
+        c.put(fx - 1, gy - lift, P['foot']); c.put(fx + 3, gy - lift, P['foot'])
 
     # outline of body-ish colors
     c.outline_of(body_set | {P['foot']}, P['line'])
@@ -460,7 +477,7 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     # everything beside the glasses (blush, brows, tears) is placed from them. Each lens holds one simple mark (a pupil,
     # one arch, one line) that keeps clear of the frame ("眼镜内线条太多太复杂").
     D = 9
-    ey = int(cy - 11)
+    ey = int(cy - 9) if emotion == 'peck' else int(cy - 11)          # bowing: the face drops toward the ground
     exl, exr = int(cx) - 1 - D, int(cx) + 3
     lo, ro = exl - 2, exr - 1 + D
     LY = 1 + (D - 7) // 2                                   # lens top = eye y - LY: the lens stays centred where the 7-pixel one was
@@ -510,11 +527,11 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
                 for t in range(thick): c.put(xx, lowest - up - t, P['line'])
 
     # cheeks first: the lenses drawn next cover any blush that reaches under them
-    if emotion in ('happy', 'laughing', 'proud', 'wave'):
+    if emotion in ('happy', 'laughing', 'proud', 'wave', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'sly_l', 'sly_r', 'tuck'):
         body_paint(lo - 3, ey + 5, 3, 2, P['cheek']); body_paint(ro + 1, ey + 5, 3, 2, P['cheek'])
     elif emotion == 'angry':
         body_paint(lo - 3, ey + 5, 3, 3, P['red2']); body_paint(ro + 1, ey + 5, 3, 3, P['red2'])
-    elif emotion in ('neutral', 'curious', 'puff', 'peek'):
+    elif emotion in ('neutral', 'curious', 'puff', 'peek', 'look_l', 'look_r', 'read_l', 'read_r', 'hold', 'peck', 'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b'):
         body_paint(lo - 2, ey + 5, 2, 1, P['cheek']); body_paint(ro + 1, ey + 5, 2, 1, P['cheek'])
 
     if eyes_closed:
@@ -588,6 +605,28 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     elif emotion == 'dizzy':
         eye_spiral(exl, ey - 1); eye_spiral(exr, ey + 1)                                   # a tilt: one eye higher than the other
         for sx, sy in ((int(cx) - 17, ey - 9), (int(cx) + 15, ey - 12), (int(cx) - 3, ey - 15), (int(cx) + 19, ey - 1)): star(sx, sy, True)
+    elif emotion in ('look_l', 'look_r', 'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b'):   # eyes on something to one side
+        lx = -2 if emotion in ('look_l', 'walk_l_a', 'walk_l_b') else 2
+        eye_open(exl, ey, look=(lx, 0)); eye_open(exr, ey, look=(lx, 0))
+    elif emotion in ('read_l', 'read_r'):                                                  # down at the paper, along the line
+        lx = -1 if emotion == 'read_l' else 1
+        eye_open(exl, ey, look=(lx, 2)); eye_open(exr, ey, look=(lx, 2))
+    elif emotion == 'peck':                                                                # down at the ground
+        eye_open(exl, ey, look=(0, 2)); eye_open(exr, ey, look=(0, 2))
+    elif emotion == 'hold':                                                                # cross-eyed at what is in the beak
+        eye_open(exl, ey, look=(2, 2)); eye_open(exr, ey, look=(-2, 2))
+    elif emotion in ('chew_a', 'chew_b', 'preen_a', 'preen_b'):                            # contented
+        eye_arc(exl, ey); eye_arc(exr, ey)
+    elif emotion == 'stretch':                                                             # a big stretch and a yawn
+        eye_squeeze(exl, ey); eye_squeeze(exr, ey, right=True)
+    elif emotion in ('sly_l', 'sly_r', 'tuck'):                                            # 偷摸: a sideways glance under low, flat brows
+        lx = -2 if emotion == 'sly_l' else 2
+        eye_open(exl, ey, look=(lx, 1)); eye_open(exr, ey, look=(lx, 1))
+        for (x0, y0, w, h) in eye_boxes: c.hline(x0 + 1, x0 + w - 2, y0 - 3, P['line'])
+    elif emotion in ('kick_l', 'kick_r'):                                                  # hmph, away with it
+        lx = -2 if emotion == 'kick_l' else 2
+        eye_open(exl, ey + 1, pw=2, ph=2, look=(lx, 1)); eye_open(exr, ey + 1, pw=2, ph=2, look=(lx, 1))
+        brows(outer_low=False, thick=1, steps=2)
 
     # beak: Gugu's only mouth, always the orange beak (2026-11-03, owner: "有些表情是用黑线，有些时候用橙色块，到底是用哪个？";
     # the black grin, frown, teeth and wavy lines are gone). A mood changes the beak itself: shut, chirping, talking, wide
@@ -612,6 +651,24 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         c.rect(bx, beak_y, 3, 1, P['beak']); c.rect(bx, beak_y + 1, 3, 1, P['beak2'])
     elif emotion == 'dizzy':                                                               # open and askew
         c.rect(bx, beak_y, 3, 1, P['beak']); c.rect(bx, beak_y + 1, 3, 1, P['mouth']); c.put(bx, beak_y + 2, P['beak2'])
+    elif emotion == 'peck':                                                                # open at the ground, grabbing
+        opened(beak_y + 1, 1)
+    elif emotion == 'chew_a':
+        opened(beak_y, 1)
+    elif emotion == 'stretch':                                                             # the yawn
+        c.rect(bx - 1, beak_y, 5, 1, P['beak']); c.rect(bx - 1, beak_y + 1, 5, 3, P['mouth']); c.rect(bx - 1, beak_y + 4, 5, 1, P['beak2'])
+    elif emotion in ('preen_a', 'preen_b', 'tuck'):                                        # the head turned into the lifted wing
+        edge = int(cx + rx)
+        px0 = edge - 6 if emotion != 'preen_b' else edge - 7
+        py0 = beak_y + 3 if emotion != 'preen_b' else beak_y + 4
+        c.rect(px0, py0, 3, 1, P['beak']); c.put(px0 + 1, py0 + 1, P['beak2'])
+        if emotion != 'tuck':
+            for fx, fy in ((edge - 1, py0 - 2), (edge + 1, py0 - 4)) if emotion == 'preen_b' else ((edge, py0 - 3),):
+                c.put(fx, fy, P['hi'])                                                     # a feather tip ruffled up
+    elif emotion in ('sly_l', 'sly_r'):                                                    # hehe: a tiny chirp
+        opened(beak_y, 1)
+    elif emotion in ('kick_l', 'kick_r'):                                                  # pressed shut
+        c.rect(bx, beak_y, 3, 1, P['beak']); c.rect(bx, beak_y + 1, 3, 1, P['beak2'])
     else:                                                                                  # neutral, curious, sleepy, proud, puff, sad (a row lower: drooping)
         shut(beak_y)
 
@@ -937,6 +994,22 @@ def food_sock():
 
 FOODS = {'corn': food_corn, 'nut': food_nut, 'burger': food_burger, 'cake': food_cake, 'broccoli': food_broccoli,
          'chili': food_chili, 'coin': food_coin, 'sock': food_sock}
+
+def newspaper(turn=False):
+    """The paper Gugu reads when idle (2026-11-04, the owner: "看报纸"): two pages, a headline, lines, a little picture;
+    turn: the right page's corner lifted. Drawn in front of the belly, the wings at its edges."""
+    c = Canvas(30, 17); P = PAL
+    c.rect(1, 1, 28, 15, P['paper'])
+    c.vline(15, 1, 15, P['hi'])                                        # the fold
+    c.rect(3, 3, 10, 2, P['line']); c.rect(17, 3, 10, 2, P['line'])    # headlines
+    for y in (7, 9, 11, 13): c.hline(3, 12, y, P['ink'])
+    c.rect(17, 7, 5, 4, P['skyd']); c.put(19, 8, P['sun'])            # a picture
+    for y in (7, 9): c.hline(23, 27, y, P['ink'])
+    c.hline(17, 27, 13, P['ink'])
+    if turn:                                                           # the right page's corner lifted, about to turn
+        c.rect(24, 1, 5, 5, P['hi']); c.put(28, 1, None); c.put(27, 1, None); c.put(28, 2, None)
+    c.outline_of({P['paper'], P['hi'], P['line'], P['ink'], P['skyd'], P['sun']}, P['line'])
+    return c
 
 def acc_sun_hat():
     c = Canvas(24, 9); P = PAL

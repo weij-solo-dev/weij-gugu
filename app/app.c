@@ -390,6 +390,12 @@ void app_main(void)
     call_set_state_listener(on_call_state, NULL);
     if (getenv("GUGU_YELLOW_HOLD")) { board_event_t ev = { .kind = BOARD_EV_KEY_HOLD, .a = BOARD_KEY_YELLOW, .b = BOARD_HOLD_MS }; on_board_event(&ev, NULL); }   // host: the pairing card, for a screenshot
     if (getenv("GUGU_TOD")) instinct_set_tod_override(atoi(getenv("GUGU_TOD")));   // host screenshots: 0 night, 1 sunrise, 2 day, 3 dusk
+    if (getenv("GUGU_IDLE")) instinct_idle_now(getenv("GUGU_IDLE"));   // host screenshots: that idle bit at once
+    if (getenv("GUGU_FEED")) {                     // host screenshots: the yellow key drops this item, item[:plan]
+        char item[24]; snprintf(item, sizeof item, "%s", getenv("GUGU_FEED"));
+        char *colon = strchr(item, ':'); int plan = colon ? atoi(colon + 1) : -1; if (colon) *colon = '\0';
+        instinct_feed_override(item, plan);
+    }
     if (getenv("GUGU_READY")) {                    // host screenshots: the bubble's reason (yes, setup, wifi, service)
         const char *r = getenv("GUGU_READY");
         instinct_set_ready_override(!strcmp(r, "yes") ? INSTINCT_READY : !strcmp(r, "wifi") ? INSTINCT_WIFI_DOWN : !strcmp(r, "service") ? INSTINCT_SERVICE_DOWN : INSTINCT_NEED_SETUP);

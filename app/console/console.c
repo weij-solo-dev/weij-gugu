@@ -245,7 +245,12 @@ static int cmd_press(int argc, char **argv)   // press yellow [n] | press shake 
     int n = argc > 2 ? atoi(argv[2]) : 1;
     if (argc > 1 && !strcmp(argv[1], "shake")) { for (int i = 0; i < n; i++) { instinct_shaken(160); clock_sleep_ms(300); } printf("shaken x%d\n", n); return 0; }
     if (argc > 1 && !strcmp(argv[1], "pickup")) { instinct_picked_up(); printf("picked up\n"); return 0; }
-    if (argc < 2 || strcmp(argv[1], "yellow")) { printf("usage: press yellow [n] | shake [n] | pickup\n"); return 1; }
+    if (argc < 2 || strcmp(argv[1], "yellow")) { printf("usage: press yellow [n] [item[:plan]] | shake [n] | pickup\n"); return 1; }
+    if (argc > 3) {                                            // e.g. chili:0 (kicked), coin, nut:1 (tucked away)
+        char item[24]; snprintf(item, sizeof item, "%s", argv[3]);
+        char *colon = strchr(item, ':'); int plan = colon ? atoi(colon + 1) : -1; if (colon) *colon = '\0';
+        instinct_feed_override(item, plan);
+    } else instinct_feed_override(NULL, -1);
     for (int i = 0; i < n; i++) { instinct_yellow_tap(); clock_sleep_ms(250); }
     printf("yellow x%d\n", n);
     return 0;
@@ -358,6 +363,13 @@ static int cmd_vendors(int argc, char **argv)   // vendors [test]: who plays eac
     return s_res.ok ? 0 : 1;
 }
 
+static int cmd_idle(int argc, char **argv)   // idle look|preen|read|stretch: start that bit of idle life now
+{
+    if (argc < 2 || !instinct_idle_now(argv[1])) { printf("usage: idle look|preen|read|stretch\n"); return 1; }
+    printf("idle: %s\n", argv[1]);
+    return 0;
+}
+
 static int cmd_tap(int argc, char **argv)   // tap x y: a finger on the screen there (466×466), as the touch panel reports it
 {
     if (argc < 3) { printf("usage: tap x y\n"); return 1; }
@@ -426,7 +438,8 @@ static const cmd_t CMDS[] = {
     { "journey", "journey [ask <words> | forget <trip id>] — the three memory books", cmd_journey },
     { "art", "art [gen|retry] — the generated pictures of the current trip (backdrop, props, friend)", cmd_art },
     { "tod", "tod night|sunrise|day|dusk|auto — force the time of day the scene shows", cmd_tod },
-    { "press", "press yellow [n] | shake [n] | pickup — the child's hands, from the console", cmd_press },
+    { "press", "press yellow [n] [item[:plan]] | shake [n] | pickup — the child's hands, from the console (item: corn nut burger cake broccoli chili coin sock)", cmd_press },
+    { "idle", "idle look|preen|read|stretch — start that bit of idle life now (it also comes by itself when nobody is about)", cmd_idle },
     { "voice", "voice [en|zh|yue] [voice_id] — Gugu says the preview line with that voice (the page's 试听)", cmd_voice },
     { "vendors", "vendors [test] — who plays each role, whether its key is set; test: ask them all (the page's 测试)", cmd_vendors },
     { "scan", "nearby Wi-Fi networks (what the pairing page offers)", cmd_scan },

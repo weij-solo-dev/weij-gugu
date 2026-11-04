@@ -48,33 +48,49 @@ static struct { instinct_offer_t kind; char path[160]; char text[240]; bool ques
 static bool s_speaking, s_speaking_question;
 static int64_t s_last_interaction, s_idea_asked, s_peek_next;
 
-// The feed key (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等），然后 gugu 完成拾起作出相关反应").
-// Each item has two reactions and a chance for the first; `then` is a second face after then_ms (UI_EMO_COUNT: none).
-typedef struct { ui_emotion_t face, then; uint16_t then_ms; const char *sfx; int act; uint8_t pct; } feed_react_t;   // act: a ui_action_t, -1 none
-typedef struct { const char *id; uint8_t weight; feed_react_t r[2]; } food_t;
-#define NO_ACT (-1)
+// The feed key (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等），然后 gugu 完成拾起作出相关反应";
+// then "可以都统一动作：所有投递的物品，它先眼睛看向它，然后做一个表情（开心、白眼、偷摸等），然后做动作（拾起吃了、拾起偷偷
+// 收起来、一脚踢开等）" and "比如我投递辣椒，它看到，可以白眼，然后一脚踢开"). Every item goes the same way: the eyes find
+// it as it falls, Gugu makes a face about it, walks over and acts (eats it, slips it under its wing, or kicks it out of
+// the window), shows how that felt, and walks home. Each item has two plans and a chance for the first.
+typedef enum { ACT_EAT = 0, ACT_STASH, ACT_KICK } feed_act_t;
+#define FACE_SLY UI_EMO_COUNT            // the face step as a pose: glancing left and right (偷摸)
+typedef struct { uint8_t act; ui_emotion_t face, after, then; const char *sfx; uint8_t pct; } feed_plan_t;   // then: a second face after `after` (UI_EMO_COUNT none)
+typedef struct { const char *id; uint8_t weight; feed_plan_t plan[2]; } food_t;
+#define NONE_E UI_EMO_COUNT
 static const food_t FOOD[] = {   // the order of ui_food_sprites
-    { "corn",     22, { { UI_EMO_HAPPY,     UI_EMO_COUNT,    0,    "crunch", UI_ACT_JUMP, 75 }, { UI_EMO_LAUGHING, UI_EMO_COUNT, 0, "crunch", NO_ACT, 0 } } },
-    { "nut",      18, { { UI_EMO_HAPPY,     UI_EMO_COUNT,    0,    "crunch", NO_ACT,      70 }, { UI_EMO_PROUD,    UI_EMO_COUNT, 0, "crunch", NO_ACT, 0 } } },
-    { "burger",   10, { { UI_EMO_SURPRISED, UI_EMO_LAUGHING, 1200, "crunch", NO_ACT,      70 }, { UI_EMO_PUFF,     UI_EMO_COUNT, 0, "pop",    NO_ACT, 0 } } },
-    { "cake",     10, { { UI_EMO_LAUGHING,  UI_EMO_COUNT,    0,    "chirp",  NO_ACT,      70 }, { UI_EMO_SHY,      UI_EMO_COUNT, 0, "chirp",  NO_ACT, 0 } } },
-    { "broccoli", 10, { { UI_EMO_EYEROLL,   UI_EMO_COUNT,    0,    NULL,     NO_ACT,      70 }, { UI_EMO_ANGRY,    UI_EMO_COUNT, 0, NULL,     NO_ACT, 0 } } },
-    { "chili",     8, { { UI_EMO_SURPRISED, UI_EMO_ANGRY,    900,  "pop",    NO_ACT,      80 }, { UI_EMO_DIZZY,    UI_EMO_COUNT, 0, "pop",    NO_ACT, 0 } } },
-    { "coin",     12, { { UI_EMO_PROUD,     UI_EMO_COUNT,    0,    "bell",   NO_ACT,      70 }, { UI_EMO_HAPPY,    UI_EMO_COUNT, 0, "bell",   UI_ACT_FLY, 0 } } },
-    { "sock",     10, { { UI_EMO_EYEROLL,   UI_EMO_COUNT,    0,    NULL,     UI_ACT_SHAKE_HEAD, 60 }, { UI_EMO_ANGRY, UI_EMO_COUNT, 0, NULL,  NO_ACT, 0 } } },
+    { "corn",     22, { { ACT_EAT,   UI_EMO_HAPPY,     UI_EMO_HAPPY,    NONE_E, "crunch", 100 }, { 0 } } },
+    { "nut",      18, { { ACT_EAT,   UI_EMO_HAPPY,     UI_EMO_PROUD,    NONE_E, "crunch", 70 },  { ACT_STASH, FACE_SLY, UI_EMO_SHY, NONE_E, "pop", 0 } } },
+    { "burger",   10, { { ACT_EAT,   UI_EMO_SURPRISED, UI_EMO_LAUGHING, NONE_E, "crunch", 100 }, { 0 } } },
+    { "cake",     10, { { ACT_EAT,   UI_EMO_LAUGHING,  UI_EMO_SHY,      NONE_E, "chirp",  100 }, { 0 } } },
+    { "broccoli", 10, { { ACT_KICK,  UI_EMO_EYEROLL,   UI_EMO_ANGRY,    NONE_E, "pop",    70 },  { ACT_EAT, UI_EMO_EYEROLL, UI_EMO_EYEROLL, NONE_E, "crunch", 0 } } },
+    { "chili",     8, { { ACT_KICK,  UI_EMO_EYEROLL,   UI_EMO_ANGRY,    NONE_E, "pop",    75 },  { ACT_EAT, UI_EMO_CURIOUS, UI_EMO_SURPRISED, UI_EMO_ANGRY, "pop", 0 } } },   // eaten: spicy!
+    { "coin",     12, { { ACT_STASH, FACE_SLY,         UI_EMO_PROUD,    NONE_E, "bell",   100 }, { 0 } } },
+    { "sock",     10, { { ACT_KICK,  UI_EMO_EYEROLL,   UI_EMO_EYEROLL,  NONE_E, "pop",    60 },  { ACT_STASH, FACE_SLY, UI_EMO_SHY, NONE_E, NULL, 0 } } },
 };
+static const feed_plan_t FULL_PLAN = { ACT_KICK, UI_EMO_EYEROLL, UI_EMO_EYEROLL, NONE_E, "pop", 100 };   // full: whatever it is, away with it
+static const char *const ACT_NAME[] = { "eaten", "tucked away", "kicked off" };
 #define FOOD_N ((int)(sizeof FOOD / sizeof FOOD[0]))
 #define FEED_LAND_MS   450              // ui_feed.c's fall
-#define FEED_PECK_MS   650
-#define FEED_GONE_MS   900
-#define FEED_REACT_MS  2000
-#define FEED_FULL_N    5                // this many eaten within FEED_FULL_US and it pushes the next one away
+#define FEED_FULL_N    5                // this many eaten within FEED_FULL_US and it kicks the next one away
 #define FEED_FULL_US   (60 * 1000000LL)
-static int s_feed_food = -1;            // the item falling or on the ground, -1 none
-static int64_t s_feed_t0, s_feed_done_at;
-static uint8_t s_feed_step; static bool s_feed_full;
+enum { FS_FALL, FS_FACE, FS_WALK, FS_PECK, FS_HOLD, FS_LOOK, FS_CHEW, FS_TUCK, FS_KICK, FS_AFTER, FS_BACK };
+static int s_feed_food = -1;            // the item being dealt with, -1 none
+static const feed_plan_t *s_plan;
+static uint8_t s_fs;                    // its step
+static int64_t s_feed_t0, s_fs_next;
+static int s_feed_dir, s_feed_dx;       // the side it fell (-1 left, +1 right); where Gugu stands to deal with it (base px from home)
+static bool s_landed;
 static int s_feed_queue;                // presses waiting for the current item (at most 3)
+static int s_force_food = -1, s_force_plan = -1;   // instinct_feed_override
 static int64_t s_eaten[FEED_FULL_N]; static int s_eaten_i;
+// Idle life (2026-11-04, the owner: "眨眼可以，可以加入其他 idle 动作（可以更拟人，比如打理自己羽毛，比如看报纸等），但不要上下
+// 动来动去"): now and then, when nobody is about, Gugu looks around, preens, reads the paper or stretches with a yawn; a touch,
+// a key, a shake, a bubble or a call ends it at once.
+typedef enum { IDLE_NONE = 0, IDLE_LOOK, IDLE_PREEN, IDLE_READ, IDLE_STRETCH } idle_kind_t;
+static idle_kind_t s_idle_kind;
+static int64_t s_idle_next, s_idle_end, s_idle_mark;
+static atomic_int s_idle_force;           // instinct_idle_now: the kind to start next, IDLE_NONE for chance
 // One random stream for the feeding, whatever task presses: newlib keeps rand() per FreeRTOS task, so a seed in the
 // key's task left the instinct task (queued drops) replaying the same feast after every boot.
 static uint32_t s_rng = 2463534242u;
@@ -200,7 +216,7 @@ static ui_bubble_t bubble_of(instinct_ready_t r)
 }
 static const char *reason_name(instinct_ready_t r) { return r == INSTINCT_WIFI_DOWN ? "wifi" : r == INSTINCT_SERVICE_DOWN ? "service" : "setup"; }
 
-static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && !s_shake_last; }   // no call, no timed mood, not a ball
+static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && !s_shake_last && s_feed_food < 0; }   // no call, no timed mood, not a ball, not eating
 
 // Once a second: enter the puzzled rest after PUZZLED_AFTER of "not ready", leave it the moment it is ready.
 static void readiness_tick(void)
@@ -230,60 +246,154 @@ static void readiness_tick(void)
     if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
 }
 
-// Feeding, the yellow key's one job: an item falls beside Gugu's feet, Gugu pecks it up and reacts (its own two
-// reactions per item), full after five in a minute. Day and night alike: at night it eats and dozes off again.
+// Feeding, the yellow key's one job: see FOOD above. feed_tick moves the item through its steps; a call or a shake
+// ends it on the spot (feed_abort), Gugu back home at once.
 static void feed_abort(void)
 {
     if (s_feed_food < 0 && !s_feed_queue) return;
-    ui_feed_clear();
+    ui_feed_clear(); ui_pose(UI_POSE_NONE); ui_walk_to(0, 0);
     s_feed_food = -1; s_feed_queue = 0;
 }
+
+static void idle_stop(void);
 
 static void feed_start(int64_t now)
 {
     int roll = (int)(rng() % 100), food = 0;
     for (int acc = 0; food < FOOD_N - 1; food++) { acc += FOOD[food].weight; if (roll < acc) break; }
-    int64_t oldest = s_eaten[s_eaten_i % FEED_FULL_N];      // the fifth-last bite: within a minute means full
-    s_feed_full = oldest && now - oldest < FEED_FULL_US;
-    ui_feed_drop(food, (rng() & 1) ? 20 : 79);            // beside the feet, left or right
+    int64_t oldest = s_eaten[s_eaten_i % FEED_FULL_N];       // the fifth-last bite: within a minute means full
+    bool full = oldest && now - oldest < FEED_FULL_US;
+    if (s_force_food >= 0) food = s_force_food;
+    s_plan = full ? &FULL_PLAN : (int)(rng() % 100) < FOOD[food].plan[0].pct ? &FOOD[food].plan[0] : &FOOD[food].plan[1];
+    if (!full && s_force_plan >= 0 && (s_force_plan == 0 || FOOD[food].plan[0].pct < 100)) s_plan = &FOOD[food].plan[s_force_plan ? 1 : 0];
+    s_feed_dir = (rng() & 1) ? 1 : -1;
+    int land_x = s_feed_dir < 0 ? 24 : 76, w = ui_feed_width(food);   // beside the feet, left or right
+    // Where to stand: the beak over it to pick it up (the beak's tip is sprite pixel 24, home at 34), or the swung foot at
+    // its near side to kick it (the left kick's foot spans sprite pixels 11..14, the right one's 33..36).
+    s_feed_dx = s_plan->act != ACT_KICK ? land_x + w / 2 - 58 : s_feed_dir < 0 ? land_x + w - 45 : land_x - 70;
+    idle_stop();
+    ui_feed_drop(food, land_x);
     board_vibrate(15);
-    s_feed_food = food; s_feed_t0 = now; s_feed_step = 0;
-    LOGI("fed: a %s falls%s", FOOD[food].id, s_feed_full ? " (Gugu is full)" : "");
-}
-
-static int64_t feed_react(int food)   // returns how long the reaction lasts, µs
-{
-    const feed_react_t *r = &FOOD[food].r[(int)(rng() % 100) < FOOD[food].r[0].pct ? 0 : 1];
     s_mood_until = 0;
-    mood(r->face, r->then != UI_EMO_COUNT ? r->then_ms : FEED_REACT_MS);
-    if (r->then != UI_EMO_COUNT) { s_mood_next = r->then; s_mood_next_until = 1800; }
-    if (r->sfx) audio_sfx_play(r->sfx);
-    if (r->act != NO_ACT) ui_play_action((ui_action_t)r->act);
-    if (r->face == UI_EMO_SURPRISED && r->then == UI_EMO_ANGRY) board_vibrate(60);   // spicy!
-    store_event("fed a %s", FOOD[food].id);
-    return (int64_t)((r->then != UI_EMO_COUNT ? r->then_ms + 1800 : FEED_REACT_MS)) * 1000;
+    ui_pose(s_feed_dir < 0 ? UI_POSE_LOOK_L : UI_POSE_LOOK_R);   // 1. the eyes find it as it falls
+    s_feed_food = food; s_feed_t0 = now; s_landed = false;
+    s_fs = FS_FALL; s_fs_next = now + (FEED_LAND_MS + 250) * 1000LL;   // µs: it lands at 450 ms, the eyes stay on it a little
+    LOGI("fed: a %s falls (%s)%s", FOOD[food].id, ACT_NAME[s_plan->act], full ? ", Gugu is full" : "");
 }
 
-static void feed_tick(int64_t now)   // every 40 ms while something is falling, on the ground or being reacted to
+void instinct_feed_override(const char *food, int plan)
+{
+    s_force_food = -1; s_force_plan = plan;
+    for (int i = 0; food && i < FOOD_N; i++) if (!strcmp(FOOD[i].id, food)) s_force_food = i;
+    if (!food) s_force_plan = -1;
+}
+
+static uint32_t walk_ms(int dx) { return 40u + (uint32_t)(dx < 0 ? -dx : dx) * 16u; }
+
+static void feed_tick(int64_t now)   // every 40 ms while an item is being dealt with
 {
     if (s_feed_food < 0) return;
-    int64_t t = (now - s_feed_t0) / 1000;
-    if (s_feed_step == 0 && t >= FEED_LAND_MS) { audio_sfx_play("tap"); s_feed_step = 1; }
-    if (s_feed_step == 1 && t >= FEED_PECK_MS) {
-        s_feed_step = 2;
-        if (s_feed_full) { s_mood_until = 0; mood(UI_EMO_EYEROLL, 1800); ui_play_action(UI_ACT_SHAKE_HEAD); LOGI("fed: full, the %s is pushed away", FOOD[s_feed_food].id); }
-        else ui_play_action(UI_ACT_PECK);
-    }
-    if (s_feed_step == 2 && t >= (s_feed_full ? 1900 : FEED_GONE_MS)) {
-        ui_feed_clear();
-        s_feed_step = 3;
-        if (s_feed_full) s_feed_done_at = now + 300000;
-        else { s_feed_done_at = now + feed_react(s_feed_food); s_eaten[s_eaten_i++ % FEED_FULL_N] = now; }
-    }
-    if (s_feed_step == 3 && now >= s_feed_done_at) {
+    if (!s_landed && now - s_feed_t0 >= FEED_LAND_MS * 1000LL) { audio_sfx_play("tap"); s_landed = true; }
+    if (now < s_fs_next) return;
+    const feed_plan_t *pl = s_plan;
+    switch (s_fs) {
+    case FS_FALL:                                                // 2. a face about it
+        if (pl->face == FACE_SLY) ui_pose(UI_POSE_SLY);
+        else { ui_pose(UI_POSE_NONE); s_mood_until = 0; mood(pl->face, 1000); }
+        s_fs = FS_FACE; s_fs_next = now + 1000000;
+        break;
+    case FS_FACE:                                                // 3. over to it
+        s_mood_until = 0;
+        ui_pose(s_feed_dx < 0 ? UI_POSE_WALK_L : UI_POSE_WALK_R);
+        ui_walk_to(s_feed_dx, walk_ms(s_feed_dx));
+        s_fs = FS_WALK; s_fs_next = now + (walk_ms(s_feed_dx) + 60) * 1000LL;
+        break;
+    case FS_WALK:
+        if (pl->act == ACT_KICK) {                               // 4a. a kick, and it is gone
+            ui_pose(s_feed_dir < 0 ? UI_POSE_KICK_L : UI_POSE_KICK_R);
+            ui_feed_kick(s_feed_dir); board_vibrate(30);
+            if (pl->sfx) audio_sfx_play(pl->sfx);
+            s_fs = FS_KICK; s_fs_next = now + 500000;
+        } else { ui_pose(UI_POSE_PECK); s_fs = FS_PECK; s_fs_next = now + 300000; }   // 4b. bow down to it
+        break;
+    case FS_PECK:                                                // into the beak
+        ui_feed_pick(); ui_pose(UI_POSE_HOLD);
+        s_fs = FS_HOLD; s_fs_next = now + 450000;
+        break;
+    case FS_HOLD:
+        if (pl->act == ACT_EAT) {                                // chewed up
+            ui_feed_clear(); ui_pose(UI_POSE_CHEW);
+            if (pl->sfx) audio_sfx_play(pl->sfx);
+            s_eaten[s_eaten_i++ % FEED_FULL_N] = now;
+            s_fs = FS_CHEW; s_fs_next = now + 800000;
+        } else {                                                 // a good look beside the glasses, glancing about: nobody saw?
+            ui_feed_raise(); ui_pose(UI_POSE_SLY);
+            s_fs = FS_LOOK; s_fs_next = now + 1100000;
+        }
+        break;
+    case FS_LOOK:                                                // under the wing
+        ui_pose(UI_POSE_TUCK); ui_feed_tuck();
+        if (pl->sfx) audio_sfx_play(pl->sfx);
+        s_fs = FS_TUCK; s_fs_next = now + 550000;
+        break;
+    case FS_CHEW: case FS_TUCK: case FS_KICK:                    // 5. how that felt
+        ui_pose(UI_POSE_NONE); s_mood_until = 0;
+        mood(pl->after, pl->then != NONE_E ? 800 : 1200);
+        if (pl->then != NONE_E) { s_mood_next = pl->then; s_mood_next_until = 1300; board_vibrate(60); }   // spicy!
+        store_event("fed a %s: %s", FOOD[s_feed_food].id, ACT_NAME[pl->act]);
+        s_fs = FS_AFTER; s_fs_next = now + (pl->then != NONE_E ? 2200000 : 1300000);
+        break;
+    case FS_AFTER:                                               // 6. home
+        s_mood_until = 0; s_mood_next = UI_EMO_COUNT; ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));
+        if (s_feed_dx) { ui_pose(s_feed_dx > 0 ? UI_POSE_WALK_L : UI_POSE_WALK_R); ui_walk_to(0, walk_ms(s_feed_dx)); }
+        s_fs = FS_BACK; s_fs_next = now + (s_feed_dx ? walk_ms(s_feed_dx) + 60 : 0) * 1000LL;
+        break;
+    case FS_BACK:
+        ui_pose(UI_POSE_NONE);
         s_feed_food = -1;
         if (s_feed_queue > 0) { s_feed_queue--; feed_start(now); }
+        break;
     }
+}
+
+// ---- idle life: see IDLE above ----
+static void idle_stop(void)
+{
+    if (s_idle_kind) { ui_pose(UI_POSE_NONE); s_idle_kind = IDLE_NONE; }
+    s_idle_next = clock_us() + (int64_t)(12 + rng() % 14) * 1000000LL;   // the next one 12–25 s after things went quiet
+}
+
+static void idle_tick(int64_t now, world_tod_t tod)   // every 250 ms
+{
+    bool quiet = resting() && !s_puzzled && !s_speaking && !atomic_load(&s_line_open) && ui_bubble_shown() == UI_BUBBLE_NONE;
+    if (s_idle_kind) {
+        if (!quiet || now >= s_idle_end) { idle_stop(); return; }
+        if (s_idle_kind == IDLE_LOOK && s_idle_mark && now >= s_idle_mark) { ui_pose(UI_POSE_LOOK_R); s_idle_mark = 0; }   // and the other way
+        return;
+    }
+    int forced = atomic_exchange(&s_idle_force, IDLE_NONE);
+    if (forced && quiet) { s_idle_kind = (idle_kind_t)forced; goto start; }
+    if (!quiet || now < s_idle_next || now - s_last_interaction < 6000000) return;
+    // what fits the hour: no paper in the dark, more yawns as it gets late
+    int w_look = tod == WORLD_TOD_NIGHT ? 0 : 30, w_preen = tod == WORLD_TOD_NIGHT ? 40 : 25;
+    int w_read = tod == WORLD_TOD_DAY || tod == WORLD_TOD_SUNRISE ? 25 : 0;
+    int w_stretch = tod == WORLD_TOD_NIGHT ? 60 : tod == WORLD_TOD_DUSK ? 35 : 20;
+    int r = (int)(rng() % (uint32_t)(w_look + w_preen + w_read + w_stretch));
+    s_idle_kind = (r -= w_look) < 0 ? IDLE_LOOK : (r -= w_preen) < 0 ? IDLE_PREEN : (r -= w_read) < 0 ? IDLE_READ : IDLE_STRETCH;
+start:
+    switch (s_idle_kind) {
+    case IDLE_LOOK:    ui_pose(UI_POSE_LOOK_L);  s_idle_mark = now + 1300000; s_idle_end = now + 2600000; break;
+    case IDLE_PREEN:   ui_pose(UI_POSE_PREEN);   s_idle_end = now + 2700000; break;
+    case IDLE_READ:    ui_pose(UI_POSE_READ);    s_idle_end = now + 7200000; break;
+    default:           ui_pose(UI_POSE_STRETCH); s_idle_end = now + 1500000; break;
+    }
+}
+
+bool instinct_idle_now(const char *kind)
+{
+    static const char *const NAMES[] = { "", "look", "preen", "read", "stretch" };
+    for (int i = 1; i < 5; i++) if (kind && !strcmp(kind, NAMES[i])) { atomic_store(&s_idle_force, i); return true; }
+    return false;
 }
 
 // An object of the scene is touched: its behaviour, a buzz, a sound, a look from Gugu.
@@ -338,6 +448,7 @@ void instinct_yellow_tap(void)
     static bool seeded;
     if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
     if (s_shake_last) return;                                 // a ball does not eat
+    idle_stop();
     if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // one more is coming
     feed_start(now);                                          // a bubble or the trip's props on screen change nothing: they answer touches
 }
@@ -346,6 +457,7 @@ void instinct_shaken(int intensity)
 {
     s_last_interaction = clock_us();
     if (atomic_load(&s_busy)) return;
+    idle_stop();
     int64_t now = clock_us();
     if (!s_shake_last || now - s_shake_last > 1200000) { feed_abort(); ui_bounce_start(); LOGI("shaken: into a ball"); }
     else ui_bounce_kick(intensity);
@@ -356,8 +468,8 @@ void instinct_shaken(int intensity)
 void instinct_picked_up(void)
 {
     s_last_interaction = clock_us();
-    if (atomic_load(&s_busy) || s_shake_last) return;
-    audio_sfx_play("chirp");
+    if (atomic_load(&s_busy) || s_shake_last || s_feed_food >= 0) return;
+    idle_stop();                                               // no sound: a face and a wave (2026-11-04, the owner: "没必要有嘀")
     ui_play_action(UI_ACT_WAVE);
     mood(UI_EMO_CURIOUS, 2000);
     LOGI("picked up");
@@ -365,6 +477,7 @@ void instinct_picked_up(void)
 
 void instinct_refuse(const char *why)
 {
+    idle_stop();
     board_vibrate(90);
     audio_sfx_play("nosignal");
     ui_play_action(UI_ACT_SHAKE_HEAD);
@@ -497,6 +610,7 @@ static void instinct_task(void *arg)
         moods_tick();
         urge_tick();
         offer_tick(now);
+        idle_tick(now, tod);
         if (now < next1s) continue;
         next1s = now + 1000000;
         readiness_tick();
@@ -528,6 +642,7 @@ void instinct_set_busy(bool in_turn)
     bool was = atomic_exchange(&s_busy, in_turn);
     s_last_interaction = clock_us();
     ui_set_idle(!in_turn);
+    if (in_turn) idle_stop();
     if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
     if (in_turn) feed_abort();                                // and whatever was falling goes
     if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
@@ -543,10 +658,11 @@ void instinct_touched(int x, int y)
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
     s_last_interaction = now;
+    idle_stop();
     if (ui_bubble_hit(x, y) && bubble_tap(now)) return;      // the bubble: pairing mode, or Gugu says its line
     int hit = ui_scene_hit(x, y);
     if (hit >= 0) { s_last_touch = now; poke_object(hit); return; }
-    if (!ui_scene_hit_gugu(x, y)) return;
+    if (!ui_scene_hit_gugu(x, y) || s_feed_food >= 0) return;   // busy with the food: a touch on Gugu waits
     if (now - s_last_touch < 1500000) return;     // one reaction per 1.5 s
     s_last_touch = now;
     board_vibrate(30);

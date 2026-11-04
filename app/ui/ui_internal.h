@@ -24,4 +24,5 @@ void ui_scene_init(lv_obj_t *scr);              // the window pane and the objec
 void ui_scene_init_accessory(void);             // the accessory overlay, a child of the pigeon (after ui_gugu_img exists)
 void ui_scene_show_window(bool show);
 void ui_scene_refresh_accessory(ui_emotion_t e);   // reposition the worn accessory for the face on screen
+void ui_scene_refresh_accessory_pose(int frame);  // the same for a pose frame (UI_PF_*)
 void ui_home_backdrop_refresh(void);            // lamp on/off: swap the room picture (UI lock held)

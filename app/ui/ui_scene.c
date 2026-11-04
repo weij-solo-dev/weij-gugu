@@ -281,17 +281,28 @@ void ui_set_accessory(const char *id)
     ui_unlock();
 }
 
-void ui_scene_refresh_accessory(ui_emotion_t e)
+static void place_accessory(const ui_patch_t *glasses, int hat_y, int camera_y)
 {
     if (!s_acc_img) return;
-    if (e >= UI_EMOTION_COUNT) e = UI_EMO_NEUTRAL;
     const lv_image_dsc_t *src = NULL; int x = 0, y = 0;
-    if (!strcmp(s_acc, "sun_hat")) { src = &spr_acc_sun_hat; x = 12; y = ui_hat_y[e]; }
-    else if (!strcmp(s_acc, "sunglasses")) { src = ui_sunglasses_patch[e].img; x = ui_sunglasses_patch[e].x; y = ui_sunglasses_patch[e].y; }
-    else if (!strcmp(s_acc, "camera")) { src = &spr_acc_camera; x = 18; y = ui_camera_y[e]; }
+    if (!strcmp(s_acc, "sun_hat")) { src = &spr_acc_sun_hat; x = 12; y = hat_y; }
+    else if (!strcmp(s_acc, "sunglasses")) { src = glasses->img; x = glasses->x; y = glasses->y; }
+    else if (!strcmp(s_acc, "camera")) { src = &spr_acc_camera; x = 18; y = camera_y; }
     if (!src) { lv_obj_add_flag(s_acc_img, LV_OBJ_FLAG_HIDDEN); return; }
     if (lv_image_get_src(s_acc_img) != src) lv_image_set_src(s_acc_img, src);
     lv_obj_set_pos(s_acc_img, x * UI_SPRITE_SCALE, y * UI_SPRITE_SCALE);
     lv_obj_remove_flag(s_acc_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_acc_img);
+}
+
+void ui_scene_refresh_accessory(ui_emotion_t e)
+{
+    if (e >= UI_EMOTION_COUNT) e = UI_EMO_NEUTRAL;
+    place_accessory(&ui_sunglasses_patch[e], ui_hat_y[e], ui_camera_y[e]);
+}
+
+void ui_scene_refresh_accessory_pose(int frame)
+{
+    if (frame < 0 || frame >= UI_POSE_FRAME_COUNT) return;
+    place_accessory(&ui_pose_sunglasses_patch[frame], ui_pose_hat_y[frame], ui_pose_camera_y[frame]);
 }

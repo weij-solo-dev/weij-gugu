@@ -10,7 +10,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pixelgen as pg
 
 EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek', 'eyeroll']
-CLOSED = {'happy', 'laughing', 'sleepy', 'proud', 'dizzy', 'puff', 'blink'}   # marks that must keep clear of the frame
+POSES = ['look_l', 'look_r', 'read_l', 'read_r', 'peck', 'hold', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch',
+         'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b', 'kick_l', 'kick_r', 'sly_l', 'sly_r', 'tuck']   # export_lvgl.py's pose frames
+CLOSED = {'happy', 'laughing', 'sleepy', 'proud', 'dizzy', 'puff', 'blink', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch'}   # marks that must keep clear of the frame
 
 
 def problems():
@@ -18,7 +20,7 @@ def problems():
     allowed = {P['eyew'], P['pupil'], P['hi']}
     names = {v: k for k, v in P.items()}
     found = []
-    for name, emotion, kw in [(e, e, {}) for e in EMOTIONS] + [('blink', 'neutral', {'eyes_closed': True})]:
+    for name, emotion, kw in [(e, e, {}) for e in EMOTIONS + POSES] + [('blink', 'neutral', {'eyes_closed': True})]:
         g = pg.gugu(emotion, **kw)
         for i, (x0, y0, w, h) in enumerate(pg.LAST_GEOM['eye_boxes']):
             mask = pg.lens_mask(x0, y0, w, h); ring = pg.lens_ring(mask)
@@ -33,5 +35,5 @@ def problems():
 
 if __name__ == '__main__':
     p = problems()
-    print('\n'.join(p) if p else f'faces ok: {len(EMOTIONS)} faces and the blink, one mark per lens, nothing touching a frame')
+    print('\n'.join(p) if p else f'faces ok: {len(EMOTIONS)} faces, {len(POSES)} pose frames and the blink, one mark per lens, nothing touching a frame')
     sys.exit(1 if p else 0)

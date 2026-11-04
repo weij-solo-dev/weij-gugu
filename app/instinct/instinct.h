@@ -15,6 +15,12 @@ void instinct_set_tod_override(int tod);    // -1 follows the clock; else a worl
 // it up and reacts (happy, laughing, an eye-roll, cross …); five in a minute and it is full; at night too, then it dozes
 // off again. Presses queue (three at most). A bubble and the scene's objects answer touches, never this key.
 void instinct_yellow_tap(void);
+// Tests and screenshots: the next drops are this item (a FOOD id: corn, nut, burger, cake, broccoli, chili, coin, sock) with
+// its first or second plan (0 / 1; -1 by chance); NULL goes back to chance.
+void instinct_feed_override(const char *food, int plan);
+// Idle life (looking around, preening, reading the paper, a stretch) comes by itself when nobody is about; this starts one
+// in a second, whatever the hour (look, preen, read, stretch; console `idle`, screenshots). False for an unknown name.
+bool instinct_idle_now(const char *kind);
 void instinct_shaken(int intensity);        // IMU: rolls into a ball and bounces off the rim; when it stops, dizzy, then cross, then fine
 void instinct_picked_up(void);              // IMU: looks up at you
 void instinct_refuse(const char *why);      // a call that cannot start or a turn that failed: a buzz, a head shake, then the bubble says why (a sad face only if nothing known is wrong)

@@ -1,11 +1,12 @@
-// ui_anim.c — the expression animation table: beak sync while speaking, blink and breathe when idle,
-// one-shot actions (nod, wave, puff, coo, whistle), the listening ring. Runs on LVGL timers inside the
-// UI task; other modules only poke the small API in ui.h.
+// ui_anim.c — the expression animation table: beak sync while speaking, a blink when idle, one-shot actions (nod,
+// wave, puff, coo, whistle), poses (looking aside, reading the paper, preening, stretching, walking, pecking, holding,
+// chewing, kicking, a sly glance, tucking away) and the walk to a spot, the listening ring. Runs on LVGL timers
+// inside the UI task; other modules only poke the small API in ui.h.
 //
-// Everything that moves often is small: the beak (12 Hz while speaking) and the eyelids (a blink) are
-// patches drawn over the pre-scaled base sprite, so one frame repaints a few hundred pixels. The whole
-// pigeon is repainted only on an emotion change, the two-frame breathe (one base pixel every 1.2 s)
-// and the one-shot actions; the listening ring is static, a small dot pulses instead.
+// Everything that moves often is small: the beak (12 Hz while speaking) and the eyelids (a blink) are patches drawn
+// over the pre-scaled base sprite, so one frame repaints a few hundred pixels. The whole pigeon is repainted on an
+// emotion change, a pose frame and the one-shot actions. The body keeps still when idle: the breathing bob (one base
+// pixel every 1.2 s, forever) is gone (2026-11-04, the owner: "一直上下，这样不好"); idle life is the poses instead.
 #define LOG_TAG "ui"
 #include "ui_internal.h"
 #include "board/board.h"
@@ -15,15 +16,54 @@
 
 static lv_obj_t *s_ring, *s_dot;
 static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
-static bool s_mouth_open, s_idle = true, s_blinking, s_breathe_low;
+static bool s_mouth_open, s_idle = true, s_blinking;
 static uint32_t s_wave_until, s_puff_until;
-static lv_timer_t *s_blink_timer, *s_mouth_timer, *s_breathe_timer, *s_dot_timer;
+static lv_timer_t *s_blink_timer, *s_mouth_timer, *s_pose_timer, *s_dot_timer;
 static uint8_t s_level;
 
-static int rest_y(void) { return GUGU_BASE_Y + (s_breathe_low ? UI_SPRITE_SCALE : 0); }
+static int rest_y(void) { return GUGU_BASE_Y; }
+static int s_dx;                                   // where Gugu stands, base pixels from home (ui_walk_to)
+static int home_x(void) { return GUGU_BASE_X + s_dx * UI_SPRITE_SCALE; }
+
+// ---- poses: two frames at most, alternating every ms; the newspaper goes with READ ----
+static ui_pose_t s_pose;
+static uint8_t s_pose_phase;
+static uint16_t s_pose_ticks;
+static lv_obj_t *s_news;
+static const struct { int8_t f0, f1; uint16_t ms; } POSE[UI_POSE_COUNT] = {
+    [UI_POSE_NONE]    = { -1, -1, 0 },
+    [UI_POSE_LOOK_L]  = { UI_PF_LOOK_L, -1, 0 },          [UI_POSE_LOOK_R]  = { UI_PF_LOOK_R, -1, 0 },
+    [UI_POSE_READ]    = { UI_PF_READ_L, UI_PF_READ_R, 900 },
+    [UI_POSE_PECK]    = { UI_PF_PECK, -1, 0 },            [UI_POSE_HOLD]    = { UI_PF_HOLD, -1, 0 },
+    [UI_POSE_CHEW]    = { UI_PF_CHEW_A, UI_PF_CHEW_B, 160 },
+    [UI_POSE_PREEN]   = { UI_PF_PREEN_A, UI_PF_PREEN_B, 340 },
+    [UI_POSE_STRETCH] = { UI_PF_STRETCH, -1, 0 },
+    [UI_POSE_WALK_L]  = { UI_PF_WALK_L_A, UI_PF_WALK_L_B, 130 }, [UI_POSE_WALK_R] = { UI_PF_WALK_R_A, UI_PF_WALK_R_B, 130 },
+    [UI_POSE_KICK_L]  = { UI_PF_KICK_L, -1, 0 },          [UI_POSE_KICK_R]  = { UI_PF_KICK_R, -1, 0 },
+    [UI_POSE_SLY]     = { UI_PF_SLY_L, UI_PF_SLY_R, 450 },
+    [UI_POSE_TUCK]    = { UI_PF_TUCK, -1, 0 },
+};
+static int pose_frame(void) { return s_pose_phase && POSE[s_pose].f1 >= 0 ? POSE[s_pose].f1 : POSE[s_pose].f0; }
+static void news_show(bool on)
+{
+    if (!s_news) return;
+    if (!on) { lv_obj_add_flag(s_news, LV_OBJ_FLAG_HIDDEN); return; }
+    const lv_image_dsc_t *src = s_pose_ticks % 6 == 5 ? &spr_news_turn : &spr_news;   // a page turned now and then
+    if (lv_image_get_src(s_news) != src) lv_image_set_src(s_news, src);
+    lv_obj_remove_flag(s_news, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_news);
+}
 
 static void refresh_sprite(void)
 {
+    if (s_pose != UI_POSE_NONE) {                          // a pose: its frame, no patches, the trip's accessory on its head
+        int f = pose_frame();
+        ui_show_base(ui_pose_sprites[f]); ui_show_beak(NULL); ui_show_eyes(NULL);
+        news_show(s_pose == UI_POSE_READ);
+        ui_scene_refresh_accessory_pose(f);
+        return;
+    }
+    news_show(false);
     uint32_t now = lv_tick_get();
     const lv_image_dsc_t *base;
     const ui_patch_t *beak = NULL, *eyes = NULL;
@@ -43,10 +83,10 @@ static void refresh_sprite(void)
     ui_scene_refresh_accessory(base == &spr_gugu_puff || base == &spr_gugu_puff_open ? UI_EMO_PUFF : base == &spr_gugu_wave || base == &spr_gugu_wave_open ? UI_EMO_WAVE : s_emotion);
 }
 
-static void jitter_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 2 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 20)) / 32767); }
-static void sway_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 6 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 2)) / 32767); }
-static void headshake_exec(void *obj, int32_t v) { lv_obj_set_x(obj, GUGU_BASE_X + 4 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 3)) / 32767); }   // three swings: no, no, no
-static void x_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, GUGU_BASE_X); }
+static void jitter_exec(void *obj, int32_t v) { lv_obj_set_x(obj, home_x() + 2 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 20)) / 32767); }
+static void sway_exec(void *obj, int32_t v) { lv_obj_set_x(obj, home_x() + 6 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 2)) / 32767); }
+static void headshake_exec(void *obj, int32_t v) { lv_obj_set_x(obj, home_x() + 4 * UI_SPRITE_SCALE * lv_trigo_sin((int16_t)(v * 3)) / 32767); }   // three swings: no, no, no
+static void x_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, home_x()); }
 static void wobble(lv_anim_exec_xcb_t exec, uint32_t ms)
 {
     lv_anim_t a; lv_anim_init(&a);
@@ -102,20 +142,52 @@ static void blink_open_cb(lv_timer_t *t)
 static void blink_close_cb(lv_timer_t *t)
 {
     (void)t;
-    if (!s_idle || s_mouth_open || !ui_blink_fits[s_emotion] || (s_puff_until && lv_tick_get() < s_puff_until) ||
+    if (!s_idle || s_mouth_open || s_pose != UI_POSE_NONE || !ui_blink_fits[s_emotion] || (s_puff_until && lv_tick_get() < s_puff_until) ||
         (s_wave_until && lv_tick_get() < s_wave_until)) return;
     s_blinking = true; refresh_sprite();
     lv_timer_set_period(s_blink_timer, 120);
     lv_timer_set_cb(s_blink_timer, blink_open_cb);
 }
 
-// ---- breathe: a two-frame bob of one base pixel, like the rest of the pixel art ----
-static void breathe_cb(lv_timer_t *t)
+// ---- poses and the walk ----
+static void pose_cb(lv_timer_t *t) { (void)t; s_pose_phase ^= 1; s_pose_ticks++; refresh_sprite(); }
+
+void ui_pose(ui_pose_t p)
 {
-    (void)t;
-    s_breathe_low = !s_breathe_low;
-    lv_obj_set_y(ui_gugu_img, rest_y());
+    if (p >= UI_POSE_COUNT) p = UI_POSE_NONE;
+    ui_lock();
+    if (p != s_pose) {
+        s_pose = p; s_pose_phase = 0; s_pose_ticks = 0;
+        if (p != UI_POSE_NONE && POSE[p].ms) { lv_timer_set_period(s_pose_timer, POSE[p].ms); lv_timer_reset(s_pose_timer); lv_timer_resume(s_pose_timer); }
+        else lv_timer_pause(s_pose_timer);
+        s_blinking = false;
+        refresh_sprite();
+    }
+    ui_unlock();
 }
+ui_pose_t ui_get_pose(void) { return s_pose; }
+
+static void walk_exec(void *obj, int32_t v) { lv_obj_set_x(obj, v); }
+static void walk_done(lv_anim_t *a) { (void)a; lv_obj_set_x(ui_gugu_img, home_x()); }
+void ui_walk_to(int dx, uint32_t ms)
+{
+    ui_lock();
+    int32_t from = lv_obj_get_x(ui_gugu_img);
+    s_dx = dx;
+    lv_anim_delete(ui_gugu_img, walk_exec);
+    if (!ms || from == home_x()) lv_obj_set_x(ui_gugu_img, home_x());
+    else {
+        lv_anim_t a; lv_anim_init(&a);
+        lv_anim_set_var(&a, ui_gugu_img);
+        lv_anim_set_values(&a, from, home_x());
+        lv_anim_set_duration(&a, ms);
+        lv_anim_set_exec_cb(&a, walk_exec);
+        lv_anim_set_completed_cb(&a, walk_done);
+        lv_anim_start(&a);
+    }
+    ui_unlock();
+}
+int ui_gugu_dx(void) { return s_dx; }
 
 void ui_set_idle(bool on)
 {
@@ -141,11 +213,11 @@ static void hop(int32_t height, uint32_t ms)
 // a loop around the window: the pigeon (wings up) follows a circle and lands back on its spot
 static void fly_exec(void *obj, int32_t v)
 {
-    int32_t cx = GUGU_BASE_X, cy = rest_y(), r = 36 * UI_SPRITE_SCALE;
+    int32_t cx = home_x(), cy = rest_y(), r = 36 * UI_SPRITE_SCALE;
     int32_t s = lv_trigo_sin((int16_t)v), c = lv_trigo_cos((int16_t)v);
     lv_obj_set_pos(obj, cx - r * s / 32767, cy - r * (32767 - c) / 32767 / 2);
 }
-static void fly_done(lv_anim_t *a) { (void)a; lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y()); s_wave_until = 0; refresh_sprite(); }
+static void fly_done(lv_anim_t *a) { (void)a; lv_obj_set_pos(ui_gugu_img, home_x(), rest_y()); s_wave_until = 0; refresh_sprite(); }
 static void fly(uint32_t ms)
 {
     s_wave_until = lv_tick_get() + ms; refresh_sprite();
@@ -311,7 +383,16 @@ void ui_anim_init(lv_obj_t *scr)
 
     s_blink_timer = lv_timer_create(blink_close_cb, 3000, NULL);
     s_mouth_timer = lv_timer_create(mouth_timer_cb, 40, NULL);
-    s_breathe_timer = lv_timer_create(breathe_cb, 1200, NULL);
+    s_pose_timer = lv_timer_create(pose_cb, 300, NULL);
+    lv_timer_pause(s_pose_timer);
+    s_news = lv_image_create(ui_gugu_img);                  // the paper, in front of the belly while reading
+    lv_image_set_src(s_news, &spr_news);
+    lv_image_set_pivot(s_news, 0, 0);
+    lv_image_set_scale(s_news, 256 * UI_SPRITE_SCALE);
+    lv_image_set_antialias(s_news, false);
+    lv_obj_remove_flag(s_news, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(s_news, UI_NEWS_X * UI_SPRITE_SCALE, UI_NEWS_Y * UI_SPRITE_SCALE);
+    lv_obj_add_flag(s_news, LV_OBJ_FLAG_HIDDEN);
     s_dot_timer = lv_timer_create(dot_cb, 300, NULL);
     lv_timer_pause(s_dot_timer);
     refresh_sprite();
