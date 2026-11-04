@@ -381,11 +381,11 @@ def gugu_with_case(emotion='neutral', color='red', w=66, h=56):
     return c
 
 # ---------- gugu sprite ----------
-# Wings as hands (2026-11-04, the owner: "它翅膀可以当做手，应该是用手拾起"): in these poses a wing is a hand drawn in front
-# of the body (wing_arm); LAST_GEOM['hand'] says where the held item goes, so the UI can put it there. reach: bowed, one
-# wing down to the ground beside the feet; hold: the item at the chest between both wing tips; lift: one wing up beside
-# the glasses for a good look; sneak: held at the chest with both, glancing about (a, b); bite: both wings bring it up to
-# the open beak; hide: one wing behind the back, the item gone.
+# Wings as hands (2026-11-04, the owner: "它翅膀可以当做手，应该是用手拾起"): in these poses a wing is a hand; LAST_GEOM['hand']
+# says where the held item goes, so the UI can put it there. reach: bowed, one wing down to the ground beside the feet;
+# hold: the item at the chest between both wing tips; lift: one wing up beside the glasses for a good look; sneak: held
+# at the chest with both, glancing about (a, b); bite: both wings bring it up to the open beak; hide: one wing behind
+# the back, the item gone.
 HAND_KINDS = ('reach', 'hold', 'lift', 'sneak', 'bite', 'hide')
 def hand_pose(emotion):
     for k in HAND_KINDS:
@@ -398,60 +398,79 @@ def hand_pose(emotion):
 # hand to the chin) or a stick (holding at the chest). A wing is about as long as the resting one, broad at the shoulder,
 # tapering to a rounded tip that two notches split into three feathers, with a lit upper edge; a gesture keeps its tip
 # within that reach and off the face, and food is held with both wings, like a squirrel with a nut.
+# A wing grows out of the body (2026-11-05, the owner: "就是感觉翅膀（手）跟身体是分离的"): outlined all round, its shoulder
+# included, it sat on the body like a sticker. A wing that reaches out is drawn behind the body, which covers its
+# shoulder, and the two share one outline, as the resting wings do. A wing across the body is filled before the outline
+# is drawn, so one outline runs round both, and its own edge is drawn only where it lies on the feathers, never along
+# its first part, where it comes out of the body (WING_JOIN); across the belly it comes down the side first (an elbow
+# at the body's edge), wrapping round it.
 WING_ROOT, WING_TIP = 4.0, 2.6            # half widths at the shoulder and at the tip
 WING_NOTCH = (0.0, 1.0, 1.6)              # how far each notch reaches in from the tip's edge
+WING_JOIN = 0.25                          # the first part of a front wing's edge, where it comes out of the body: no line
 
-def wing_arm(c, sx, sy, hx, hy, P, elbow=None):
-    """A wing used as a hand, from the shoulder (sx, sy) through the elbow if given to its tip (hx, hy): filled in the
-    resting wing's shade, outlined, the upper edge lit, the tip split into feathers."""
-    pts = [(sx, sy)] + ([elbow] if elbow else []) + [(hx, hy)]
+def wing_field(pts):
+    """A wing from the shoulder pts[0] (through an elbow) to its tip pts[-1]: (x, y) → (v, join), v < 0 inside (the
+    distance to the tapered spine less the half width there), join where the edge is the wing's root."""
     segs = list(zip(pts, pts[1:]))
     lens = [max(1e-6, ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) for (ax, ay), (bx, by) in segs]
     total = sum(lens)
-    def dist(px, py):                                     # < 0 inside: the distance to the spine less the half width there
-        best, run = 1e9, 0.0
-        for ((ax, ay), (bx, by)), L in zip(segs, lens):
+    def at(px, py):
+        best, join, run = 1e9, False, 0.0
+        for i, (((ax, ay), (bx, by)), L) in enumerate(zip(segs, lens)):
             dx, dy = bx - ax, by - ay
-            t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (L * L)))
+            u = ((px - ax) * dx + (py - ay) * dy) / (L * L)
+            t = max(0.0, min(1.0, u))
             r = WING_ROOT - (WING_ROOT - WING_TIP) * (run + t * L) / total
-            best = min(best, ((px - ax - dx * t) ** 2 + (py - ay - dy * t) ** 2) ** 0.5 - r)
+            v = ((px - ax - dx * t) ** 2 + (py - ay - dy * t) ** 2) ** 0.5 - r
+            if v < best: best, join = v, i == 0 and u < WING_JOIN
             run += L
-        return best
+        return best, join
     xs, ys = [q[0] for q in pts], [q[1] for q in pts]
-    d = {(x, y): dist(x + 0.5, y + 0.5) for y in range(int(min(ys)) - 6, int(max(ys)) + 7) for x in range(int(min(xs)) - 6, int(max(xs)) + 7)}
-    for (x, y), v in d.items():
-        if v <= 0: c.put(x, y, P['shade'])
-        elif v <= 1.0: c.put(x, y, P['line'])
-    for (x, y), v in d.items():                           # the upper edge catches the light
-        if -1.0 <= v <= 0 and d.get((x, y - 1), 9) > 0 and d.get((x, y + 2), 9) <= 0: c.put(x, y, P['body'])
-    ax, ay = pts[-2]; n = max(1e-6, ((hx - ax) ** 2 + (hy - ay) ** 2) ** 0.5); ux, uy = (hx - ax) / n, (hy - ay) / n
-    for k in (-1, 1):                                     # two notches in from the tip's edge: three feathers
+    return {(x, y): at(x + 0.5, y + 0.5) for y in range(int(min(ys)) - 6, int(max(ys)) + 7) for x in range(int(min(xs)) - 6, int(max(xs)) + 7)}
+
+def wing_fill(c, f, pts, P):
+    """The wing's feathers: the resting wing's shade, the upper edge lit, the tip split by two notches into three
+    feathers. Returns the pixels it covers."""
+    inside = {p for p, (v, _) in f.items() if v <= 0}
+    for (x, y) in inside: c.put(x, y, P['shade'])
+    for (x, y) in inside:                                     # the upper edge catches the light
+        if f[(x, y)][0] >= -1.0 and (x, y - 1) not in inside and (x, y + 2) in inside: c.put(x, y, P['body'])
+    (ax, ay), (hx, hy) = pts[-2], pts[-1]
+    n = max(1e-6, ((hx - ax) ** 2 + (hy - ay) ** 2) ** 0.5); ux, uy = (hx - ax) / n, (hy - ay) / n
+    for k in (-1, 1):                                         # two notches in from the tip's edge: three feathers
         for depth in WING_NOTCH:
             x, y = hx + ux * (WING_TIP + 0.4 - depth) - uy * k * 0.9, hy + uy * (WING_TIP + 0.4 - depth) + ux * k * 0.9
-            if d.get((int(x), int(y)), 9) <= 0: c.put(int(x), int(y), P['line'])
+            if (int(x), int(y)) in inside: c.put(int(x), int(y), P['line'])
+    return inside
+
+def wing_lines(c, f, P, over):
+    """A wing across the body: its edge drawn where it lies on the feathers (over), not where it comes out of the body."""
+    for (x, y), (v, join) in f.items():
+        if 0 < v <= 1.0 and not join and c.get(x, y) in over: c.put(x, y, P['line'])
 
 def gesture_arms(emotion, cx, cy, rx, ry, ey):
     """The hands of the expressions (2026-11-04, the owner: "所有表情都可以选择手部动作"): for each face, the wings that
-    are arms, as (side, [shoulder, (elbow,) hand]). A face not listed keeps both wings at rest."""
+    are arms, as (side, [shoulder, (elbow,) hand], across the body). A face not listed keeps both wings at rest."""
     both = lambda f: [(s, f(s)) for s in (-1, 1)]
     G = {
         'happy':     both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 4), cy - 9)]),                    # yay: wings up and out
-        'laughing':  both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * 8, cy + 9)]),                             # holding the belly
-        'surprised': both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 5), cy - 5)]),                  # wings flung open
+        'laughing':  both(lambda s: [(cx + s * (rx - 3), cy - 3), (cx + s * (rx - 0.5), cy + 5), (cx + s * 8, cy + 10)]),   # holding the belly
+        'surprised': both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 7), cy - 4)]),                    # wings flung open
         'curious':   [(1, [(cx + rx - 3, cy), (cx + 7, ey + 9)])],                                                 # a tip to the chin: hmm?
         'shy':       both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * 8, ey + 7)]),                               # tips over the blushing cheeks
         'sad':       [(1, [(cx + rx - 3, cy), (cx + 7, ey + 6)])],                                                 # wiping a tear
         'sleepy':    [(1, [(cx + rx - 3, cy), (cx + 9, ey + 2)])],                                                 # rubbing an eye
         'angry':     both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 3), cy + 9)]),                        # stiff wings down and out: hmph
-        'scared':    both(lambda s: [(cx + s * (rx - 3), cy - 2), (cx + s * (rx - 1), ey - 2)]),                    # wings up by the head: eek
+        'scared':    both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 1), cy - 7), (cx + s * (rx + 1), ey - 6)]),   # wings up by the head: eek
         'proud':     both(lambda s: [(cx + s * (rx - 3), cy - 2), (cx + s * (rx + 3), cy + 3), (cx + s * (rx - 2), cy + 8)]),   # hands on hips
         'dizzy':     [(-1, [(cx - rx + 3, cy - 1), (cx - rx + 1, ey - 3)])],                                       # a wing to the head
         'wave':      [(1, [(cx + rx - 3, cy - 1), (cx + rx + 3, cy - 12)])],                                       # waving hello
         'urge':      [(1, [(cx + rx - 3, cy - 1), (cx + rx + 5, cy - 9)])],                                        # pointing at the bubble; the same
         'urge_you':  [(1, [(cx + rx - 3, cy - 1), (cx + rx + 5, cy - 9)])],                                        # when it looks at you: only the eyes swap
-        'eyeroll':   both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 2), cy + 4), (cx + s * (rx + 5), cy - 1)]),   # a shrug: whatever
+        'eyeroll':   both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 4), cy + 4), (cx + s * (rx + 6), cy - 3)]),   # a shrug: whatever
     }
-    return G.get(emotion, [])
+    FRONT = {'laughing', 'curious', 'shy', 'sad', 'sleepy'}   # across the body; the others reach out from behind it
+    return [(side, pts, emotion in FRONT) for side, pts in G.get(emotion, [])]
 
 # Every frame stands on one row: the feet fill rows 47–48 and their outline row 49 sits on the ground line (the away
 # scenes' strip, art.h ART_GROUND_TOP; ui checks the two agree when it compiles, check_faces.py checks every frame).
@@ -490,14 +509,26 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     if emotion == 'stretch':   ry = 21.0; cy = 28.0
     body_set = {P['body'], P['shade'], P['belly'], P['hi']}
 
+    hand, arms = None, []                                      # the wings that are hands: (side, points, across the body)
+    if hk and hk != 'hide':
+        if hk == 'reach':   H = (cx + hs * (rx + 2), cy + ry - 3); arms.append((hs, [(cx + hs * (rx - 2), cy + 3), H], False))
+        elif hk == 'lift':  H = (cx + hs * (rx + 2), cy - 9); arms.append((hs, [(cx + hs * (rx - 3), cy + 1), H], False))
+        else:                                                  # held at the chest (hold, sneak) or up at the open beak (bite)
+            H = (cx, cy + 5) if hk in ('hold', 'sneak') else (cx, cy + 1)
+            for sd in (-1, 1): arms.append((sd, [(cx + sd * (rx - 3), cy - 2), (cx + sd * (rx - 0.5), cy + 5), (cx + sd * 5, H[1] + 3)], True))
+        hand = (int(round(H[0])), int(round(H[1])))
+    arms += gesture_arms(emotion, cx, cy, rx, ry, int(cy - 11))
+
     # wings (behind body)
     wing_dy = {'wave': -9, 'happy': -6, 'laughing': -10, 'surprised': -8, 'proud': -4, 'scared': -12, 'sad': 4, 'angry': -5, 'shy': 2,
                'stretch': -13, 'read_l': -3, 'read_r': -3, 'kick_l': -6, 'kick_r': -6}.get(emotion, 0)
     for side in (-1, 1):
         dy = wing_dy if side == 1 or emotion != 'wave' else 0
         if emotion in ('preen_a', 'preen_b'): dy = (-5 if emotion == 'preen_b' else -8) if side == 1 else 0   # the right wing lifted to be groomed
-        if hk and hk != 'hide' and (side == hs or hk in ('hold', 'sneak', 'bite')): continue   # an arm, drawn in front after the body
-        if any(sd == side for sd, _ in gesture_arms(emotion, cx, cy, rx, ry, int(cy - 11))): continue   # an expression's hand
+        arm = next((a for a in arms if a[0] == side), None)
+        if arm:
+            if not arm[2]: wing_fill(c, wing_field(arm[1]), arm[1], P)   # reaching out: the body covers the shoulder
+            continue
         if hk == 'hide': dy = -6 if side == hs else 0          # the arm behind the back, up a little
         if emotion == 'puff':
             continue
@@ -530,20 +561,15 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         c.rect(fx, gy - 1 - lift, 3, 2, P['foot'])
         c.put(fx - 1, gy - lift, P['foot']); c.put(fx + 3, gy - lift, P['foot'])
 
+    wing_px, fronts = set(), []                               # across the body: one outline around body and wing
+    for _, pts, front in arms:
+        if front: f = wing_field(pts); wing_px |= wing_fill(c, f, pts, P); fronts.append(f)
+
     # outline of body-ish colors
     c.outline_of(body_set | {P['foot']}, P['line'])
 
     if 'vest' in parts:
         draw_vest(c, cx, cy, rx, ry, vest_color)
-
-    hand, arms = None, []                                      # drawn after the cheeks (a blush must not land on an arm), before the eyes
-    if hk and hk != 'hide':
-        if hk == 'reach':   H = (cx + hs * (rx + 2), cy + ry - 3); arms.append([(cx + hs * (rx - 2), cy + 3), H])
-        elif hk == 'lift':  H = (cx + hs * (rx + 2), cy - 9); arms.append([(cx + hs * (rx - 3), cy + 1), H])
-        else:                                                  # held at the chest (hold, sneak) or up at the open beak (bite)
-            H = (cx, cy + 5) if hk in ('hold', 'sneak') else (cx, cy + 1)
-            for sd in (-1, 1): arms.append([(cx + sd * (rx - 3), cy - 1), (cx + sd * 5, H[1] + 3)])
-        hand = (int(round(H[0])), int(round(H[1])))
 
     # satchel strap + bag (left hip)
     if bag:
@@ -572,10 +598,10 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     lo, ro = exl - 2, exr - 1 + D
     LY = 1 + (D - 7) // 2                                   # lens top = eye y - LY: the lens stays centred where the 7-pixel one was
     FEATHERS = (P['body'], P['shade'], P['hi'], P['belly'])
-    def body_paint(x, y, w, h, col):                        # blush only lands on feathers: never on a lens, never past the outline
+    def body_paint(x, y, w, h, col):                        # blush only lands on feathers: never on a lens or a wing, never past the outline
         for yy in range(y, y + h):
             for xx in range(x, x + w):
-                if c.get(xx, yy) in FEATHERS: c.put(xx, yy, col)
+                if c.get(xx, yy) in FEATHERS and (xx, yy) not in wing_px: c.put(xx, yy, col)
     def eye_box(x0, y0, w, h, pw=3, ph=3, look=(0, 0)):
         for (x, y) in lens_mask(x0, y0, w, h): c.put(x, y, P['eyew'])
         eye_boxes.append((x0, y0, w, h))
@@ -624,8 +650,7 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     elif emotion in ('neutral', 'curious', 'puff', 'peek', 'look_l', 'look_r', 'read_l', 'read_r', 'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b') or hk in ('reach', 'hold', 'lift'):
         body_paint(lo - 2, ey + 5, 2, 1, P['cheek']); body_paint(ro + 1, ey + 5, 2, 1, P['cheek'])
 
-    for pts in arms + [pts for _, pts in gesture_arms(emotion, cx, cy, rx, ry, ey)]:
-        wing_arm(c, pts[0][0], pts[0][1], pts[-1][0], pts[-1][1], P, elbow=pts[1] if len(pts) == 3 else None)
+    for f in fronts: wing_lines(c, f, P, set(FEATHERS) | {P['cheek'], P['red2']})   # after the cheeks, before the eyes
 
     if eyes_closed:
         eye_shut(exl, ey); eye_shut(exr, ey)
@@ -791,7 +816,8 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     if emotion == 'happy':
         c.put(int(cx) - 15, ey - 6, P['glow']); c.put(int(cx) + 14, ey - 4, P['glow'])
     global LAST_GEOM
-    LAST_GEOM = {'eye_boxes': list(eye_boxes), 'head_top': cy - ry, 'cx': cx, 'cy': cy, 'rx': rx, 'ry': ry, 'hand': hand}   # for accessory and hand anchors (export_lvgl.py)
+    LAST_GEOM = {'eye_boxes': list(eye_boxes), 'head_top': cy - ry, 'cx': cx, 'cy': cy, 'rx': rx, 'ry': ry, 'hand': hand,   # for accessory and hand anchors (export_lvgl.py)
+                 'wings': [pts for _, pts, _ in arms]}                                                                        # for check_faces.py
     return c
 
 # ---------- home scene ----------
