@@ -312,7 +312,7 @@ static esp_err_t mm_tts_open(const tts_params_t *p, const tts_events_t *ev, void
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
     if (err != ESP_OK) { mem_release(s); return err; }
     int li = p->lang == LANG_EN ? 0 : p->lang == LANG_ZH ? 1 : p->lang == LANG_YUE ? 2 : 1;
-    const char *voice = p->voice_id ? p->voice_id : (pr->default_voice_lang[li][0] ? pr->default_voice_lang[li] : pr->default_voice);
+    const char *voice = provider_voice(pr, p->lang, p->voice_id);
     const char *boost = p->lang == LANG_UNKNOWN ? "auto" : (pr->lang_boost[li][0] ? pr->lang_boost[li] : "auto");
     char start[512];
     snprintf(start, sizeof start,

@@ -321,6 +321,43 @@ static int cmd_bubble(int argc, char **argv)   // bubble hello|idea: make that l
     return 0;
 }
 
+// voice and vendors: the pairing page's 试听 and 测试 from the console (they wait for life's worker, like the page)
+static signal_t s_wait;
+static struct { bool ok; char why[160], path[160]; } s_res;
+static void voice_done(const life_line_t *L, void *user) { (void)user; s_res.ok = L->ok; snprintf(s_res.why, sizeof s_res.why, "%s", L->why); snprintf(s_res.path, sizeof s_res.path, "%s", L->path); signal_set(s_wait); }
+static void check_done(bool ok, int kind, const char *why, void *user) { (void)kind; (void)user; s_res.ok = ok; snprintf(s_res.why, sizeof s_res.why, "%s", why); signal_set(s_wait); }
+
+static int cmd_voice(int argc, char **argv)   // voice [en|zh|yue] [voice_id]: Gugu says the preview line with that voice (default: the family's)
+{
+    lang_t l = argc > 1 ? lang_from_code(argv[1]) : LANG_UNKNOWN;
+    if (l == LANG_UNKNOWN) l = lang_from_code(store_setting_str("lang", "zh"));
+    if (l == LANG_UNKNOWN) l = LANG_ZH;
+    if (!s_wait) s_wait = signal_create();
+    while (signal_wait(s_wait, 0)) { }
+    life_voice_sample(l, argc > 2 ? argv[2] : "", voice_done, NULL);
+    if (!signal_wait(s_wait, 30000)) { printf("voice: no answer within 30 s\n"); return 1; }
+    printf("voice %s %s: %s (%s)\n", lang_code(l), argc > 2 ? argv[2] : "(the family's)", s_res.ok ? "ok" : "failed", s_res.why);
+    if (s_res.ok) audio_play_file(s_res.path);
+    return s_res.ok ? 0 : 1;
+}
+
+static int cmd_vendors(int argc, char **argv)   // vendors [test]: who plays each role and whether its key is set; test: ask them all
+{
+    static const provider_role_t R[4] = { PROVIDER_ROLE_ASR, PROVIDER_ROLE_CHAT, PROVIDER_ROLE_TTS, PROVIDER_ROLE_IMAGE };
+    static const char *const N[4] = { "asr", "chat", "tts", "image" };
+    for (int i = 0; i < 4; i++) {
+        char why[96]; bool ok = provider_role_ready(R[i], why, sizeof why);
+        printf("  %-6s %-14s %s\n", N[i], provider_for(R[i]) ? provider_for(R[i])->id : "-", ok ? "key set" : why);
+    }
+    if (argc < 2 || strcmp(argv[1], "test")) return 0;
+    if (!s_wait) s_wait = signal_create();
+    while (signal_wait(s_wait, 0)) { }
+    life_check_service(LIFE_CHECK_CHAT | LIFE_CHECK_TTS | LIFE_CHECK_ASR, check_done, NULL);
+    if (!signal_wait(s_wait, 45000)) { printf("test: no answer within 45 s\n"); return 1; }
+    printf("test: %s (%s)\n", s_res.ok ? "ok" : "failed", s_res.why);
+    return s_res.ok ? 0 : 1;
+}
+
 static int cmd_tap(int argc, char **argv)   // tap x y: a finger on the screen there (466×466), as the touch panel reports it
 {
     if (argc < 3) { printf("usage: tap x y\n"); return 1; }
@@ -390,6 +427,8 @@ static const cmd_t CMDS[] = {
     { "art", "art [gen|retry] — the generated pictures of the current trip (backdrop, props, friend)", cmd_art },
     { "tod", "tod night|sunrise|day|dusk|auto — force the time of day the scene shows", cmd_tod },
     { "press", "press yellow [n] | shake [n] | pickup — the child's hands, from the console", cmd_press },
+    { "voice", "voice [en|zh|yue] [voice_id] — Gugu says the preview line with that voice (the page's 试听)", cmd_voice },
+    { "vendors", "vendors [test] — who plays each role, whether its key is set; test: ask them all (the page's 测试)", cmd_vendors },
     { "scan", "nearby Wi-Fi networks (what the pairing page offers)", cmd_scan },
     { "events", "events [n] — the last n lines of the persistent event log (keys, call states, failures)", cmd_events },
     { "logs", "the diagnostic bundle (boot record, events, console log, last calls), secrets masked", cmd_logs },

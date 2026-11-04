@@ -3,8 +3,12 @@
 #include "provider/provider_wire.h"
 #include "provider/provider_internal.h"
 #include "foundation/mem.h"
+#include "store/store.h"
 #include "cJSON.h"
+#include <string.h>
 #include <stdlib.h>
+
+#define TEST_DATA GUGU_REPO_ROOT "/host/build/test_data"
 
 static char acc[1024]; static int done_calls; static char stop[32]; static provider_usage_t usage; static provider_error_t last_err;
 static void d_delta(const char *t, size_t n, void *u) { strncat(acc, t, n); }
@@ -70,6 +74,49 @@ TEST(test_preset_minimax)
     CHECK_EQ_STR(p->chat_extra[0], "\"thinking\":{\"type\":\"disabled\"}");
     CHECK(p->tts_bidi && p->image && !p->asr_stream);
     CHECK_EQ_STR(p->default_voice, "Cantonese_CuteGirl");
+}
+
+// The family's choices live in settings and NVS; the presets say what each vendor needs. provider_configure() turns
+// them into role assignments, regions, voices and credentials, naming no vendor in code.
+TEST(test_provider_configure)
+{
+    store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    CHECK(provider_init(GUGU_REPO_ROOT "/content/providers") == ESP_OK);
+    const provider_preset_t *q = provider_preset_get("qwen_realtime"), *v = provider_preset_get("volc");
+    CHECK(q && !strcmp(q->cred_store[0], "qwen_api_key"));          // the realtime recognizer shares the 百炼 key
+    CHECK(v && !strcmp(v->role_cred[1], "ark_api_key"));             // Volcengine's chat uses the Ark key (slot 1 = CHAT)
+    CHECK(v && !strcmp(v->role_cred[2], "api_key"));                 // its voice the speech key (slot 2 = TTS)
+    int declared = 0;
+    for (int i = 0; store_secret_name(i); i++) declared += !strcmp(store_secret_name(i), "volc_ark_api_key");
+    CHECK_EQ_INT(declared, 1);                                       // the presets declared their secrets to the store
+    char old_q[256] = ""; bool had_q = store_secret_get("qwen_api_key", old_q, sizeof old_q) == ESP_OK;
+    char old_a[256] = ""; bool had_a = store_secret_get("volc_ark_api_key", old_a, sizeof old_a) == ESP_OK;
+    store_setting_set_str("provider_tts", "qwen"); store_setting_set_str("provider_chat", "volc");
+    store_setting_set_str("region_minimax", "overseas");
+    store_setting_set_str("voice_minimax_yue", "Cantonese_GentleLady");
+    store_secret_set("qwen_api_key", "sk-test-qwen-0123456789"); store_secret_set("volc_ark_api_key", "");
+    provider_configure();
+    CHECK_EQ_STR(provider_for(PROVIDER_ROLE_TTS)->id, "qwen");
+    CHECK_EQ_STR(provider_for(PROVIDER_ROLE_CHAT)->id, "volc");
+    CHECK_EQ_STR(provider_for(PROVIDER_ROLE_ASR)->id, "minimax");    // unset: the preset with the lowest "order" that plays it
+    CHECK_EQ_STR(provider_preset_get("minimax")->asr_url, "https://api.minimax.io/v1/speech_to_text");   // the overseas region
+    CHECK(provider_credential("qwen_realtime", "api_key") && !strcmp(provider_credential("qwen_realtime", "api_key"), "sk-test-qwen-0123456789"));
+    char why[96];
+    CHECK(provider_role_ready(PROVIDER_ROLE_TTS, why, sizeof why));
+    CHECK(!provider_role_ready(PROVIDER_ROLE_CHAT, why, sizeof why) && strstr(why, "ark_api_key") != NULL);
+    // a voice: the caller's, then the family's pick for that vendor and language, then the preset's per language, then "*"
+    const provider_preset_t *m = provider_preset_get("minimax");
+    CHECK_EQ_STR(provider_voice(m, LANG_YUE, NULL), "Cantonese_GentleLady");
+    CHECK_EQ_STR(provider_voice(m, LANG_YUE, "Cantonese_KindWoman"), "Cantonese_KindWoman");
+    CHECK_EQ_STR(provider_voice(m, LANG_ZH, NULL), "lovely_girl");
+    CHECK_EQ_STR(provider_voice(m, LANG_EN, NULL), "Cute_Elf");
+    store_setting_set_str("provider_tts", ""); store_setting_set_str("provider_chat", "");
+    store_setting_set_str("region_minimax", ""); store_setting_set_str("voice_minimax_yue", "");
+    store_secret_set("qwen_api_key", had_q ? old_q : ""); store_secret_set("volc_ark_api_key", had_a ? old_a : "");
+    provider_configure();
+    CHECK_EQ_STR(provider_for(PROVIDER_ROLE_TTS)->id, "minimax");
+    CHECK_EQ_STR(provider_preset_get("minimax")->asr_url, "https://api.minimax.cn/v1/speech_to_text");
+    CHECK_EQ_STR(provider_voice(m, LANG_YUE, NULL), "Cantonese_CuteGirl");
 }
 
 static char fake_text[256]; static int fake_audio_samples; static int fake_flushed;
@@ -164,5 +211,6 @@ void test_provider(void)
     RUN(test_wire_anthropic_build);
     RUN(test_wire_anthropic_stream);
     RUN(test_preset_minimax);
+    RUN(test_provider_configure);
     RUN(test_fake_vendor_roundtrip);
 }

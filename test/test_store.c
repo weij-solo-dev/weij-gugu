@@ -37,7 +37,32 @@ TEST(test_store_export_masks_secrets)
     store_secret_set("wifi_pass", had ? old : "");
 }
 
+// Which secrets exist is declared by whoever knows (the provider presets name their keys), so the export, the page
+// and the masks never carry a vendor list of their own. A Google key has no "sk-" to catch: it is masked by shape too.
+TEST(test_store_secret_names)
+{
+    store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    store_secret_declare("example_api_key"); store_secret_declare("example_api_key");
+    int wifi = 0, ex = 0;
+    for (int i = 0; store_secret_name(i); i++) { wifi += !strcmp(store_secret_name(i), "wifi_pass"); ex += !strcmp(store_secret_name(i), "example_api_key"); }
+    CHECK_EQ_INT(wifi, 1); CHECK_EQ_INT(ex, 1);                   // built in once, declared once however often
+    store_secret_set("example_api_key", "plain-words-key-0123456789");
+    store_event("a careless line with plain-words-key-0123456789 in it");
+    size_t n = 0; char *s = store_export_logs(&n);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(strstr(s, "plain-words-key-0123456789") == NULL);
+        CHECK(strstr(s, "example_api_key: set (") != NULL);
+        mem_release(s);
+    }
+    char g[] = "gemini AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUvW done";
+    store_mask_secrets(g, strlen(g));
+    CHECK_EQ_STR(g, "gemini AIza*** done");
+    store_secret_set("example_api_key", "");
+}
+
 void test_store(void)
 {
     RUN(test_store_export_masks_secrets);
+    RUN(test_store_secret_names);
 }

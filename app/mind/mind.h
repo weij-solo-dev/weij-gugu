@@ -43,6 +43,7 @@ char  *mind_normalize_transcript(char *text);
 
 // ---- what Gugu says on its own, from the bubble (mind_lines.c; content/prompts/hello.json, questions.json, share.md) ----
 esp_err_t mind_line_hello(lang_t lang, char *out, size_t cap);                     // the self-introduction, the child's name filled in
+esp_err_t mind_line_sample(lang_t lang, char *out, size_t cap);                    // the pairing page's voice preview (content/prompts/voice_sample.json)
 esp_err_t mind_line_question(lang_t lang, unsigned pick, char *out, size_t cap);   // one of the questions for the child (pick % count)
 // The system prompt that retells one fact of the trip as a sentence Gugu tells the child in `lang`; where_phrase says
 // where Gugu is in relation to the place ("正在开罗", "过几天要去开罗", "刚从开罗回来").

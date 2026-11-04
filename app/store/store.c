@@ -14,6 +14,17 @@
 #include <sys/stat.h>
 
 static char s_data[96], s_content[96];
+static char s_secret_names[24][40] = { "wifi_ssid", "wifi_pass" };
+static int s_secret_n = 2;
+
+void store_secret_declare(const char *key)
+{
+    if (!key || !*key) return;
+    for (int i = 0; i < s_secret_n; i++) if (!strcmp(s_secret_names[i], key)) return;
+    if (s_secret_n < 24) snprintf(s_secret_names[s_secret_n++], sizeof s_secret_names[0], "%s", key);
+}
+
+const char *store_secret_name(int i) { return i >= 0 && i < s_secret_n ? s_secret_names[i] : NULL; }
 static cJSON *s_settings;
 
 static void mkdirs(const char *path)

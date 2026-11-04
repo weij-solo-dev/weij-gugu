@@ -4,7 +4,7 @@
   "order": 3,
   "console_url": "https://bailian.console.aliyun.com/",
   "regions": ["domestic", "overseas"],
-  "credentials": [ { "key": "api_key", "secret": true } ],
+  "credentials": [ { "key": "api_key", "secret": true, "store": "qwen_api_key", "label": "百炼 API Key (DashScope)" } ],
   "capabilities": { "asr_stream": true, "tts_bidi": false, "s2s": true, "image": false },
   "asr": {
     "api": "openai_realtime",

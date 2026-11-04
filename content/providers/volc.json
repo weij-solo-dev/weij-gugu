@@ -4,7 +4,7 @@
   "order": 4,
   "console_url": "https://console.volcengine.com/speech/",
   "regions": ["domestic"],
-  "credentials": [ { "key": "api_key", "secret": true }, { "key": "ark_api_key", "secret": true } ],
+  "credentials": [ { "key": "api_key", "secret": true, "label": "豆包语音 API Key" }, { "key": "ark_api_key", "secret": true, "label": "方舟 API Key (Ark)" } ],
   "capabilities": { "asr_stream": true, "tts_bidi": true, "s2s": false, "image": false },
   "asr": {
     "api": "volc_sauc_v3",

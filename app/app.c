@@ -21,6 +21,7 @@
 #include "foundation/task.h"
 #include "foundation/atomic_file.h"
 #include "foundation/logcap.h"
+#include "foundation/strbuf.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -139,11 +140,68 @@ static int on_test_audio(char *json, size_t cap, void *user)
     return snprintf(json, cap, "{\"volume\":%u,\"ambient_ms\":%u,\"ambient_peak\":%d,\"ambient_rms\":%d,\"tone_ms\":%u,\"tone_peak\":%d,\"tone_rms\":%d,\"sfx\":\"%s\"}",
                     t.volume, (unsigned)t.ambient_ms, t.ambient_peak, t.ambient_rms, (unsigned)t.tone_ms, t.tone_peak, t.tone_rms, esp_err_to_name(t.sfx));
 }
-static void load_credentials(void);
+static void configure_providers(void);
+static bool keys_ok(char *why, size_t cap);
+
+// ---- the pairing page's two tests: do the vendors answer, and how does a voice sound (each waits for life's worker) ----
+static signal_t s_page_done;
+static struct { bool ok; char why[160], path[160]; } s_page;
+static int page_answer(char *json, size_t cap, bool ok, const char *why)
+{
+    strbuf_t b; strbuf_init(&b);
+    strbuf_printf(&b, "{\"ok\":%s,\"why\":\"", ok ? "true" : "false"); strbuf_append_json_escaped(&b, why ? why : "");
+    strbuf_printf(&b, "\",\"asr\":\"%s\",\"chat\":\"%s\",\"tts\":\"%s\"}", provider_for(PROVIDER_ROLE_ASR)->id, provider_for(PROVIDER_ROLE_CHAT)->id, provider_for(PROVIDER_ROLE_TTS)->id);
+    int n = snprintf(json, cap, "%s", b.s ? b.s : "{}"); strbuf_free(&b);
+    return n;
+}
+static bool page_busy(char *why, size_t cap)
+{
+    if (!net_is_online()) { snprintf(why, cap, "the device is not online"); return true; }
+    if (call_state() != CALL_IDLE) { snprintf(why, cap, "Gugu is on a call; try again in a moment"); return true; }
+    if (!s_page_done) s_page_done = signal_create();
+    while (signal_wait(s_page_done, 0)) { }                   // a late answer from an earlier test
+    return false;
+}
+static void on_page_checked(bool ok, int kind, const char *why, void *user)
+{
+    on_service_checked(ok, kind, why, user);                 // the bubble follows the page's test too
+    s_page.ok = ok; snprintf(s_page.why, sizeof s_page.why, "%s", why);
+    signal_set(s_page_done);
+}
+static int on_page_check(char *json, size_t cap, void *user)
+{
+    (void)user;
+    char why[160];
+    if (!keys_ok(why, sizeof why) || page_busy(why, sizeof why)) return page_answer(json, cap, false, why);
+    s_last_check = clock_us();
+    life_check_service(LIFE_CHECK_CHAT | LIFE_CHECK_TTS | LIFE_CHECK_ASR, on_page_checked, NULL);
+    if (!signal_wait(s_page_done, 45000)) return page_answer(json, cap, false, "no answer within 45 s");
+    store_event("vendors tested from the page: %s (%s)", s_page.ok ? "ok" : "failed", s_page.why);
+    return page_answer(json, cap, s_page.ok, s_page.why);
+}
+static void on_page_line(const life_line_t *L, void *user)
+{
+    (void)user;
+    s_page.ok = L->ok; snprintf(s_page.why, sizeof s_page.why, "%s", L->why); snprintf(s_page.path, sizeof s_page.path, "%s", L->path);
+    signal_set(s_page_done);
+}
+static int on_voice_test(const char *lang, const char *voice, char *json, size_t cap, void *user)
+{
+    (void)user;
+    char why[160];
+    if (!provider_role_ready(PROVIDER_ROLE_TTS, why, sizeof why) || page_busy(why, sizeof why)) return page_answer(json, cap, false, why);
+    lang_t l = lang_from_code(lang);
+    life_voice_sample(l == LANG_UNKNOWN ? s_lang : l, voice, on_page_line, NULL);
+    if (!signal_wait(s_page_done, 30000)) return page_answer(json, cap, false, "no voice within 30 s");
+    store_event("voice tried from the page: %s %s: %s", lang, voice && *voice ? voice : "(default)", s_page.ok ? "ok" : s_page.why);
+    if (s_page.ok) { instinct_hush(); audio_play_file(s_page.path); }
+    return page_answer(json, cap, s_page.ok, s_page.why);
+}
+
 static void on_apply(bool wifi_changed, void *user)   // the page saved secrets: keys take effect now, Wi-Fi joins without a reboot
 {
     (void)user;
-    load_credentials();
+    configure_providers();                         // vendors per role, regions, voices, keys: in use from the next request
     char ssid[64], pass[64];
     if (wifi_changed && store_secret_get("wifi_ssid", ssid, sizeof ssid) == ESP_OK && ssid[0]) {
         if (store_secret_get("wifi_pass", pass, sizeof pass) != ESP_OK) pass[0] = '\0';
@@ -200,15 +258,10 @@ static void hello_tick(void)   // once a second: the self-introduction, the firs
 // Can a call start right now, and if not, why: setup unfinished (no Wi-Fi configured, a vendor or key missing), Wi-Fi
 // down (configured, not joined), or the service down (the last check failed). Checked before dialling so the child
 // gets an answer at once instead of a beep and twenty seconds of silence; the reason picks the bubble's icon.
-static bool keys_ok(char *why, size_t cap)
+static bool keys_ok(char *why, size_t cap)   // every vendor a call needs can sign its requests
 {
-    const char *roles[] = { "chat", "asr", "tts" }; provider_role_t ids[] = { PROVIDER_ROLE_CHAT, PROVIDER_ROLE_ASR, PROVIDER_ROLE_TTS };
-    for (int i = 0; i < 3; i++) {
-        const provider_vtable_t *v = provider_for(ids[i]);
-        if (!v) { snprintf(why, cap, "no %s vendor", roles[i]); return false; }
-        if (strcmp(v->id, "fake")) { const char *k = provider_credential(v->id, "api_key"); if (!k || !*k) { snprintf(why, cap, "no %s key for %s", roles[i], v->id); return false; } }
-    }
-    return true;
+    return provider_role_ready(PROVIDER_ROLE_CHAT, why, cap) && provider_role_ready(PROVIDER_ROLE_ASR, why, cap) &&
+           provider_role_ready(PROVIDER_ROLE_TTS, why, cap);
 }
 
 static instinct_ready_t readiness(char *why, size_t cap)
@@ -267,14 +320,13 @@ static void on_memory_forget(const char *book, const char *key, void *user)  // 
     else mind_book_forget(book, atoi(key));
 }
 
-static void load_credentials(void)
+static void configure_providers(void)
 {
-    char v[256];
-    if (store_secret_get("minimax_api_key", v, sizeof v) == ESP_OK) provider_set_credential("minimax", "api_key", v);
-    else LOGW("no MiniMax key configured");
-    if (store_secret_get("qwen_api_key", v, sizeof v) == ESP_OK) { provider_set_credential("qwen", "api_key", v); provider_set_credential("qwen_realtime", "api_key", v); }
-    if (store_secret_get("volc_api_key", v, sizeof v) == ESP_OK) provider_set_credential("volc", "api_key", v);
-    if (store_secret_get("volc_ark_api_key", v, sizeof v) == ESP_OK) provider_set_credential("volc", "ark_api_key", v);
+    provider_configure();
+#ifdef GUGU_HOST
+    const char *all = getenv("GUGU_PROVIDERS");                 // e.g. fake: offline stability runs
+    if (all) { provider_assign(PROVIDER_ROLE_ASR, all); provider_assign(PROVIDER_ROLE_CHAT, all); provider_assign(PROVIDER_ROLE_TTS, all); }
+#endif
 }
 
 void app_main(void)
@@ -302,14 +354,9 @@ void app_main(void)
     }
     char presets[200]; snprintf(presets, sizeof presets, "%s/providers", CONTENT_DIR);
     provider_init(presets);
-    load_credentials();
+    configure_providers();
     instinct_set_ready_probe(ready_probe, NULL);   // vendors are known from here on: instinct may ask whether a call could start
     instinct_set_bubble_cb(on_bubble_tap, NULL);
-    const char *asr = store_setting_str("provider_asr", "minimax"), *chat = store_setting_str("provider_chat", "minimax"), *tts = store_setting_str("provider_tts", "minimax");
-#ifdef GUGU_HOST
-    if (getenv("GUGU_PROVIDERS")) asr = chat = tts = getenv("GUGU_PROVIDERS");   // e.g. fake: offline stability runs
-#endif
-    provider_assign(PROVIDER_ROLE_ASR, asr); provider_assign(PROVIDER_ROLE_CHAT, chat); provider_assign(PROVIDER_ROLE_TTS, tts);
 
     s_lang = lang_from_code(store_setting_str("lang", "zh"));
     if (s_lang == LANG_UNKNOWN) s_lang = LANG_ZH;
@@ -325,7 +372,8 @@ void app_main(void)
                          .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_outcome = on_call_outcome };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply, .user = NULL };
+    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply,
+                          .check = on_page_check, .voice_test = on_voice_test, .user = NULL };
     parent_set_hooks(&ph);
     life_init();
     {
@@ -351,9 +399,10 @@ void app_main(void)
 #endif
     board_set_listener(on_board_event, NULL);
     console_init();
-    LOGI("ready: asr=%s chat=%s tts=%s", asr, chat, tts);
+    LOGI("ready: asr=%s chat=%s tts=%s image=%s", provider_for(PROVIDER_ROLE_ASR)->id, provider_for(PROVIDER_ROLE_CHAT)->id,
+         provider_for(PROVIDER_ROLE_TTS)->id, provider_for(PROVIDER_ROLE_IMAGE)->id);
     {   // what the pairing page and a report need to know about this boot
-        char v[256]; bool have_key = store_secret_get("minimax_api_key", v, sizeof v) == ESP_OK && v[0], have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // a short buffer reads as "unset": size it for a real key
+        char v[256]; bool have_key = keys_ok(v, sizeof v), have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // keys: every vendor a call needs has one
         char boot[720], path[200], fw[16], crash[200] = "", bt[200] = "";
         board_firmware_id(fw, sizeof fw);
         bool crashed = board_crash_report(crash, sizeof crash, bt, sizeof bt);   // the last run's crash, if a core dump says so

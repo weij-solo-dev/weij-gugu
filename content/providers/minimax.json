@@ -10,7 +10,8 @@
   "credentials": [
     {
       "key": "api_key",
-      "secret": true
+      "secret": true,
+      "label": "MiniMax API Key"
     }
   ],
   "capabilities": {
@@ -93,7 +94,10 @@
     }
   },
   "default_voice": {
-    "*": "Cantonese_CuteGirl"
+    "*": "Cantonese_CuteGirl",
+    "yue": "Cantonese_CuteGirl",
+    "zh": "lovely_girl",
+    "en": "Cute_Elf"
   },
   "voices": {
     "yue": [
@@ -112,6 +116,14 @@
       {
         "id": "Cantonese_PlayfulMan",
         "name": "活泼男声"
+      },
+      {
+        "id": "Cantonese_ProfessionalHost（F)",
+        "name": "专业女主持"
+      },
+      {
+        "id": "Cantonese_ProfessionalHost（M)",
+        "name": "专业男主持"
       }
     ],
     "zh": [
@@ -124,8 +136,24 @@
         "name": "可爱男童"
       },
       {
+        "id": "clever_boy",
+        "name": "聪明男童"
+      },
+      {
+        "id": "cartoon_pig",
+        "name": "卡通猪小琪"
+      },
+      {
         "id": "Chinese (Mandarin)_Cute_Spirit",
         "name": "憨憨萌兽"
+      },
+      {
+        "id": "Chinese (Mandarin)_Straightforward_Boy",
+        "name": "率真弟弟"
+      },
+      {
+        "id": "Chinese (Mandarin)_Crisp_Girl",
+        "name": "清脆少女"
       }
     ],
     "en": [
@@ -136,6 +164,14 @@
       {
         "id": "Sweet_Girl",
         "name": "Sweet Girl"
+      },
+      {
+        "id": "English_Graceful_Lady",
+        "name": "Graceful Lady (British)"
+      },
+      {
+        "id": "English_Gentle-voiced_man",
+        "name": "Gentle-voiced man"
       }
     ]
   },
@@ -146,5 +182,6 @@
     "chat_out_per_m": 4.0,
     "chat_cache_read_per_m": 0.1,
     "image_per_picture": 0.025
-  }
+  },
+  "_voices_note": "Voice ids checked against MiniMax's own list (POST /v1/get_voice, voice_type all) on 2026-11-04. The pairing page lists these per language and also takes any other id, such as a voice the family cloned or designed in its own MiniMax account."
 }

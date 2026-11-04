@@ -290,8 +290,7 @@ static esp_err_t v_tts_open(const tts_params_t *p, const tts_events_t *ev, void 
     volc_frame_build(&s->frame, MT_FULL_CLIENT, FL_EVENT, SER_JSON, 1, NULL, 0, "{}", 2);                 // StartConnection
     net_ws_send_binary(s->ws, (const uint8_t *)s->frame.s, s->frame.len);
     if (!signal_wait(s->conn_started, 6000) || atomic_load(&s->failed)) { net_ws_close(s->ws); free(s); return ESP_ERR_TIMEOUT; }
-    int li = p->lang == LANG_EN ? 0 : p->lang == LANG_ZH ? 1 : p->lang == LANG_YUE ? 2 : -1;
-    const char *voice = p->voice_id ? p->voice_id : (li >= 0 && pr->default_voice_lang[li][0] ? pr->default_voice_lang[li] : pr->default_voice);
+    const char *voice = provider_voice(pr, p->lang, p->voice_id);
     char body[512];
     snprintf(body, sizeof body, "{\"user\":{\"uid\":\"gugu\"},\"event\":100,\"namespace\":\"BidirectionalTTS\",\"req_params\":{\"speaker\":\"%s\","
              "\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":%u},\"additions\":\"{\\\"disable_markdown_filter\\\":false}\"}}",

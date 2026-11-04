@@ -47,3 +47,6 @@ void life_prepare_hello(lang_t lang, life_line_cb done, void *user);   // the se
 // The next idea (data/voice/idea.wav): a fact of the current trip retold by the model, or a question for the child,
 // taking turns (questions only when there is no trip with facts). A second request while one is pending only replaces the callback.
 void life_prepare_idea(lang_t lang, life_line_cb done, void *user);
+// The pairing page tries a voice: a short fixed line (content/prompts/voice_sample.json) spoken with voice_id ("": the
+// family's pick or the preset's) into data/voice/sample.wav. Asynchronous; done gets the path or why it failed.
+void life_voice_sample(lang_t lang, const char *voice_id, life_line_cb done, void *user);

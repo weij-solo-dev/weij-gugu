@@ -5,15 +5,18 @@
 #include "provider_internal.h"
 #include "foundation/log.h"
 #include "foundation/mem.h"
+#include "store/store.h"
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
 
-static const provider_vtable_t *s_vendors[8];
+#define MAX_VENDORS 10
+static const provider_vtable_t *s_vendors[MAX_VENDORS];
 static size_t s_vendor_count;
 static const provider_vtable_t *s_role[5];   // index = bit position of provider_role_t
-MEM_BIG_BSS static char s_cred[8][4][256];   // [vendor][field] values (keys can exceed 128 chars), never logged
-static char s_cred_name[8][4][16];
+MEM_BIG_BSS static char s_cred[MAX_VENDORS][4][256];   // [vendor][field] values (keys can exceed 128 chars), never logged
+static char s_cred_name[MAX_VENDORS][4][24];
+static const char *const ROLE_NAME[5] = { "asr", "chat", "tts", "s2s", "image" };
 
 const char *lang_code(lang_t l)
 {
@@ -53,7 +56,7 @@ static int vendor_index(const char *id)
 
 void provider_register(const provider_vtable_t *v)
 {
-    if (s_vendor_count < 8) s_vendors[s_vendor_count++] = v;
+    if (s_vendor_count < MAX_VENDORS) s_vendors[s_vendor_count++] = v;
 }
 
 static int role_slot(provider_role_t role)
@@ -91,10 +94,11 @@ esp_err_t provider_set_credential(const char *vendor_id, const char *field, cons
     if (v < 0) return ESP_ERR_NOT_FOUND;
     for (int f = 0; f < 4; f++) {
         if (!strcmp(s_cred_name[v][f], field) || s_cred_name[v][f][0] == '\0') {
+            bool changed = strcmp(s_cred[v][f], value ? value : "") != 0;
             snprintf(s_cred_name[v][f], sizeof s_cred_name[v][f], "%s", field);
             snprintf(s_cred[v][f], sizeof s_cred[v][f], "%s", value ? value : "");
             char masked[8];
-            LOGI("credential %s.%s set (%s)", vendor_id, field, log_mask(value, masked));
+            if (changed) LOGI("credential %s.%s %s (%s)", vendor_id, field, value && *value ? "set" : "cleared", log_mask(value, masked));
             return ESP_OK;
         }
     }
@@ -137,6 +141,67 @@ extern const provider_vtable_t provider_qwen_realtime;
 extern const provider_vtable_t provider_volc;
 extern const provider_vtable_t provider_fake;
 
+static const char *default_vendor(provider_role_t role)   // the lowest-order preset whose vendor plays the role
+{
+    const provider_preset_t *best = NULL;
+    for (size_t i = 0; provider_preset_at(i); i++) {
+        const provider_preset_t *p = provider_preset_at(i);
+        int v = vendor_index(p->id);
+        if (v < 0 || !(s_vendors[v]->roles & role)) continue;
+        if (!best || p->order < best->order) best = p;
+    }
+    return best ? best->id : NULL;
+}
+
+void provider_configure(void)
+{
+    bool reload = false;                                   // regions first: they decide the URLs
+    for (size_t i = 0; provider_preset_at(i); i++) {
+        char key[48]; snprintf(key, sizeof key, "region_%s", provider_preset_at(i)->id);
+        if (provider_preset_pick_region(provider_preset_at(i)->id, store_setting_str(key, ""))) reload = true;
+    }
+    if (reload) provider_preset_reload();
+    for (int s = 0; s < 5; s++) {
+        if (s == 3) continue;                              // speech-to-speech is not the family's choice (yet)
+        provider_role_t role = (provider_role_t)(1u << s);
+        char key[24]; snprintf(key, sizeof key, "provider_%s", ROLE_NAME[s]);
+        const char *want = store_setting_str(key, ""), *def = default_vendor(role);
+        if (*want && provider_assign(role, want) == ESP_OK) continue;
+        if (*want) LOGW("%s: %s cannot play it, using %s", key, want, def ? def : "none");
+        if (def) provider_assign(role, def);
+    }
+    for (size_t i = 0; provider_preset_at(i); i++) {
+        provider_preset_t *p = provider_preset_at(i);
+        for (int c = 0; c < p->cred_n; c++) {              // keys from the secrets the preset names
+            char v[256];
+            if (store_secret_get(p->cred_store[c], v, sizeof v) != ESP_OK) v[0] = '\0';
+            if (vendor_index(p->id) >= 0) provider_set_credential(p->id, p->cred_key[c], v);
+        }
+        static const char *const L[3] = { "en", "zh", "yue" };
+        for (int l = 0; l < 3; l++) {                      // the family's voice per language
+            char key[64]; snprintf(key, sizeof key, "voice_%s_%s", p->id, L[l]);
+            snprintf(p->voice_pick[l], sizeof p->voice_pick[l], "%s", store_setting_str(key, ""));
+        }
+    }
+    LOGI("configured: asr %s, chat %s, tts %s, image %s", s_role[0] ? s_role[0]->id : "-", s_role[1] ? s_role[1]->id : "-",
+         s_role[2] ? s_role[2]->id : "-", s_role[4] ? s_role[4]->id : "-");
+}
+
+bool provider_role_ready(provider_role_t role, char *why, size_t cap)
+{
+    int s = role_slot(role);
+    const provider_vtable_t *v = provider_for(role);
+    if (s < 0 || !v) { snprintf(why, cap, "no %s vendor", s < 0 ? "?" : ROLE_NAME[s]); return false; }
+    const provider_preset_t *p = provider_preset_get(v->id);
+    if (!p) return true;                                   // no preset (the fake): nothing to sign with
+    const char *field = p->role_cred[s][0] ? p->role_cred[s] : p->cred_n ? p->cred_key[0] : NULL;
+    if (!field) return true;
+    const char *k = provider_credential(v->id, field);
+    if (k && *k) return true;
+    snprintf(why, cap, "no %s key for %s (%s)", ROLE_NAME[s], v->id, field);
+    return false;
+}
+
 esp_err_t provider_init(const char *preset_dir)
 {
     s_vendor_count = 0;
@@ -147,11 +212,12 @@ esp_err_t provider_init(const char *preset_dir)
     provider_register(&provider_fake);
     esp_err_t err = provider_preset_load_dir(preset_dir);
     if (err != ESP_OK) LOGW("presets: %s (%s)", preset_dir, esp_err_to_name(err));
-    // Defaults: MiniMax for every role it plays; the fake for the rest (replaced by settings later).
+    // Defaults: the lowest-order preset that plays each role; the fake for the rest (provider_configure applies settings).
     for (int i = 0; i < 5; i++) {
         provider_role_t r = (provider_role_t)(1u << i);
-        if (provider_minimax.roles & r) s_role[i] = &provider_minimax;
-        else s_role[i] = &provider_fake;
+        const char *def = default_vendor(r);
+        s_role[i] = &provider_fake;
+        if (def) provider_assign(r, def);
     }
     LOGI("%u vendors registered", (unsigned)s_vendor_count);
     return ESP_OK;

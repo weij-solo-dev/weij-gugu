@@ -24,8 +24,16 @@ TEST(test_mind_prompt_blocks)
     CHECK(p.blocks[0].cache && p.blocks[1].cache && p.blocks[2].cache && !p.blocks[3].cache);
     CHECK(strstr(p.blocks[3].text, "3 岁半") != NULL);
     CHECK(strstr(p.blocks[3].text, "刚摸了你一下") != NULL);
+    // One interaction language. The persona once told the model to follow the child's language as well: a Mandarin
+    // Gugu then answered a Cantonese-speaking child half in Cantonese, and the voice read it with Mandarin sounds.
+    CHECK(strstr(p.blocks[0].text, "用什么语言，你就用什么语言") == NULL);
+    CHECK(strstr(p.blocks[1].text, "香港") != NULL && strstr(p.blocks[1].text, "繁体字") != NULL);   // yue: Hong Kong colloquial, traditional characters
+    CHECK(strstr(p.blocks[1].text, "只用粤语回答") != NULL);
+    mind_prompt_build(&p, LANG_ZH, NULL, NULL);
+    CHECK(strstr(p.blocks[1].text, "只用普通话回答") != NULL && strstr(p.blocks[1].text, "喺") != NULL);   // zh: the Cantonese words to avoid, named
     mind_prompt_build(&p, LANG_EN, NULL, NULL);
     CHECK(strstr(p.blocks[1].text, "simple English") != NULL);
+    CHECK(strstr(p.blocks[1].text, "always answer in English") != NULL);
 }
 
 TEST(test_mind_dialog_ring)
@@ -113,10 +121,14 @@ TEST(test_mind_lines_and_language)
     CHECK(strstr(s, "撳住藍色個掣") != NULL); CHECK(strstr(s, "黃色個掣，就可以餵我") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "Hi, 小满! I'm Gugu") != NULL);
     CHECK(strstr(s, "hold the blue button") != NULL); CHECK(strstr(s, "yellow button to feed me") != NULL); CHECK(strstr(s, "whistle") == NULL);
+    CHECK(mind_line_sample(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "我係咕咕") != NULL);   // the voice preview's line
+    CHECK(mind_line_sample(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "I'm Gugu") != NULL);
     char a[200], b[200];
     CHECK(mind_line_question(LANG_EN, 0, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_EN, 1, b, sizeof b) == ESP_OK); CHECK(strcmp(a, b) != 0);
     CHECK(mind_line_question(LANG_YUE, 15, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_YUE, 0, b, sizeof b) == ESP_OK); CHECK_EQ_STR(a, b);   // 15 questions: wraps
     MEM_BIG_BSS static char sys[2048];
+    CHECK(mind_share_request_build(LANG_YUE, "正在开罗", "金字塔是用大石块盖的。", sys, sizeof sys) == ESP_OK);
+    CHECK(strstr(sys, "香港") != NULL && strstr(sys, "繁体字") != NULL);   // the light bulb's lines: Hong Kong Cantonese too
     CHECK(mind_share_request_build(LANG_EN, "正在开罗", "金字塔是用大石块盖的。", sys, sizeof sys) == ESP_OK);
     CHECK(strstr(sys, "English") != NULL && strstr(sys, "正在开罗") != NULL && strstr(sys, "金字塔是用大石块盖的。") != NULL && strstr(sys, "小满") != NULL);
     char t[] = " [happy] 你知道吗？[wave]金字塔很高！ ";

@@ -4,7 +4,7 @@
   "order": 2,
   "console_url": "https://bailian.console.aliyun.com/",
   "regions": ["domestic", "overseas"],
-  "credentials": [ { "key": "api_key", "secret": true } ],
+  "credentials": [ { "key": "api_key", "secret": true, "label": "百炼 API Key (DashScope)" } ],
   "capabilities": { "asr_stream": false, "tts_bidi": true, "s2s": false, "image": false },
   "chat": {
     "api": "openai_chat",

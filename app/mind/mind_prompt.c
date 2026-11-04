@@ -113,9 +113,14 @@ esp_err_t mind_prompt_build(mind_prompt_t *out, lang_t reply_lang, const char *w
     mind_block_a();
     // A2: examples in the reply language (stable per language)
     const char *ex = (reply_lang > LANG_UNKNOWN && reply_lang <= LANG_YUE && s_examples[reply_lang]) ? s_examples[reply_lang] : s_examples[LANG_ZH];
-    const char *lang_line = reply_lang == LANG_YUE ? "这一通电话孩子在说粤语，你用口语粤语回答。" :
-                            reply_lang == LANG_EN ? "The child is speaking English on this call; answer in simple English." :
-                            "这一通电话孩子在说普通话，你用普通话回答。";
+    // One interaction language (the family's pick): Gugu understands the other two and never mixes them in, because the
+    // voice reads every character with this language's sounds.
+    const char *lang_line = reply_lang == LANG_YUE ?
+        "这一通电话用香港地道的口语粤语回答：用繁体字和香港用字（係、唔、佢、嘅、咗、啲、喺、冇、乜嘢、點解、屋企），不要写成书面语，"
+        "也不要用普通话的说法（说「屋企」不说「家」，说「食」不说「吃」，说「佢」不说「他」）。孩子说普通话或英文你也听得懂，但只用粤语回答。" :
+                            reply_lang == LANG_EN ?
+        "Answer in simple English on this call. The child may speak Mandarin or Cantonese: you understand, but always answer in English." :
+        "这一通电话用普通话回答，写简体中文。孩子说粤语或英文你也听得懂，但只用普通话回答：不用粤语字（喺、嘅、咗、唔、係、佢、啲、嘢、乜），不夹英文。";
     snprintf(s_block_a2, sizeof s_block_a2, "%s\n\n【对话示例】\n%s", lang_line, ex ? ex : "");
     // B: the three memory books and the trip card. Stable for a day at a time (cached), except the last part:
     // journey entries the child's latest words point at.

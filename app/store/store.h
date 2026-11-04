@@ -19,6 +19,10 @@ esp_err_t   store_setting_set_int(const char *key, int value);
 // ---- secrets (device: encrypted NVS; host: environment / secrets file) ----
 esp_err_t   store_secret_get(const char *key, char *out, size_t cap);    // ESP_ERR_NOT_FOUND if unset
 esp_err_t   store_secret_set(const char *key, const char *value);
+// The secrets that may exist: Wi-Fi built in, vendor keys declared by the provider presets. The export lists them as
+// set or not and masks their values, the page shows the owner's own; no module keeps a vendor list of its own.
+void        store_secret_declare(const char *key);
+const char *store_secret_name(int i);                // in declaration order, wifi_ssid and wifi_pass first; NULL past the end
 
 // ---- call log: one JSONL file per call under calls/<yyyy-mm>/, plus calls/index.jsonl ----
 typedef struct { char id[32]; char path[160]; int turns; int64_t started_ms; } store_call_t;

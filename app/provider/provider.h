@@ -165,6 +165,12 @@ esp_err_t provider_init(const char *preset_dir);
 const provider_vtable_t *provider_for(provider_role_t role);
 // Override the assignment at runtime (settings page, replay harness).
 esp_err_t provider_assign(provider_role_t role, const char *vendor_id);
+// The family's choices applied: settings provider_<role> (asr, chat, tts, image), region_<vendor>, voice_<vendor>_<lang>
+// and each vendor's keys from the secrets its preset names. At boot and whenever the pairing page saves. A role left
+// unset (or set to a vendor that cannot play it) goes to the preset with the lowest "order" that plays it.
+void provider_configure(void);
+// Can the vendor assigned to this role sign its requests? False with why ("no chat key for volc (ark_api_key)").
+bool provider_role_ready(provider_role_t role, char *why, size_t cap);
 // Credentials and endpoints are read by vendor files through these; never logged.
 const char *provider_credential(const char *vendor_id, const char *field);   // "api_key", "appid" …
 esp_err_t provider_set_credential(const char *vendor_id, const char *field, const char *value);

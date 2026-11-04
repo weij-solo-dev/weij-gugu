@@ -163,14 +163,45 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         *out = strdup(b.s ? b.s : "[]"); *out_len = strlen(*out); strbuf_free(&b); return 200;
     }
     if (get && !strcmp(path, "/api/secrets")) {            // the owner's own Wi-Fi and keys, shown on the owner's own page (the hotspot is the lock)
-        static const char *const keys[] = { "wifi_ssid", "wifi_pass", "minimax_api_key", "qwen_api_key", "volc_api_key", NULL };
         strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '{');
-        for (int i = 0; keys[i]; i++) {
-            char v[256]; if (store_secret_get(keys[i], v, sizeof v) != ESP_OK) v[0] = '\0';
-            strbuf_printf(&b, "%s\"%s\":\"", i ? "," : "", keys[i]); strbuf_append_json_escaped(&b, v); strbuf_putc(&b, '"');
+        for (int i = 0; store_secret_name(i); i++) {      // Wi-Fi and every key a provider preset declared
+            char v[256]; if (store_secret_get(store_secret_name(i), v, sizeof v) != ESP_OK) v[0] = '\0';
+            strbuf_printf(&b, "%s\"%s\":\"", i ? "," : "", store_secret_name(i)); strbuf_append_json_escaped(&b, v); strbuf_putc(&b, '"');
         }
         strbuf_putc(&b, '}');
         *out = strdup(b.s ? b.s : "{}"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+    }
+    if (get && !strcmp(path, "/api/providers")) {          // the presets as they are (content/providers/*.json): roles, regions, keys, voices
+        snprintf(p, sizeof p, "%s/providers", store_content_dir());
+        DIR *d = opendir(p);
+        strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '[');
+        bool first = true;
+        for (struct dirent *e = d ? readdir(d) : NULL; e; e = readdir(d)) {
+            size_t n = strlen(e->d_name);
+            if (n < 6 || strcmp(e->d_name + n - 5, ".json")) continue;
+            char fp[240]; snprintf(fp, sizeof fp, "%s/%s", p, e->d_name);
+            size_t fl; char *txt = file_read_all(fp, &fl);
+            if (!txt) continue;
+            if (!first) strbuf_putc(&b, ',');
+            strbuf_append(&b, txt, fl); first = false;
+            mem_release(txt);
+        }
+        if (d) closedir(d);
+        strbuf_putc(&b, ']');
+        *out = strdup(b.s ? b.s : "[]"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+    }
+    if (post && !strcmp(path, "/api/check")) {             // after saving: do the vendors answer? (a tiny chat, a word of voice, a moment of silence heard)
+        char json[400] = "{\"ok\":false,\"why\":\"not wired\"}";
+        if (s_hooks.check) s_hooks.check(json, sizeof json, s_hooks.user);
+        return reply(out, out_len, json);
+    }
+    if (post && !strcmp(path, "/api/voice/test")) {        // {"lang":"yue","voice":"Cantonese_CuteGirl"}: Gugu says the preview line in it
+        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
+        const char *lang = cJSON_GetStringValue(cJSON_GetObjectItem(j, "lang")), *voice = cJSON_GetStringValue(cJSON_GetObjectItem(j, "voice"));
+        char json[400] = "{\"ok\":false,\"why\":\"not wired\"}";
+        if (s_hooks.voice_test) s_hooks.voice_test(lang ? lang : "", voice ? voice : "", json, sizeof json, s_hooks.user);
+        cJSON_Delete(j);
+        return reply(out, out_len, json);
     }
     if (post && !strcmp(path, "/api/secret")) {            // {"key":"wifi_ssid","value":"..."}
         cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;

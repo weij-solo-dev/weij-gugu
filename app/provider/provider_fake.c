@@ -34,6 +34,8 @@ struct tts_session { tts_events_t ev; void *user; tts_params_t p; strbuf_t text;
 // stays dead. GUGU_FAKE_TTS_FAIL=n does the same for the simulator.
 static int s_tts_fail = -1;
 void provider_fake_tts_fail(int n) { s_tts_fail = n; }
+static char s_last_voice[64];             // tests: the voice the last TTS session was opened with ("" = the default)
+const char *provider_fake_last_voice(void) { return s_last_voice; }
 
 static esp_err_t f_asr_open(const asr_params_t *p, const asr_events_t *ev, void *user, asr_session_t **out)
 {
@@ -87,6 +89,7 @@ static void f_chat_close(chat_session_t *s) { free(s); }
 static esp_err_t f_tts_open(const tts_params_t *p, const tts_events_t *ev, void *user, tts_session_t **out)
 {
     if (s_tts_fail < 0) s_tts_fail = getenv("GUGU_FAKE_TTS_FAIL") ? atoi(getenv("GUGU_FAKE_TTS_FAIL")) : 0;
+    snprintf(s_last_voice, sizeof s_last_voice, "%s", p->voice_id ? p->voice_id : "");
     struct tts_session *s = calloc(1, sizeof *s); s->ev = *ev; s->user = user; s->p = *p; strbuf_init(&s->text); *out = s; return ESP_OK;
 }
 static esp_err_t f_tts_text(tts_session_t *s, const char *utf8, size_t n) { strbuf_append(&s->text, utf8, n); return ESP_OK; }

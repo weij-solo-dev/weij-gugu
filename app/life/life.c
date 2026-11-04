@@ -339,7 +339,7 @@ static bool check_chat(char *why, size_t cap, int *kind)
     return ok;
 }
 
-static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, struct tts_collect *t, uint32_t timeout_ms);
+static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, const char *voice, struct tts_collect *t, uint32_t timeout_ms);
 
 static bool check_tts(char *why, size_t cap, int *kind)
 {
@@ -351,7 +351,7 @@ static bool check_tts(char *why, size_t cap, int *kind)
     t.pcm = mem_alloc_big(t.cap * sizeof(int16_t));
     if (!t.pcm) { snprintf(why, cap, "tts: no memory"); *kind = PERR_OTHER; return false; }
     int64_t t0 = clock_us();
-    esp_err_t err = tts_speak(v, lang == LANG_EN ? "OK." : "好。", lang, &t, 15000);
+    esp_err_t err = tts_speak(v, lang == LANG_EN ? "OK." : "好。", lang, NULL, &t, 15000);
     long long ms = (long long)((clock_us() - t0) / 1000);
     bool ok = false;
     if (t.failed) { *kind = t.err.kind; snprintf(why, cap, "tts: %.60s (http %d, code %d) after %lld ms", t.err.message, t.err.http_status, t.err.api_code, ms); }
@@ -405,16 +405,17 @@ static void do_check(void)
 }
 
 // ---- the bubble's lines ----
-static struct { atomic_bool pending; lang_t lang; life_line_cb cb; void *user; } s_line[2];   // 0: hello, 1: idea
+static struct { atomic_bool pending; lang_t lang; life_line_cb cb; void *user; } s_line[3];   // 0: hello, 1: idea, 2: a voice preview
+static char s_sample_voice[64];                                // the voice the preview tries
 static struct job s_line_job = { .kind = JOB_LINE };
 
 // One utterance through the TTS role into `t` (open, text, flush, wait for the flush or an error, close).
-static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, struct tts_collect *t, uint32_t timeout_ms)
+static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t lang, const char *voice, struct tts_collect *t, uint32_t timeout_ms)
 {
     if (!s_tts_done) s_tts_done = signal_create();
     while (signal_wait(s_tts_done, 0)) { }                    // drop a stale latch
     tts_events_t ev = { NULL, tc_audio, NULL, tc_flushed, tc_error };
-    tts_params_t p = { .voice_id = NULL, .lang = lang, .speed = 1.0f, .sample_rate = 16000 };
+    tts_params_t p = { .voice_id = voice, .lang = lang, .speed = 1.0f, .sample_rate = 16000 };   // NULL: the family's pick or the preset's
     tts_session_t *s = NULL;
     esp_err_t err = v->tts_open(&p, &ev, t, &s);
     if (err == ESP_OK) {
@@ -428,7 +429,7 @@ static esp_err_t tts_speak(const provider_vtable_t *v, const char *text, lang_t 
 }
 
 // Speak `text` in `lang` with the TTS role and keep it as a 16 kHz mono WAV at `path` (atomically). One ledger line.
-static esp_err_t synth_to_wav(const char *what, const char *text, lang_t lang, const char *path, const provider_usage_t *chat, char *why, size_t why_cap)
+static esp_err_t synth_to_wav(const char *what, const char *text, lang_t lang, const char *voice, const char *path, const provider_usage_t *chat, char *why, size_t why_cap)
 {
     const provider_vtable_t *v = provider_for(PROVIDER_ROLE_TTS);
     if (!v) { snprintf(why, why_cap, "no tts vendor assigned"); return ESP_ERR_INVALID_STATE; }
@@ -438,7 +439,7 @@ static esp_err_t synth_to_wav(const char *what, const char *text, lang_t lang, c
     if (!buf) { snprintf(why, why_cap, "no memory for the clip"); return ESP_ERR_NO_MEM; }
     t.pcm = (int16_t *)(buf + WAV_HEADER_BYTES);
     int64_t t0 = clock_us();
-    esp_err_t err = tts_speak(v, text, lang, &t, 30000);
+    esp_err_t err = tts_speak(v, text, lang, voice, &t, 30000);
     if (err == ESP_OK && t.n == 0) { err = ESP_ERR_INVALID_RESPONSE; snprintf(why, why_cap, "the voice came back empty"); }
     else if (err != ESP_OK) snprintf(why, why_cap, "tts: %.60s (%s)", t.failed ? t.err.message : "", esp_err_to_name(err));
     if (err == ESP_OK) {
@@ -484,7 +485,11 @@ static void do_line(int which)
     life_line_t L = { 0 };
     provider_usage_t chat = { 0 };
     esp_err_t err = ESP_OK;
-    if (which == 0) {
+    if (which == 2) {
+        snprintf(L.path, sizeof L.path, "%s/voice/sample.wav", store_data_dir());
+        err = mind_line_sample(lang, L.text, sizeof L.text);
+        if (err != ESP_OK) snprintf(L.why, sizeof L.why, "no preview line for %s", lang_code(lang));
+    } else if (which == 0) {
         snprintf(L.path, sizeof L.path, "%s/voice/hello.wav", store_data_dir());
         err = mind_line_hello(lang, L.text, sizeof L.text);
         if (err != ESP_OK) snprintf(L.why, sizeof L.why, "no self-introduction for %s", lang_code(lang));
@@ -511,9 +516,10 @@ static void do_line(int which)
         }
         if (err == ESP_OK) store_setting_set_int("idea_n", n + 1);
     }
-    if (err == ESP_OK) err = synth_to_wav(which == 0 ? "hello" : L.question ? "question" : "share", L.text, lang, L.path, which ? &chat : NULL, L.why, sizeof L.why);
+    const char *what = which == 2 ? "sample" : which == 0 ? "hello" : L.question ? "question" : "share";
+    if (err == ESP_OK) err = synth_to_wav(what, L.text, lang, which == 2 ? s_sample_voice : NULL, L.path, which == 1 ? &chat : NULL, L.why, sizeof L.why);
     L.ok = err == ESP_OK;
-    LOGI("line %s: %s (%s) %s", which == 0 ? "hello" : "idea", L.ok ? "ready" : "failed", L.why, L.text);
+    LOGI("line %s: %s (%s) %s", what, L.ok ? "ready" : "failed", L.why, L.text);
     if (cb) cb(&L, user);
 }
 
@@ -527,6 +533,11 @@ static void request_line(int which, lang_t lang, life_line_cb done, void *user)
 }
 void life_prepare_hello(lang_t lang, life_line_cb done, void *user) { request_line(0, lang, done, user); }
 void life_prepare_idea(lang_t lang, life_line_cb done, void *user) { request_line(1, lang, done, user); }
+void life_voice_sample(lang_t lang, const char *voice_id, life_line_cb done, void *user)
+{
+    snprintf(s_sample_voice, sizeof s_sample_voice, "%s", voice_id ? voice_id : "");
+    request_line(2, lang, done, user);
+}
 
 void life_check_service(unsigned roles, life_check_cb done, void *user)
 {
@@ -571,8 +582,8 @@ static void life_task(void *arg)
     for (;;) {
         struct job *j;
         if (queue_recv(s_q, &j, 60 * 1000)) {
-            if (j->kind == JOB_CHECK) do_check(); else if (j->kind == JOB_LINE) { do_line(0); do_line(1); } else { run_job(j); signal_set(s_done); }
-            do_check(); do_line(0); do_line(1);   // ones asked for while a long job ran
+            if (j->kind == JOB_CHECK) do_check(); else if (j->kind == JOB_LINE) { do_line(2); do_line(0); do_line(1); } else { run_job(j); signal_set(s_done); }
+            do_check(); do_line(2); do_line(0); do_line(1);   // ones asked for while a long job ran
             continue;
         }
         if (!store_setting_int("auto_plan", 1)) continue;

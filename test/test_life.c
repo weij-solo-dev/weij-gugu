@@ -258,6 +258,7 @@ static bool s_chk_ok; static int s_chk_kind; static char s_chk_why[120]; static 
 static void chk_done(bool ok, int kind, const char *why, void *user) { (void)user; s_chk_ok = ok; s_chk_kind = kind; snprintf(s_chk_why, sizeof s_chk_why, "%s", why); s_chk_calls++; }
 
 void provider_fake_tts_fail(int n);
+const char *provider_fake_last_voice(void);
 
 TEST(test_life_service_check)
 {
@@ -314,6 +315,11 @@ TEST(test_life_bubble_lines)
     life_prepare_idea(LANG_ZH, line_done, NULL);
     CHECK(s_line.ok); CHECK(s_line.question);
     CHECK_EQ_INT(store_setting_int("idea_n", 0), 3);
+    life_voice_sample(LANG_YUE, "Cantonese_KindWoman", line_done, NULL);   // the pairing page tries a voice
+    CHECK(s_line.ok); CHECK(strstr(s_line.path, "voice/sample.wav") != NULL); CHECK(strstr(s_line.text, "我係咕咕") != NULL);
+    CHECK_EQ_STR(provider_fake_last_voice(), "Cantonese_KindWoman");
+    life_prepare_hello(LANG_ZH, line_done, NULL);                  // and the next line is back on the family's voice
+    CHECK_EQ_STR(provider_fake_last_voice(), "");
 }
 
 void test_life(void)

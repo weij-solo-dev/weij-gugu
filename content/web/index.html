@@ -15,7 +15,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 .muted{color:#888;font-size:12px}.row{display:flex;gap:10px}.row>*{flex:1}
 .call{cursor:pointer}.call:hover{background:#fdf6ea}
 </style></head><body>
-<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-03b</span></header>
+<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-04</span></header>
 <main>
 <section><h2>设备状态</h2><div id="devstatus" class="muted">加载中…</div>
 <button class="secondary" onclick="testAudio()">测试扬声器和麦克风</button> <span id="soundMsg" class="muted"></span>
@@ -29,18 +29,30 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 <section id="detail" style="display:none"><h2 id="detailTitle">聊天</h2><div id="turns"></div></section>
 <section><h2>设置</h2>
 <div class="row"><div><label>孩子的名字</label><input id="child_name"></div><div><label>年龄（月）</label><input id="child_age_months" type="number"></div></div>
-<div class="row"><div><label>交互语种（听和说）</label><select id="lang"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
+<div class="row"><div><label>交互语种（听和说）</label><select id="lang" onchange="renderVoice()"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
 <p class="muted">咕咕用这个语种听孩子说话、用它回答，自己说的话也用它；保存后立即生效，咕咕会用新语种再自我介绍一次。</p>
 <div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一次连续聊天最长（分钟）</label><input id="max_call_min" type="number"></div></div>
 <button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
-<section><h2>网络与密钥</h2>
+<section><h2>咕咕的声音</h2>
+<label>音色（<span id="voiceWhere"></span>）</label><select id="voice_pick" onchange="voicePicked()"></select>
+<div id="voiceCustomRow" style="display:none"><label>自定义音色 ID</label><input id="voice_custom" placeholder="服务商音色列表里的 ID，或你自己复刻 / 设计的音色"></div>
+<button class="secondary" onclick="tryVoice()">试听</button> <button onclick="saveVoice()">用这个音色</button> <span id="voiceMsg" class="muted"></span>
+<p class="muted">每种交互语种各记一个音色（跟着上面的"交互语种"走）。试听：咕咕当场用这个声音说一句话。</p></section>
+<section><h2>网络</h2>
 <label>附近的 Wi-Fi <a href="#" class="muted" onclick="scanWifi();return false" id="scanLink">（扫描中…）</a></label>
 <select id="wifi_pick" onchange="if(this.value)$('wifi_ssid').value=this.value"><option value="">— 选一个，或在下面手输 —</option></select>
 <div class="row"><div><label>Wi-Fi 名称</label><input id="wifi_ssid"></div><div><label>Wi-Fi 密码</label><input id="wifi_pass" type="password"></div></div>
-<label>MiniMax API Key</label><input id="minimax_api_key" type="password">
-<label><input type="checkbox" id="showSecrets" onchange="toggleSecrets()" style="width:auto"> 显示密码和密钥</label>
+<label><input type="checkbox" id="showSecrets" onchange="toggleSecrets()" style="width:auto"> 显示密码</label>
 <button onclick="saveSecrets()">保存并重连</button> <span id="secretMsg" class="muted"></span>
-<p class="muted">保存后立即生效：密钥马上可用；改了 Wi-Fi 会马上去连，几秒后看上面"已联网"。</p></section>
+<p class="muted">保存后马上去连，几秒后看上面"已联网"。</p></section>
+<section><h2>服务商</h2>
+<p class="muted">咕咕听、想、说、画分别交给哪一家；每家用它自己的 Key，只存在这台设备里。</p>
+<div class="row"><div><label>听（语音识别）</label><select id="prov_asr" onchange="renderProviderDetails()"></select></div><div><label>想（对话）</label><select id="prov_chat" onchange="renderProviderDetails()"></select></div></div>
+<div class="row"><div><label>说（语音合成）</label><select id="prov_tts" onchange="renderProviderDetails()"></select></div><div><label>画（旅行图片）</label><select id="prov_image" onchange="renderProviderDetails()"></select></div></div>
+<div id="provRegions"></div><div id="provKeys"></div>
+<label><input type="checkbox" id="showKeys" onchange="toggleKeys()" style="width:auto"> 显示密钥</label>
+<button onclick="saveProviders()">保存并测试</button> <span id="provMsg" class="muted"></span>
+<p class="muted">测试会让每家各答一下（一句话、一个字的语音、半秒安静的识别），几秒到十几秒。</p></section>
 <section><h2>事件记录</h2><pre id="events" class="muted" style="white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto">加载中…</pre></section>
 </main>
 <script>
@@ -50,10 +62,12 @@ async function load(){
   try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
     const ok=v=>v?'<b style="color:#2a7">✓</b>':'<b style="color:#d33">✗</b>';
     $('devstatus').innerHTML=`固件 ${s.version||'?'} · 上次启动：${s.reset_reason||'?'} · 音频 ${ok(s.audio)} · 音量 ${s.volume??'?'} · Wi-Fi 已配置 ${ok(s.wifi_configured)} · 已联网 ${ok(s.online)} · 密钥已配置 ${ok(s.key_configured)}`}catch(e){$('devstatus').textContent='读取失败'}
-  try{const sec=await j('/api/secrets');loadedSecrets=sec;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key'])if(sec[k]!==undefined)$(k).value=sec[k]}catch(e){}
+  try{presets=await j('/api/providers')}catch(e){presets=[]}
+  try{secrets=await j('/api/secrets');loadedSecrets=secrets;for(const k of ['wifi_ssid','wifi_pass'])if(secrets[k]!==undefined)$(k).value=secrets[k]}catch(e){}
   try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
   scanWifi();
-  try{const st=await j('/api/settings');for(const k of ['child_name','child_age_months','lang','volume'])if(st[k]!==undefined)$(k).value=st[k];if(st.max_call_ms)$('max_call_min').value=Math.round(st.max_call_ms/60000)}catch(e){}
+  try{settings=await j('/api/settings');for(const k of ['child_name','child_age_months','lang','volume'])if(settings[k]!==undefined)$(k).value=settings[k];if(settings.max_call_ms)$('max_call_min').value=Math.round(settings.max_call_ms/60000)}catch(e){}
+  renderProviders();renderVoice();
   try{const t=await j('/api/trip');if(!t){$('trip').textContent='还没有计划中的出门。'}else{const kind={deliver:'送信',vacation:'度假',visit:'探亲'}[t.kind]||t.kind;
     $('trip').innerHTML=`<div><b>${kind}</b> · ${t.place.name}（${t.place.country}）· ${t.depart_date} 出发，住 ${t.nights} 晚，${t.return_date} 回家</div><div style="margin:6px 0">${t.reason}${t.recipient?'<br>收件人：'+t.recipient:''}${t.letter?'<br>信里写：'+t.letter:''}</div><div><b>它会讲的事</b><ul>${(t.facts||[]).map(f=>`<li>${f}</li>`).join('')}</ul></div><div><b>每天</b><ol>${(t.days||[]).map(d=>`<li>${d}</li>`).join('')}</ol></div><div class="muted">朋友：${(t.friend||{}).name||''}（${(t.friend||{}).animal||''}）· 纪念品：${t.souvenir||''} · 生成于 ${t.generated_at||''}</div>`;
     $('tripDel').style.display='inline-block'}}catch(e){$('trip').textContent='读取失败'}
@@ -81,13 +95,57 @@ async function copyLogs(){$('logMsg').textContent='读取中…';try{const r=awa
 async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
 async function saveSettings(){const b={};for(const k of ['child_name','lang'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
   const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});$('saveMsg').textContent=r.ok?'已保存并生效':'失败'}
-let loadedSecrets={};
-async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass','minimax_api_key']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++}
+let loadedSecrets={},presets=[],settings={},secrets={};
+async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++}
   const wifi=$('wifi_ssid').value!==(loadedSecrets.wifi_ssid||'')||$('wifi_pass').value!==(loadedSecrets.wifi_pass||'');
   await j('/api/apply',{method:'POST',body:JSON.stringify({wifi})});
   $('secretMsg').textContent=`已保存 ${n} 项并生效${wifi?'，正在连 Wi-Fi…':''}`;
   if(wifi)setTimeout(load,8000)}
-function toggleSecrets(){const t=$('showSecrets').checked?'text':'password';$('wifi_pass').type=t;$('minimax_api_key').type=t}
+function toggleSecrets(){$('wifi_pass').type=$('showSecrets').checked?'text':'password'}
+// ---- the vendors: everything below comes from the presets (content/providers/*.json); no vendor is named here ----
+const ROLES=['asr','chat','tts','image'],REGION_NAME={domestic:'中国大陆',overseas:'海外',global:'全球'},LANG_NAME={zh:'普通话',yue:'粤语',en:'English'};
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const byOrder=(a,b)=>(a.order??99)-(b.order??99);
+const presetById=id=>presets.find(p=>p.id===id);
+const players=r=>presets.filter(p=>p[r]).sort(byOrder);
+function chosen(r){const p=presetById(settings['provider_'+r]);return p&&p[r]?p:players(r)[0]}   // as saved (the device does the same)
+function renderProviders(){for(const r of ROLES){const cur=chosen(r);$('prov_'+r).innerHTML=players(r).map(p=>`<option value="${esc(p.id)}"${cur&&cur.id===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}renderProviderDetails()}
+function selectedVendors(){const ids=[...new Set(ROLES.map(r=>$('prov_'+r).value).filter(Boolean))];return ids.map(presetById).filter(Boolean)}
+function renderProviderDetails(){const vs=selectedVendors();
+  $('provRegions').innerHTML=vs.filter(p=>(p.regions||[]).length>1).map(p=>{const cur=settings['region_'+p.id]||p.regions[0];
+    return `<label>${esc(p.name)} 的服务区域</label><select id="region_${esc(p.id)}">${p.regions.map(g=>`<option value="${esc(g)}"${g===cur?' selected':''}>${esc(REGION_NAME[g]||g)}</option>`).join('')}</select>`}).join('');
+  const seen=new Set(),show=$('showKeys').checked?'text':'password';let h='';
+  for(const p of vs)for(const c of (p.credentials||[])){const k=c.store||`${p.id}_${c.key}`;if(seen.has(k))continue;seen.add(k);
+    h+=`<label>${esc(c.label||p.name+' '+c.key)}${p.console_url?` <a class="muted" href="${esc(p.console_url)}" target="_blank">（去哪里申请）</a>`:''}</label><input class="key" data-key="${esc(k)}" type="${show}" value="${esc(secrets[k]||'')}">`}
+  $('provKeys').innerHTML=h}
+function toggleKeys(){for(const el of document.querySelectorAll('#provKeys input.key'))el.type=$('showKeys').checked?'text':'password'}
+async function saveProviders(){const b={};for(const r of ROLES)b['provider_'+r]=$('prov_'+r).value;
+  for(const p of selectedVendors())if($('region_'+p.id))b['region_'+p.id]=$('region_'+p.id).value;
+  await j('/api/settings',{method:'POST',body:JSON.stringify(b)});Object.assign(settings,b);
+  let n=0;for(const el of document.querySelectorAll('#provKeys input.key')){const v=el.value.trim();if(v===(secrets[el.dataset.key]||''))continue;
+    const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:el.dataset.key,value:v})});if(r.ok){n++;secrets[el.dataset.key]=v}}
+  await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});renderVoice();
+  $('provMsg').textContent=`已保存${n?'（'+n+' 个密钥）':''}，正在测试…`;
+  try{const r=await j('/api/check',{method:'POST'});
+    $('provMsg').innerHTML=r.ok?`<b style="color:#2a7">✓ 都能用</b>（听 ${esc(r.asr)} · 想 ${esc(r.chat)} · 说 ${esc(r.tts)}）`:`<b style="color:#d33">✗ 有问题</b>：${esc(r.why)}`}
+  catch(e){$('provMsg').textContent='测试没有结果（设备没回应）'}}
+// ---- the voice, per interaction language, for the voice vendor as saved ----
+function renderVoice(){const p=chosen('tts');if(!p)return;const lang=$('lang').value||'zh';
+  $('voiceWhere').textContent=`${LANG_NAME[lang]||lang} · ${p.name}`;
+  const list=(p.voices&&(p.voices[lang]||p.voices['*']))||[],dv=p.default_voice||{},def=dv[lang]||dv['*']||'';
+  const cur=settings[`voice_${p.id}_${lang}`]||def,inList=list.some(v=>v.id===cur);
+  $('voice_pick').innerHTML=list.map(v=>`<option value="${esc(v.id)}"${v.id===cur?' selected':''}>${esc(v.name)}${v.id===def?'（默认）':''}</option>`).join('')+`<option value="__custom"${inList?'':' selected'}>自定义音色 ID…</option>`;
+  $('voice_custom').value=inList?'':cur;$('voiceCustomRow').style.display=inList?'none':'block'}
+function voicePicked(){$('voiceCustomRow').style.display=$('voice_pick').value==='__custom'?'block':'none'}
+function voiceValue(){const v=$('voice_pick').value;return v==='__custom'?$('voice_custom').value.trim():v}
+async function tryVoice(){const voice=voiceValue();if(!voice){$('voiceMsg').textContent='先选一个音色，或填一个音色 ID';return}
+  $('voiceMsg').textContent='咕咕在试这个声音（几秒）…';
+  try{const r=await j('/api/voice/test',{method:'POST',body:JSON.stringify({lang:$('lang').value,voice})});
+    $('voiceMsg').textContent=r.ok?'听到了吗？满意就点"用这个音色"。':'没成功：'+r.why}catch(e){$('voiceMsg').textContent='试听没有结果（设备没回应）'}}
+async function saveVoice(){const p=chosen('tts'),lang=$('lang').value,voice=voiceValue();if(!p)return;
+  const b={};b[`voice_${p.id}_${lang}`]=voice;
+  await j('/api/settings',{method:'POST',body:JSON.stringify(b)});Object.assign(settings,b);
+  await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});$('voiceMsg').textContent=`已保存：咕咕说${LANG_NAME[lang]||lang}时用这个声音`}
 async function scanWifi(){$('scanLink').textContent='（扫描中…）';try{const aps=await j('/api/wifi/scan');const sel=$('wifi_pick');sel.innerHTML='<option value="">— 选一个，或在下面手输 —</option>'+aps.map(a=>`<option value="${a.ssid}">${a.ssid}　${a.rssi} dBm${a.secure?' 🔒':''}</option>`).join('');$('scanLink').textContent=`（重新扫描，找到 ${aps.length} 个）`}catch(e){$('scanLink').textContent='（扫描失败，点此重试）'}}
 load();
 </script></body></html>

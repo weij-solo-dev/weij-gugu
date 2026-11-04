@@ -19,6 +19,8 @@ typedef struct {
     void (*test_sound)(void *user);                                        // the page's "test the speaker" button
     int  (*test_audio)(char *json, size_t cap, void *user);                 // "test speaker and microphone": a beep listened to; the levels as JSON
     void (*apply)(bool wifi_changed, void *user);                          // secrets were saved: take them into use now (keys at once, Wi-Fi joins)
+    int  (*check)(char *json, size_t cap, void *user);                     // "test": do the vendors now assigned answer? Waits for the answer
+    int  (*voice_test)(const char *lang, const char *voice, char *json, size_t cap, void *user);   // speak the preview line with this voice
     void *user;
 } parent_hooks_t;
 void parent_set_hooks(const parent_hooks_t *h);

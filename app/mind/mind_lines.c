@@ -42,6 +42,15 @@ esp_err_t mind_line_hello(lang_t lang, char *out, size_t cap)
     return ESP_OK;
 }
 
+esp_err_t mind_line_sample(lang_t lang, char *out, size_t cap)
+{
+    cJSON *j = load_json("voice_sample.json");
+    const char *s = j ? cJSON_GetStringValue(cJSON_GetObjectItem(j, code(lang))) : NULL;
+    if (s) snprintf(out, cap, "%s", s);
+    cJSON_Delete(j);
+    return s ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t mind_line_question(lang_t lang, unsigned pick, char *out, size_t cap)
 {
     cJSON *j = load_json("questions.json");
@@ -58,7 +67,7 @@ esp_err_t mind_share_request_build(lang_t lang, const char *where_phrase, const 
     char path[220]; snprintf(path, sizeof path, "%s/prompts/share.md", s_dir);
     char *tpl = file_read_all(path, NULL);
     if (!tpl) { LOGW("missing %s", path); return ESP_ERR_NOT_FOUND; }
-    const char *lang_name = lang == LANG_EN ? "English" : lang == LANG_YUE ? "粤语（广东话口语，用粤语字）" : "普通话（简体中文）";
+    const char *lang_name = lang == LANG_EN ? "English" : lang == LANG_YUE ? "香港地道的口语粤语（繁体字、香港用字）" : "普通话（简体中文）";
     const char *const pairs[] = { "where_phrase", where_phrase ? where_phrase : "在家里", "child_name", mind_child_name(),
                                   "lang_name", lang_name, "fact", fact ? fact : "", NULL };
     mind_fill(system, system_cap, tpl, pairs);

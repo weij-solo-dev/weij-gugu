@@ -159,8 +159,7 @@ static esp_err_t q_tts_flush(tts_session_t *s)
 {
     if (s->pending.len == 0) { provider_usage_t u = { 0 }; if (s->ev.on_flushed) s->ev.on_flushed(&u, s->user); return ESP_OK; }
     const provider_preset_t *pr = preset();
-    int li = s->p.lang == LANG_EN ? 0 : s->p.lang == LANG_ZH ? 1 : s->p.lang == LANG_YUE ? 2 : -1;
-    const char *voice = s->p.voice_id ? s->p.voice_id : (li >= 0 && pr->default_voice_lang[li][0] ? pr->default_voice_lang[li] : pr->default_voice);
+    const char *voice = provider_voice(pr, s->p.lang, s->p.voice_id);
     new_task_id(s->task_id);
     strbuf_t b; strbuf_init(&b);
     strbuf_printf(&b, "{\"header\":{\"action\":\"run-task\",\"task_id\":\"%s\",\"streaming\":\"duplex\"},"

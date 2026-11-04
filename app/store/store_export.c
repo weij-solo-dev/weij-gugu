@@ -69,19 +69,22 @@ static bool key_char(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <
 
 size_t store_mask_secrets(char *s, size_t n)
 {
-    static const char *const SECRETS[] = { "wifi_pass", "minimax_api_key", "qwen_api_key", "volc_api_key", "volc_ark_api_key", NULL };
-    for (int i = 0; SECRETS[i]; i++) {
+    for (int i = 0; store_secret_name(i); i++) {          // every declared secret but the network's name
         char v[256];
-        if (store_secret_get(SECRETS[i], v, sizeof v) == ESP_OK && v[0]) n = mask_value(s, n, v);
+        if (strcmp(store_secret_name(i), "wifi_ssid") && store_secret_get(store_secret_name(i), v, sizeof v) == ESP_OK && v[0]) n = mask_value(s, n, v);
     }
-    // anything shaped like a vendor key ("sk-" and a long run of key characters) is masked as well
-    for (size_t i = 0; i + 3 < n; i++) {
-        if (s[i] != 's' || s[i + 1] != 'k' || s[i + 2] != '-') continue;
-        size_t j = i + 3; while (j < n && key_char(s[j])) j++;
-        if (j - i < 11) continue;
-        memcpy(s + i + 3, "***", 3);
-        memmove(s + i + 6, s + j, n - j);
-        n -= (j - i) - 6;
+    // anything shaped like a vendor key is masked as well: "sk-" (most vendors) or "AIza" (Google) and a long run of key characters
+    static const char *const SHAPES[] = { "sk-", "AIza", NULL };
+    for (int k = 0; SHAPES[k]; k++) {
+        size_t pl = strlen(SHAPES[k]);
+        for (size_t i = 0; i + pl < n; i++) {
+            if (memcmp(s + i, SHAPES[k], pl)) continue;
+            size_t j = i + pl; while (j < n && key_char(s[j])) j++;
+            if (j - i < pl + 8) continue;
+            memcpy(s + i + pl, "***", 3);
+            memmove(s + i + pl + 3, s + j, n - j);
+            n -= (j - i) - (pl + 3);
+        }
     }
     s[n] = '\0';
     return n;
@@ -123,12 +126,12 @@ char *store_export_logs(size_t *len)
     section(&b, "settings.json"); put_file(&b, "settings.json", 0);
     section(&b, "secrets (set or not; values never leave the device)");
     {
-        static const char *const KEYS[] = { "wifi_ssid", "wifi_pass", "minimax_api_key", "qwen_api_key", "volc_api_key", "volc_ark_api_key", NULL };
-        for (int i = 0; KEYS[i]; i++) {
-            char v[256]; bool set = store_secret_get(KEYS[i], v, sizeof v) == ESP_OK && v[0];
-            if (!set) strbuf_printf(&b, "%s: not set\n", KEYS[i]);
-            else if (!strcmp(KEYS[i], "wifi_ssid")) strbuf_printf(&b, "%s: \"%s\"\n", KEYS[i], v);
-            else { char m[8]; strbuf_printf(&b, "%s: set (%s, %u chars)\n", KEYS[i], strcmp(KEYS[i], "wifi_pass") ? log_mask(v, m) : "***", (unsigned)strlen(v)); }
+        for (int i = 0; store_secret_name(i); i++) {
+            const char *k = store_secret_name(i);
+            char v[256]; bool set = store_secret_get(k, v, sizeof v) == ESP_OK && v[0];
+            if (!set) strbuf_printf(&b, "%s: not set\n", k);
+            else if (!strcmp(k, "wifi_ssid")) strbuf_printf(&b, "%s: \"%s\"\n", k, v);
+            else { char m[8]; strbuf_printf(&b, "%s: set (%s, %u chars)\n", k, strcmp(k, "wifi_pass") ? log_mask(v, m) : "***", (unsigned)strlen(v)); }
         }
     }
     section(&b, "event log (logs/events.1.log, logs/events.log)"); put_file(&b, "logs/events.1.log", 0); put_file(&b, "logs/events.log", 0);
