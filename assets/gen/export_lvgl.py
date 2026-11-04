@@ -13,8 +13,10 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '
 EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek', 'eyeroll']   # ui_emotion_t order
 # Pose frames (2026-11-04): not expressions but frames ui_anim.c strings together for idle life and the food. The order
 # is the UI_PF_* enum written into ui_sprites.h; check_faces.py checks the same list.
-POSES = ['look_l', 'look_r', 'read_l', 'read_r', 'peck', 'hold', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch',
-         'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b', 'kick_l', 'kick_r', 'sly_l', 'sly_r', 'tuck']
+POSES = ['look_l', 'look_r', 'read_l', 'read_r', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch',
+         'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b', 'kick_l', 'kick_r', 'sly_l', 'sly_r',
+         'reach_l', 'reach_r', 'hold_l', 'hold_r', 'lift_l', 'lift_r', 'sneak_l_a', 'sneak_l_b', 'sneak_r_a', 'sneak_r_b',
+         'bite_l', 'bite_r', 'hide_l', 'hide_r']
 
 def rgb565(c):
     r, g, b = c
@@ -105,9 +107,10 @@ def main():
         images.append((f'spr_pose_{pz}', pg.gugu(pz), True))
     images.append(('spr_news', pg.newspaper(), True))
     images.append(('spr_news_turn', pg.newspaper(turn=True), True))
-    pose_glasses, pose_hat_y, pose_camera_y = [], [], []
-    for pz in POSES:                                              # the trip's accessories follow a pose's head too
+    pose_glasses, pose_hat_y, pose_camera_y, pose_hand = [], [], [], []
+    for pz in POSES:                                              # the trip's accessories follow a pose's head too; the held item its hand
         pg.gugu(pz); g = pg.LAST_GEOM
+        pose_hand.append(g['hand'] or (-1, -1))
         gc, gx, gy = pg.acc_sunglasses(g['eye_boxes'], g['cx'], g['rx'])
         images.append((f'spr_acc_sunglasses_pose_{pz}', gc, True)); pose_glasses.append((f'&spr_acc_sunglasses_pose_{pz}', gx, gy))
         pose_hat_y.append(int(round(g['head_top'])) - 7); pose_camera_y.append(int(round(g['cy'])) + 1)
@@ -201,6 +204,7 @@ def main():
     h_parts.append('extern const ui_patch_t ui_pose_sunglasses_patch[UI_POSE_FRAME_COUNT];')
     h_parts.append('extern const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT];')
     h_parts.append('extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];')
+    h_parts.append('extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none')
     h_parts.append('#define UI_NEWS_X 9    // the newspaper\'s base offset over the pigeon sprite (held in front of the belly)')
     h_parts.append('#define UI_NEWS_Y 26')
     c_parts.append('const lv_image_dsc_t *const ui_pose_sprites[UI_POSE_FRAME_COUNT] = {')
@@ -211,6 +215,7 @@ def main():
     c_parts.append('};')
     c_parts.append('const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT] = { ' + ', '.join(str(v) for v in pose_hat_y) + ' };')
     c_parts.append('const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT] = { ' + ', '.join(str(v) for v in pose_camera_y) + ' };')
+    c_parts.append('const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2] = { ' + ', '.join(f'{{ {x}, {y} }}' for x, y in pose_hand) + ' };')
     print('beak patches:', ', '.join(f'{e}={"ok" if b[0] != "NULL" else "-"}' for e, b in zip(EMOTIONS, beak)))
     print('blink patch:', 'ok' if blink_ok else 'none', 'bbox', bb_eyes, 'fits:', ', '.join(e for e, f in zip(EMOTIONS, blink_fits) if f))
     os.makedirs(OUT_DIR, exist_ok=True)

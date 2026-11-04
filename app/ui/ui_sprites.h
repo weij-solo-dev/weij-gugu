@@ -85,8 +85,6 @@ extern const lv_image_dsc_t spr_pose_look_l;
 extern const lv_image_dsc_t spr_pose_look_r;
 extern const lv_image_dsc_t spr_pose_read_l;
 extern const lv_image_dsc_t spr_pose_read_r;
-extern const lv_image_dsc_t spr_pose_peck;
-extern const lv_image_dsc_t spr_pose_hold;
 extern const lv_image_dsc_t spr_pose_chew_a;
 extern const lv_image_dsc_t spr_pose_chew_b;
 extern const lv_image_dsc_t spr_pose_preen_a;
@@ -100,15 +98,26 @@ extern const lv_image_dsc_t spr_pose_kick_l;
 extern const lv_image_dsc_t spr_pose_kick_r;
 extern const lv_image_dsc_t spr_pose_sly_l;
 extern const lv_image_dsc_t spr_pose_sly_r;
-extern const lv_image_dsc_t spr_pose_tuck;
+extern const lv_image_dsc_t spr_pose_reach_l;
+extern const lv_image_dsc_t spr_pose_reach_r;
+extern const lv_image_dsc_t spr_pose_hold_l;
+extern const lv_image_dsc_t spr_pose_hold_r;
+extern const lv_image_dsc_t spr_pose_lift_l;
+extern const lv_image_dsc_t spr_pose_lift_r;
+extern const lv_image_dsc_t spr_pose_sneak_l_a;
+extern const lv_image_dsc_t spr_pose_sneak_l_b;
+extern const lv_image_dsc_t spr_pose_sneak_r_a;
+extern const lv_image_dsc_t spr_pose_sneak_r_b;
+extern const lv_image_dsc_t spr_pose_bite_l;
+extern const lv_image_dsc_t spr_pose_bite_r;
+extern const lv_image_dsc_t spr_pose_hide_l;
+extern const lv_image_dsc_t spr_pose_hide_r;
 extern const lv_image_dsc_t spr_news;
 extern const lv_image_dsc_t spr_news_turn;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_look_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_look_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_read_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_read_r;
-extern const lv_image_dsc_t spr_acc_sunglasses_pose_peck;
-extern const lv_image_dsc_t spr_acc_sunglasses_pose_hold;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_chew_a;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_chew_b;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_preen_a;
@@ -122,7 +131,20 @@ extern const lv_image_dsc_t spr_acc_sunglasses_pose_kick_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_kick_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sly_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sly_r;
-extern const lv_image_dsc_t spr_acc_sunglasses_pose_tuck;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_reach_l;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_reach_r;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_hold_l;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_hold_r;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_lift_l;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_lift_r;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_l_a;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_l_b;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_r_a;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_r_b;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_bite_l;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_bite_r;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_hide_l;
+extern const lv_image_dsc_t spr_acc_sunglasses_pose_hide_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_neutral;
 extern const lv_image_dsc_t spr_acc_sunglasses_happy;
 extern const lv_image_dsc_t spr_acc_sunglasses_laughing;
@@ -181,11 +203,12 @@ extern const ui_patch_t ui_sunglasses_patch[UI_EMOTION_COUNT];   // dark lenses 
 extern const int16_t ui_hat_y[UI_EMOTION_COUNT];               // base y of the sun hat for that face (x = 12)
 extern const int16_t ui_camera_y[UI_EMOTION_COUNT];            // base y of the camera on the chest (x = 18)
 
-// Pose frames: not expressions, frames ui_anim.c strings together (idle life, the food). Order: look_l, look_r, read_l, read_r, peck, hold, chew_a, chew_b, preen_a, preen_b, stretch, walk_l_a, walk_l_b, walk_r_a, walk_r_b, kick_l, kick_r, sly_l, sly_r, tuck
-enum { UI_PF_LOOK_L, UI_PF_LOOK_R, UI_PF_READ_L, UI_PF_READ_R, UI_PF_PECK, UI_PF_HOLD, UI_PF_CHEW_A, UI_PF_CHEW_B, UI_PF_PREEN_A, UI_PF_PREEN_B, UI_PF_STRETCH, UI_PF_WALK_L_A, UI_PF_WALK_L_B, UI_PF_WALK_R_A, UI_PF_WALK_R_B, UI_PF_KICK_L, UI_PF_KICK_R, UI_PF_SLY_L, UI_PF_SLY_R, UI_PF_TUCK, UI_POSE_FRAME_COUNT };
+// Pose frames: not expressions, frames ui_anim.c strings together (idle life, the food). Order: look_l, look_r, read_l, read_r, chew_a, chew_b, preen_a, preen_b, stretch, walk_l_a, walk_l_b, walk_r_a, walk_r_b, kick_l, kick_r, sly_l, sly_r, reach_l, reach_r, hold_l, hold_r, lift_l, lift_r, sneak_l_a, sneak_l_b, sneak_r_a, sneak_r_b, bite_l, bite_r, hide_l, hide_r
+enum { UI_PF_LOOK_L, UI_PF_LOOK_R, UI_PF_READ_L, UI_PF_READ_R, UI_PF_CHEW_A, UI_PF_CHEW_B, UI_PF_PREEN_A, UI_PF_PREEN_B, UI_PF_STRETCH, UI_PF_WALK_L_A, UI_PF_WALK_L_B, UI_PF_WALK_R_A, UI_PF_WALK_R_B, UI_PF_KICK_L, UI_PF_KICK_R, UI_PF_SLY_L, UI_PF_SLY_R, UI_PF_REACH_L, UI_PF_REACH_R, UI_PF_HOLD_L, UI_PF_HOLD_R, UI_PF_LIFT_L, UI_PF_LIFT_R, UI_PF_SNEAK_L_A, UI_PF_SNEAK_L_B, UI_PF_SNEAK_R_A, UI_PF_SNEAK_R_B, UI_PF_BITE_L, UI_PF_BITE_R, UI_PF_HIDE_L, UI_PF_HIDE_R, UI_POSE_FRAME_COUNT };
 extern const lv_image_dsc_t *const ui_pose_sprites[UI_POSE_FRAME_COUNT];
 extern const ui_patch_t ui_pose_sunglasses_patch[UI_POSE_FRAME_COUNT];
 extern const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT];
 extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];
+extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none
 #define UI_NEWS_X 9    // the newspaper's base offset over the pigeon sprite (held in front of the belly)
 #define UI_NEWS_Y 26

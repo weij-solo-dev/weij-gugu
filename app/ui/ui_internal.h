@@ -25,4 +25,6 @@ void ui_scene_init_accessory(void);             // the accessory overlay, a chil
 void ui_scene_show_window(bool show);
 void ui_scene_refresh_accessory(ui_emotion_t e);   // reposition the worn accessory for the face on screen
 void ui_scene_refresh_accessory_pose(int frame);  // the same for a pose frame (UI_PF_*)
+void ui_feed_follow_hand(int hx, int hy);         // ui_anim: the pose's hand moved (base px in the sprite; -1: no hand)
+void ui_anim_hand_now(int *hx, int *hy);          // the hand of the pose on screen now (-1, -1: none)
 void ui_home_backdrop_refresh(void);            // lamp on/off: swap the room picture (UI lock held)

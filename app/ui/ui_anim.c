@@ -34,14 +34,18 @@ static const struct { int8_t f0, f1; uint16_t ms; } POSE[UI_POSE_COUNT] = {
     [UI_POSE_NONE]    = { -1, -1, 0 },
     [UI_POSE_LOOK_L]  = { UI_PF_LOOK_L, -1, 0 },          [UI_POSE_LOOK_R]  = { UI_PF_LOOK_R, -1, 0 },
     [UI_POSE_READ]    = { UI_PF_READ_L, UI_PF_READ_R, 900 },
-    [UI_POSE_PECK]    = { UI_PF_PECK, -1, 0 },            [UI_POSE_HOLD]    = { UI_PF_HOLD, -1, 0 },
     [UI_POSE_CHEW]    = { UI_PF_CHEW_A, UI_PF_CHEW_B, 160 },
     [UI_POSE_PREEN]   = { UI_PF_PREEN_A, UI_PF_PREEN_B, 340 },
     [UI_POSE_STRETCH] = { UI_PF_STRETCH, -1, 0 },
     [UI_POSE_WALK_L]  = { UI_PF_WALK_L_A, UI_PF_WALK_L_B, 130 }, [UI_POSE_WALK_R] = { UI_PF_WALK_R_A, UI_PF_WALK_R_B, 130 },
     [UI_POSE_KICK_L]  = { UI_PF_KICK_L, -1, 0 },          [UI_POSE_KICK_R]  = { UI_PF_KICK_R, -1, 0 },
     [UI_POSE_SLY]     = { UI_PF_SLY_L, UI_PF_SLY_R, 450 },
-    [UI_POSE_TUCK]    = { UI_PF_TUCK, -1, 0 },
+    [UI_POSE_REACH_L] = { UI_PF_REACH_L, -1, 0 },         [UI_POSE_REACH_R] = { UI_PF_REACH_R, -1, 0 },
+    [UI_POSE_HOLD_L]  = { UI_PF_HOLD_L, -1, 0 },          [UI_POSE_HOLD_R]  = { UI_PF_HOLD_R, -1, 0 },
+    [UI_POSE_LIFT_L]  = { UI_PF_LIFT_L, -1, 0 },          [UI_POSE_LIFT_R]  = { UI_PF_LIFT_R, -1, 0 },
+    [UI_POSE_SNEAK_L] = { UI_PF_SNEAK_L_A, UI_PF_SNEAK_L_B, 420 }, [UI_POSE_SNEAK_R] = { UI_PF_SNEAK_R_A, UI_PF_SNEAK_R_B, 420 },
+    [UI_POSE_BITE_L]  = { UI_PF_BITE_L, -1, 0 },          [UI_POSE_BITE_R]  = { UI_PF_BITE_R, -1, 0 },
+    [UI_POSE_HIDE_L]  = { UI_PF_HIDE_L, -1, 0 },          [UI_POSE_HIDE_R]  = { UI_PF_HIDE_R, -1, 0 },
 };
 static int pose_frame(void) { return s_pose_phase && POSE[s_pose].f1 >= 0 ? POSE[s_pose].f1 : POSE[s_pose].f0; }
 static void news_show(bool on)
@@ -61,9 +65,11 @@ static void refresh_sprite(void)
         ui_show_base(ui_pose_sprites[f]); ui_show_beak(NULL); ui_show_eyes(NULL);
         news_show(s_pose == UI_POSE_READ);
         ui_scene_refresh_accessory_pose(f);
+        ui_feed_follow_hand(ui_pose_hand[f][0], ui_pose_hand[f][1]);   // whatever it holds goes with the hand
         return;
     }
     news_show(false);
+    ui_feed_follow_hand(-1, -1);
     uint32_t now = lv_tick_get();
     const lv_image_dsc_t *base;
     const ui_patch_t *beak = NULL, *eyes = NULL;
@@ -188,6 +194,12 @@ void ui_walk_to(int dx, uint32_t ms)
     ui_unlock();
 }
 int ui_gugu_dx(void) { return s_dx; }
+int ui_pose_hand_x(ui_pose_t p) { return p > UI_POSE_NONE && p < UI_POSE_COUNT && POSE[p].f0 >= 0 ? ui_pose_hand[POSE[p].f0][0] : -1; }
+void ui_anim_hand_now(int *hx, int *hy)
+{
+    int f = s_pose != UI_POSE_NONE ? pose_frame() : -1;
+    *hx = f >= 0 ? ui_pose_hand[f][0] : -1; *hy = f >= 0 ? ui_pose_hand[f][1] : -1;
+}
 
 void ui_set_idle(bool on)
 {

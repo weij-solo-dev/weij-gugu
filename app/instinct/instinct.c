@@ -51,8 +51,10 @@ static int64_t s_last_interaction, s_idea_asked, s_peek_next;
 // The feed key (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等），然后 gugu 完成拾起作出相关反应";
 // then "可以都统一动作：所有投递的物品，它先眼睛看向它，然后做一个表情（开心、白眼、偷摸等），然后做动作（拾起吃了、拾起偷偷
 // 收起来、一脚踢开等）" and "比如我投递辣椒，它看到，可以白眼，然后一脚踢开"). Every item goes the same way: the eyes find
-// it as it falls, Gugu makes a face about it, walks over and acts (eats it, slips it under its wing, or kicks it out of
-// the window), shows how that felt, and walks home. Each item has two plans and a chance for the first.
+// it as it falls, Gugu makes a face about it, walks over and acts, shows how that felt, and walks home. The wings are
+// hands ("它翅膀可以当做手，应该是用手拾起"): it bends down and picks the thing up with the wing on that side, then eats
+// it (held at the chest, up to the beak, chewed), hides it (a good look by the glasses, a sly glance about, behind the
+// back), or, feet being feet, kicks it out of the window. Each item has two plans and a chance for the first.
 typedef enum { ACT_EAT = 0, ACT_STASH, ACT_KICK } feed_act_t;
 #define FACE_SLY UI_EMO_COUNT            // the face step as a pose: glancing left and right (偷摸)
 typedef struct { uint8_t act; ui_emotion_t face, after, then; const char *sfx; uint8_t pct; } feed_plan_t;   // then: a second face after `after` (UI_EMO_COUNT none)
@@ -69,12 +71,12 @@ static const food_t FOOD[] = {   // the order of ui_food_sprites
     { "sock",     10, { { ACT_KICK,  UI_EMO_EYEROLL,   UI_EMO_EYEROLL,  NONE_E, "pop",    60 },  { ACT_STASH, FACE_SLY, UI_EMO_SHY, NONE_E, NULL, 0 } } },
 };
 static const feed_plan_t FULL_PLAN = { ACT_KICK, UI_EMO_EYEROLL, UI_EMO_EYEROLL, NONE_E, "pop", 100 };   // full: whatever it is, away with it
-static const char *const ACT_NAME[] = { "eaten", "tucked away", "kicked off" };
+static const char *const ACT_NAME[] = { "eaten", "hidden away", "kicked off" };
 #define FOOD_N ((int)(sizeof FOOD / sizeof FOOD[0]))
 #define FEED_LAND_MS   450              // ui_feed.c's fall
 #define FEED_FULL_N    5                // this many eaten within FEED_FULL_US and it kicks the next one away
 #define FEED_FULL_US   (60 * 1000000LL)
-enum { FS_FALL, FS_FACE, FS_WALK, FS_PECK, FS_HOLD, FS_LOOK, FS_CHEW, FS_TUCK, FS_KICK, FS_AFTER, FS_BACK };
+enum { FS_FALL, FS_FACE, FS_WALK, FS_REACH, FS_HOLD, FS_BITE, FS_CHEW, FS_LIFT, FS_SNEAK, FS_HIDE, FS_KICK, FS_AFTER, FS_BACK };
 static int s_feed_food = -1;            // the item being dealt with, -1 none
 static const feed_plan_t *s_plan;
 static uint8_t s_fs;                    // its step
@@ -268,9 +270,10 @@ static void feed_start(int64_t now)
     if (!full && s_force_plan >= 0 && (s_force_plan == 0 || FOOD[food].plan[0].pct < 100)) s_plan = &FOOD[food].plan[s_force_plan ? 1 : 0];
     s_feed_dir = (rng() & 1) ? 1 : -1;
     int land_x = s_feed_dir < 0 ? 24 : 76, w = ui_feed_width(food);   // beside the feet, left or right
-    // Where to stand: the beak over it to pick it up (the beak's tip is sprite pixel 24, home at 34), or the swung foot at
-    // its near side to kick it (the left kick's foot spans sprite pixels 11..14, the right one's 33..36).
-    s_feed_dx = s_plan->act != ACT_KICK ? land_x + w / 2 - 58 : s_feed_dir < 0 ? land_x + w - 45 : land_x - 70;
+    // Where to stand: the reaching hand on it to pick it up (the hand's x in the sprite comes from the art; home is 34), or
+    // the swung foot at its near side to kick it (the left kick's foot spans sprite pixels 11..14, the right one's 33..36).
+    int hand = ui_pose_hand_x(s_feed_dir < 0 ? UI_POSE_REACH_L : UI_POSE_REACH_R);
+    s_feed_dx = s_plan->act != ACT_KICK ? land_x + w / 2 - 34 - (hand >= 0 ? hand : 24) : s_feed_dir < 0 ? land_x + w - 45 : land_x - 70;
     idle_stop();
     ui_feed_drop(food, land_x);
     board_vibrate(15);
@@ -314,29 +317,38 @@ static void feed_tick(int64_t now)   // every 40 ms while an item is being dealt
             ui_feed_kick(s_feed_dir); board_vibrate(30);
             if (pl->sfx) audio_sfx_play(pl->sfx);
             s_fs = FS_KICK; s_fs_next = now + 500000;
-        } else { ui_pose(UI_POSE_PECK); s_fs = FS_PECK; s_fs_next = now + 300000; }   // 4b. bow down to it
+        } else { ui_pose(s_feed_dir < 0 ? UI_POSE_REACH_L : UI_POSE_REACH_R); s_fs = FS_REACH; s_fs_next = now + 380000; }   // 4b. bend down, the wing to it
         break;
-    case FS_PECK:                                                // into the beak
-        ui_feed_pick(); ui_pose(UI_POSE_HOLD);
-        s_fs = FS_HOLD; s_fs_next = now + 450000;
+    case FS_REACH:                                               // picked up, held in front of the chest, a look at it
+        ui_feed_take(); ui_pose(s_feed_dir < 0 ? UI_POSE_HOLD_L : UI_POSE_HOLD_R);
+        s_fs = FS_HOLD; s_fs_next = now + 550000;
         break;
     case FS_HOLD:
-        if (pl->act == ACT_EAT) {                                // chewed up
-            ui_feed_clear(); ui_pose(UI_POSE_CHEW);
+        if (pl->act == ACT_EAT) {                                // up to the beak: a bite
+            ui_pose(s_feed_dir < 0 ? UI_POSE_BITE_L : UI_POSE_BITE_R);
             if (pl->sfx) audio_sfx_play(pl->sfx);
-            s_eaten[s_eaten_i++ % FEED_FULL_N] = now;
-            s_fs = FS_CHEW; s_fs_next = now + 800000;
-        } else {                                                 // a good look beside the glasses, glancing about: nobody saw?
-            ui_feed_raise(); ui_pose(UI_POSE_SLY);
-            s_fs = FS_LOOK; s_fs_next = now + 1100000;
+            s_fs = FS_BITE; s_fs_next = now + 380000;
+        } else {                                                 // a good look, up by the glasses
+            ui_pose(s_feed_dir < 0 ? UI_POSE_LIFT_L : UI_POSE_LIFT_R);
+            s_fs = FS_LIFT; s_fs_next = now + 900000;
         }
         break;
-    case FS_LOOK:                                                // under the wing
-        ui_pose(UI_POSE_TUCK); ui_feed_tuck();
-        if (pl->sfx) audio_sfx_play(pl->sfx);
-        s_fs = FS_TUCK; s_fs_next = now + 550000;
+    case FS_BITE:                                                // gone in: chewed up
+        ui_feed_clear(); ui_pose(UI_POSE_CHEW);
+        s_eaten[s_eaten_i++ % FEED_FULL_N] = now;
+        s_fs = FS_CHEW; s_fs_next = now + 750000;
         break;
-    case FS_CHEW: case FS_TUCK: case FS_KICK:                    // 5. how that felt
+    case FS_LIFT:                                                // held close, glancing about: did anyone see?
+        ui_pose(s_feed_dir < 0 ? UI_POSE_SNEAK_L : UI_POSE_SNEAK_R);
+        s_fs = FS_SNEAK; s_fs_next = now + 950000;
+        break;
+    case FS_SNEAK:                                               // behind the back with it
+        ui_pose(s_feed_dir < 0 ? UI_POSE_HIDE_L : UI_POSE_HIDE_R);
+        if (pl->sfx) audio_sfx_play(pl->sfx);
+        s_fs = FS_HIDE; s_fs_next = now + 550000;
+        break;
+    case FS_CHEW: case FS_HIDE: case FS_KICK:                    // 5. how that felt
+        if (pl->act != ACT_KICK) ui_feed_clear();               // a kicked one finishes its flight out of the window
         ui_pose(UI_POSE_NONE); s_mood_until = 0;
         mood(pl->after, pl->then != NONE_E ? 800 : 1200);
         if (pl->then != NONE_E) { s_mood_next = pl->then; s_mood_next_until = 1300; board_vibrate(60); }   // spicy!

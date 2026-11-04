@@ -10,9 +10,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pixelgen as pg
 
 EMOTIONS = ['neutral', 'happy', 'laughing', 'surprised', 'curious', 'shy', 'sad', 'sleepy', 'angry', 'scared', 'proud', 'dizzy', 'puff', 'wave', 'urge', 'urge_you', 'peek', 'eyeroll']
-POSES = ['look_l', 'look_r', 'read_l', 'read_r', 'peck', 'hold', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch',
-         'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b', 'kick_l', 'kick_r', 'sly_l', 'sly_r', 'tuck']   # export_lvgl.py's pose frames
-CLOSED = {'happy', 'laughing', 'sleepy', 'proud', 'dizzy', 'puff', 'blink', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch'}   # marks that must keep clear of the frame
+POSES = ['look_l', 'look_r', 'read_l', 'read_r', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch',
+         'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b', 'kick_l', 'kick_r', 'sly_l', 'sly_r',
+         'reach_l', 'reach_r', 'hold_l', 'hold_r', 'lift_l', 'lift_r', 'sneak_l_a', 'sneak_l_b', 'sneak_r_a', 'sneak_r_b',
+         'bite_l', 'bite_r', 'hide_l', 'hide_r']   # export_lvgl.py's pose frames
+CLOSED = {'happy', 'laughing', 'sleepy', 'proud', 'dizzy', 'puff', 'blink', 'chew_a', 'chew_b', 'preen_a', 'preen_b', 'stretch', 'bite_l', 'bite_r'}   # marks that must keep clear of the frame
 
 
 def problems():

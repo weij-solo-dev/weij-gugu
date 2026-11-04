@@ -10,6 +10,7 @@
 #define FEED_FALL_MS 450
 static lv_obj_t *s_item;
 static int32_t s_land_y;
+static void put_on_ground_layer(void);   // a held item back onto the scene (defined with the hand code below)
 
 static void y_exec(void *obj, int32_t v) { lv_obj_set_y(obj, v); }
 
@@ -39,6 +40,7 @@ void ui_feed_drop(int food, int land_x)
     }
     const lv_image_dsc_t *img = ui_food_sprites[food].img;
     lv_anim_delete(s_item, NULL);
+    put_on_ground_layer();                                    // a new item falls on the scene, not in a hand
     lv_image_set_src(s_item, img);
     s_land_y = (FEED_GROUND - (int32_t)img->header.h) * UI_SPRITE_SCALE;
     int32_t top = -(int32_t)img->header.h * UI_SPRITE_SCALE;
@@ -59,7 +61,7 @@ void ui_feed_drop(int food, int land_x)
 void ui_feed_clear(void)
 {
     ui_lock();
-    if (s_item) { lv_anim_delete(s_item, NULL); lv_obj_add_flag(s_item, LV_OBJ_FLAG_HIDDEN); }
+    if (s_item) { lv_anim_delete(s_item, NULL); lv_obj_add_flag(s_item, LV_OBJ_FLAG_HIDDEN); put_on_ground_layer(); }
     ui_unlock();
 }
 
@@ -81,30 +83,38 @@ static void glide(int32_t x, int32_t y, uint32_t ms, bool hide)   // the item to
     lv_anim_start(&b);
 }
 static int32_t item_w(void) { const lv_image_dsc_t *d = lv_image_get_src(s_item); return d ? (int32_t)d->header.w * UI_SPRITE_SCALE : 0; }
+static int32_t item_h(void) { const lv_image_dsc_t *d = lv_image_get_src(s_item); return d ? (int32_t)d->header.h * UI_SPRITE_SCALE : 0; }
 
-void ui_feed_pick(void)                      // the beak's tip in the hold pose is sprite pixel (24, 23)
+// Held: the item is a child of the pigeon, centred on the hand of each pose (ui_anim tells us when the hand moves), so it
+// walks with Gugu and is drawn in front of it; a pose without a hand (behind the back, or none at all) hides it.
+static bool s_held;
+static void put_on_ground_layer(void)
+{
+    if (!s_held || !s_item) return;
+    lv_obj_set_parent(s_item, lv_obj_get_parent(ui_gugu_img));
+    s_held = false;
+}
+
+void ui_feed_follow_hand(int hx, int hy)     // ui_anim, inside the UI lock
+{
+    if (!s_held || !s_item) return;
+    if (hx < 0) { lv_obj_add_flag(s_item, LV_OBJ_FLAG_HIDDEN); return; }
+    lv_obj_remove_flag(s_item, LV_OBJ_FLAG_HIDDEN);
+    glide(hx * UI_SPRITE_SCALE - item_w() / 2, hy * UI_SPRITE_SCALE - item_h() / 2, 120, false);
+}
+
+void ui_feed_take(void)
 {
     ui_lock();
-    if (s_item && !lv_obj_has_flag(s_item, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_move_foreground(s_item);
-        glide(lv_obj_get_x(ui_gugu_img) + 24 * UI_SPRITE_SCALE + 2 - item_w() / 2, lv_obj_get_y(ui_gugu_img) + 22 * UI_SPRITE_SCALE, 160, false);
+    if (s_item && !lv_obj_has_flag(s_item, LV_OBJ_FLAG_HIDDEN) && !s_held) {
+        lv_anim_delete(s_item, NULL);
+        int32_t x = lv_obj_get_x(s_item) - lv_obj_get_x(ui_gugu_img), y = lv_obj_get_y(s_item) - lv_obj_get_y(ui_gugu_img);
+        lv_obj_set_parent(s_item, ui_gugu_img);
+        lv_obj_set_pos(s_item, x, y);                          // where it lay, now in the pigeon's frame
+        s_held = true;
+        int hx, hy; ui_anim_hand_now(&hx, &hy);
+        ui_feed_follow_hand(hx, hy);
     }
-    ui_unlock();
-}
-
-void ui_feed_raise(void)                     // beside the right lens, where the eyes can get at it
-{
-    ui_lock();
-    if (s_item && !lv_obj_has_flag(s_item, LV_OBJ_FLAG_HIDDEN))
-        glide(lv_obj_get_x(ui_gugu_img) + 36 * UI_SPRITE_SCALE, lv_obj_get_y(ui_gugu_img) + 12 * UI_SPRITE_SCALE, 260, false);
-    ui_unlock();
-}
-
-void ui_feed_tuck(void)                      // under the lifted right wing, then gone
-{
-    ui_lock();
-    if (s_item && !lv_obj_has_flag(s_item, LV_OBJ_FLAG_HIDDEN))
-        glide(lv_obj_get_x(ui_gugu_img) + 38 * UI_SPRITE_SCALE, lv_obj_get_y(ui_gugu_img) + 26 * UI_SPRITE_SCALE, 320, true);
     ui_unlock();
 }
 
