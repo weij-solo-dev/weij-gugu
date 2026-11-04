@@ -1,6 +1,7 @@
 // ui_anim.c — the expression animation table: beak sync while speaking, a blink when idle, one-shot actions (nod,
-// wave, puff, coo, whistle), poses (looking aside, reading the paper, preening, stretching, walking, pecking, holding,
-// chewing, kicking, a sly glance, tucking away) and the walk to a spot, the listening ring. Runs on LVGL timers
+// wave, puff, coo, whistle), poses (looking aside, reading the paper, preening, stretching, walking, chewing, kicking, a
+// sly glance, and the wings as hands: reaching, holding, lifting, sneaking, biting, hiding) and the walk to a spot, the
+// listening ring. Runs on LVGL timers
 // inside the UI task; other modules only poke the small API in ui.h.
 //
 // Everything that moves often is small: the beak (12 Hz while speaking) and the eyelids (a blink) are patches drawn

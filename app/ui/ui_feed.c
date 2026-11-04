@@ -1,12 +1,13 @@
 // ui_feed.c — the yellow key's food: an item falls from above the circle and lands on the ground beside Gugu's feet with
-// a small bounce (just behind the pigeon). Then Gugu handles it (instinct runs the steps, 2026-11-04, the owner: look at
-// it, a face, then do something): picked up into the beak, held up beside the glasses for a look, eaten, slipped under
-// the wing, or kicked out of the round window in an arc. Positions follow Gugu wherever it has walked.
+// a small bounce (just behind the pigeon), on the row Gugu's feet stand on. Then Gugu handles it (instinct runs the steps,
+// 2026-11-04, the owner: look at it, a face, then do something): picked up with a wing, held at the chest in both, held
+// up beside the glasses for a look, bitten and eaten, hidden behind the back, or kicked out of the round window in an
+// arc. Positions follow Gugu wherever it has walked.
 #define LOG_TAG "ui"
 #include "ui_internal.h"
 #include "foundation/log.h"
 
-#define FEED_GROUND 89            // base y where Gugu's feet stand: the item's bottom lands on it (95 before the 6-row lift)
+#define FEED_GROUND (GUGU_FEET_ROW + 1)   // the item's bottom row lands on the row Gugu's feet stand on (and, away, the strip's edge)
 #define FEED_FALL_MS 450
 static lv_obj_t *s_item;
 static int32_t s_land_y;

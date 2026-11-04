@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""check_faces.py — every lens holds one mark and nothing else (2026-11-03, owner: "眼镜内线条太多太复杂").
+"""check_faces.py — every lens holds one mark and nothing else (2026-11-03, owner: "眼镜内线条太多太复杂"), and every frame
+stands on the same row (pixelgen FEET_ROW: the ground line Gugu's feet meet, at home and in the away scenes' strip).
 
 For each face (and the blink frame), the pixels inside each round lens may only be the lens white, the pupil colour and
 the pupil's glint; a closed-eye mark (an arch, a line, an arrow, an ×) must not touch the frame, diagonals included.
@@ -32,10 +33,13 @@ def problems():
                            and any((x + dx, y + dy) in ring for dx in (-1, 0, 1) for dy in (-1, 0, 1)))
             if stray: found.append(f'{name} lens {i}: {len(stray)} stray pixel(s) inside, e.g. {stray[:4]}')
             if touch: found.append(f'{name} lens {i}: the mark touches the frame at {touch[:4]}')
+        feet = [y for y in range(g.h) for x in range(g.w) if g.get(x, y) == P['foot']]
+        if name != 'blink' and (not feet or max(feet) != pg.FEET_ROW):   # one ground line for every frame (pixelgen FEET_ROW)
+            found.append(f'{name}: the feet end on row {max(feet) if feet else None}, not {pg.FEET_ROW}: Gugu would sink or float as the frame changes')
     return found
 
 
 if __name__ == '__main__':
     p = problems()
-    print('\n'.join(p) if p else f'faces ok: {len(EMOTIONS)} faces, {len(POSES)} pose frames and the blink, one mark per lens, nothing touching a frame')
+    print('\n'.join(p) if p else f'faces ok: {len(EMOTIONS)} faces, {len(POSES)} pose frames and the blink, one mark per lens, nothing touching a frame, the feet on row {pg.FEET_ROW}')
     sys.exit(1 if p else 0)

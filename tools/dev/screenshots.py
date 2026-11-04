@@ -28,8 +28,10 @@ def shot(out, name, after_ms, env=None):
 
 
 def stage_trip(art_dir):
-    """A card that is away right now, with the given art directory copied under host/data/art/<id>."""
-    trip_id = os.path.basename(os.path.normpath(art_dir))
+    """A card that is away right now, with the given art directory copied under host/data/art/<id>. The id is new, so
+    unstaging never removes art that was there before (pointing --art at host/data/art/<trip> once deleted that trip's
+    pictures)."""
+    trip_id = 'shots-' + os.path.basename(os.path.normpath(art_dir))
     dst = os.path.join(DATA, 'art', trip_id)
     os.makedirs(dst, exist_ok=True)
     for f in glob.glob(os.path.join(art_dir, '*.art')): shutil.copy(f, dst)

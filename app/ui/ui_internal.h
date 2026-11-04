@@ -6,7 +6,12 @@
 #include "lvgl.h"
 
 #define GUGU_BASE_X (34 * UI_SPRITE_SCALE + 1)   // the pigeon's home position in screen pixels
-#define GUGU_BASE_Y (40 * UI_SPRITE_SCALE + 1)   // 46 until 2026-11-04: lifted 6 rows with the floor (pixelgen ROOM_LIFT)
+#define GUGU_BASE_ROW 40                         // its top row in base pixels: 46 until 2026-11-04, lifted 6 with the floor (pixelgen ROOM_LIFT)
+#define GUGU_BASE_Y (GUGU_BASE_ROW * UI_SPRITE_SCALE + 1)
+#define GUGU_FEET_ROW (GUGU_BASE_ROW + UI_GUGU_FEET_ROW)   // the base row Gugu's feet stand on: the food lands on it too
+// Away, the strip under the feet starts on that row. Until 2026-11-04 it began 3 rows lower: art.h counted the sprite's
+// 54 rows, not the row its feet end on, and Gugu floated over the ground the props stood on.
+_Static_assert(GUGU_FEET_ROW == ART_GROUND_TOP, "Gugu's feet must stand on the away scenes' ground line (art.h ART_GROUND_TOP)");
 
 extern lv_obj_t *ui_gugu_img;                    // the pigeon: a pre-scaled base sprite; overlays are its children
 

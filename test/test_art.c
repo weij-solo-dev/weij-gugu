@@ -62,21 +62,25 @@ TEST(test_art_backdrop_import)
     CHECK_EQ_INT(px[(5 * 4 + 2) * 464 + 58 * 4 + 1], expect);
     mem_release(px);
     art_free(&back);
-    // A backdrop saved before the ground line moved up (2026-11-04: row 98 → ART_GROUND_TOP) is moved on load, so the
-    // trip under way keeps its picture: the same image cut for the old line, saved as a version-1 file, loads as bg.
-    {
+    // A backdrop cut for another ground line is moved on load, so the trip under way keeps its picture: version-1 files
+    // were all cut for row 98; version-2 files name their line (92 between the lift of 2026-11-04 and the feet fix that
+    // day). The same image cut for the old line, saved that way, loads as bg.
+    for (int k = 0; k < 2; k++) {
+        int from = k ? 92 : 98, d = from - ART_GROUND_TOP, period = (d / 4 + 1) * 4;   // the strip repeats whole 4-row periods higher
         art_image_t old = bg; old.idx = mem_alloc_big(116 * 116);
-        int d = 98 - ART_GROUND_TOP;
         for (int y = 0; y < 116; y++) memcpy(old.idx + y * 116, bg.idx + (y < d ? 0 : y - d) * 116, 116);
         CHECK(art_save(&old, TEST_DATA "/art/t-test/old.art") == ESP_OK);
         size_t n; char *f = file_read_all(TEST_DATA "/art/t-test/old.art", &n);
         CHECK(f && n > 8 && f[4] == 2 && (uint8_t)f[7] == ART_GROUND_TOP);   // new files carry their line (version 2)
-        if (f) { f[4] = 1; f[7] = 0; atomic_file_write(TEST_DATA "/art/t-test/old.art", f, n); mem_release(f); }   // an old file did not
+        if (f) {
+            if (k) f[7] = (char)from; else { f[4] = 1; f[7] = 0; }            // a version-2 file of the earlier line, or an old file
+            atomic_file_write(TEST_DATA "/art/t-test/old.art", f, n); mem_release(f);
+        }
         art_image_t moved;
         CHECK(art_load(TEST_DATA "/art/t-test/old.art", &moved) == ESP_OK);
         CHECK(memcmp(moved.idx, bg.idx, (size_t)(116 - d) * 116) == 0);       // everything above the new bottom rows is in place
         CHECK(moved.idx[ART_GROUND_TOP * 116 + 3] == bg.idx[ART_GROUND_TOP * 116 + 3]);   // the strip's edge on the new line
-        CHECK(memcmp(moved.idx + (116 - d) * 116, moved.idx + (116 - d - 8) * 116, (size_t)d * 116) == 0);   // the freed rows repeat the strip
+        CHECK(memcmp(moved.idx + (116 - d) * 116, moved.idx + (116 - d - period) * 116, (size_t)d * 116) == 0);   // the freed rows repeat the strip
         art_free(&moved); art_free(&old);
     }
     art_free(&bg);

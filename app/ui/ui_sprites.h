@@ -5,6 +5,7 @@
 #include "lvgl.h"
 
 #define UI_SPRITE_SCALE 4   // base pixel -> screen pixels (nearest neighbour)
+#define UI_GUGU_FEET_ROW 49   // the sprite row of the feet's outline, the same in every frame: it sits on the ground line
 
 extern const lv_image_dsc_t spr_gugu_neutral;
 extern const lv_image_dsc_t spr_gugu_happy;
