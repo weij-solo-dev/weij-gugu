@@ -1,4 +1,6 @@
 #include "minitest.h"
+#include "foundation/resample.h"
+#include <math.h>
 #include "foundation/motion.h"
 #include "foundation/logcap.h"
 #include "foundation/log.h"
@@ -136,8 +138,35 @@ TEST(test_logcap_ring)
     CHECK(buf[2] == ':' && buf[5] == ':');                       // "HH:MM:SS " in front
 }
 
+// The vendors whose voices come at 24 kHz are played at 16 kHz: a 1 kHz tone keeps its pitch and loudness, a tone above
+// the new Nyquist (8 kHz) is filtered out instead of folding back as a whistle, and chunks give what one call gives.
+static double tone_rms(const int16_t *x, size_t n) { double s = 0; for (size_t i = 0; i < n; i++) s += (double)x[i] * x[i]; return sqrt(s / (double)n); }
+static int crossings(const int16_t *x, size_t n) { int c = 0; for (size_t i = 1; i < n; i++) c += (x[i - 1] < 0) != (x[i] < 0); return c; }
+TEST(test_resample_24k_to_16k)
+{
+    enum { N = 24000 };                                    // one second
+    static int16_t in[N], out[N], out2[N];
+    for (int i = 0; i < N; i++) in[i] = (int16_t)(10000.0 * sin(2 * M_PI * 1000.0 * i / 24000.0));
+    resample_3to2_t r; resample_3to2_init(&r);
+    size_t n = resample_3to2(&r, in, N, out);
+    CHECK(n >= 15990 && n <= 16000);
+    int z = crossings(out + 200, n - 400);                 // 1 kHz → 2000 crossings a second
+    CHECK(z > 1940 * (int)(n - 400) / 16000 && z < 2060 * (int)(n - 400) / 16000);
+    double g = tone_rms(out + 200, n - 400) / tone_rms(in, N);
+    CHECK(g > 0.9 && g < 1.1);
+    resample_3to2_init(&r);                                 // the same in uneven chunks
+    size_t m = 0;
+    for (size_t i = 0; i < N; ) { size_t k = (i % 7 == 0) ? 1 : 1001; if (i + k > N) k = N - i; m += resample_3to2(&r, in + i, k, out2 + m); i += k; }
+    CHECK_EQ_INT(m, n);
+    CHECK(memcmp(out, out2, n * sizeof(int16_t)) == 0);
+    for (int i = 0; i < N; i++) in[i] = (int16_t)(10000.0 * sin(2 * M_PI * 10000.0 * i / 24000.0));   // 10 kHz: above 8 kHz
+    resample_3to2_init(&r); n = resample_3to2(&r, in, N, out);
+    CHECK(tone_rms(out + 200, n - 400) / tone_rms(in, N) < 0.1);
+}
+
 void test_foundation(void)
 {
+    RUN(test_resample_24k_to_16k);
     RUN(test_motion_detector);
     RUN(test_logcap_ring);
     RUN(test_ringbuf_wraps);

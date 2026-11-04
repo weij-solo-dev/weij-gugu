@@ -4,6 +4,10 @@
 #include "provider/provider_internal.h"
 #include "foundation/mem.h"
 #include "store/store.h"
+#include <stdatomic.h>
+#include "foundation/strbuf.h"
+#include "foundation/task.h"
+#include "foundation/clock.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
@@ -157,7 +161,7 @@ TEST(test_wire_openai)
     chat_message_t msgs[1] = { { "user", "hi" } };
     chat_request_t req = { .system = sys, .system_count = 1, .messages = msgs, .message_count = 1, .max_tokens = 50 };
     strbuf_t b; strbuf_init(&b);
-    CHECK(wire_openai_build(&b, "qwen-plus", &req, "\"enable_thinking\":false"));
+    CHECK(wire_openai_build(&b, "qwen-plus", &req, "\"enable_thinking\":false", "max_tokens", true));
     cJSON *j = cJSON_Parse(b.s); CHECK(j != NULL);
     cJSON *m = cJSON_GetObjectItem(j, "messages");
     CHECK_EQ_INT(cJSON_GetArraySize(m), 2);
@@ -204,6 +208,94 @@ TEST(test_volc_frames)
     CHECK(provider_preset_get("volc") != NULL);
 }
 
+// OpenAI and Gemini: what the presets say, what a request looks like, how the replies read (fixtures in the shapes of
+// the vendors' own docs, checked 2026-11-04). Live calls go through test_live.c once keys exist.
+TEST(test_vendors_openai_gemini)
+{
+    CHECK(provider_preset_load_dir(GUGU_REPO_ROOT "/content/providers") == ESP_OK);
+    const provider_preset_t *o = provider_preset_get("openai"), *g = provider_preset_get("gemini");
+    CHECK(o && g); if (!o || !g) return;
+    CHECK_EQ_STR(o->chat_max_field, "max_completion_tokens"); CHECK(!o->chat_temperature); CHECK_EQ_INT(o->tts_rate, 24000);
+    CHECK(strstr(o->lang_boost[2], "香港") != NULL);                  // the voice is told Hong Kong Cantonese
+    CHECK_EQ_STR(o->chat_url, "https://api.openai.com/v1/chat/completions");
+    CHECK_EQ_STR(g->chat_url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+    CHECK_EQ_STR(g->chat_max_field, "max_tokens"); CHECK(!g->chat_temperature); CHECK_EQ_INT(g->tts_rate, 0);
+    CHECK_EQ_STR(provider_voice(o, LANG_YUE, NULL), "marin"); CHECK_EQ_STR(provider_voice(g, LANG_EN, NULL), "Leda");
+    strbuf_t b; strbuf_init(&b);                                      // a reasoning model: the newer field, no temperature, reasoning off
+    chat_block_t sys = { "persona", true }; chat_message_t m = { "user", "hi" };
+    chat_request_t req = { .system = &sys, .system_count = 1, .messages = &m, .message_count = 1, .max_tokens = 400, .temperature = 0.8f };
+    CHECK(wire_openai_build(&b, o->chat_model, &req, o->chat_extra[0], o->chat_max_field, o->chat_temperature));
+    CHECK(strstr(b.s, "\"max_completion_tokens\":400") != NULL && strstr(b.s, "temperature") == NULL && strstr(b.s, "\"reasoning_effort\":\"none\"") != NULL);
+    cJSON *jb = cJSON_Parse(b.s); CHECK(jb != NULL); cJSON_Delete(jb); strbuf_free(&b);
+    char t[256]; lang_t l = LANG_UNKNOWN;
+    CHECK(provider_openai_transcript("{\"text\":\"咕咕你喺邊度？\",\"languages\":[{\"code\":\"yue\"}],\"usage\":{\"type\":\"duration\",\"seconds\":2}}", t, sizeof t, &l));
+    CHECK_EQ_STR(t, "咕咕你喺邊度？"); CHECK_EQ_INT(l, LANG_YUE);
+    CHECK(provider_openai_transcript("{\"text\":\"hello gugu\",\"languages\":[]}", t, sizeof t, &l)); CHECK_EQ_INT(l, LANG_EN);   // unsure: guessed
+    CHECK(!provider_openai_transcript("{\"error\":{\"message\":\"Incorrect API key provided\"}}", t, sizeof t, &l));
+    const char *inter = "{\"id\":\"i1\",\"steps\":[{\"type\":\"user_input\",\"content\":[{\"type\":\"text\",\"text\":\"ignored\"}]},"
+                        "{\"type\":\"model_output\",\"content\":[{\"type\":\"text\",\"text\":\"你今日去咗邊度玩？\"}]}]}";
+    CHECK(provider_gemini_text(inter, t, sizeof t)); CHECK_EQ_STR(t, "你今日去咗邊度玩？");
+    CHECK(provider_gemini_text("{\"steps\":[]}", t, sizeof t)); CHECK_EQ_STR(t, "");          // nothing heard
+    CHECK(!provider_gemini_text("{\"error\":{\"code\":\"authentication\",\"message\":\"bad key\"}}", t, sizeof t));
+    size_t n = 0;
+    uint8_t *img = provider_gemini_image("{\"steps\":[{\"type\":\"model_output\",\"content\":[{\"type\":\"image\",\"mime_type\":\"image/jpeg\",\"data\":\"/9j/4AAQ\"}]}]}", &n);
+    CHECK(img && n == 6 && img[0] == 0xFF && img[1] == 0xD8); mem_release(img);
+    img = provider_json_b64("{\"created\":1,\"data\":[{\"b64_json\":\"/9j/4AAQ\"}],\"output_format\":\"jpeg\"}", NULL, "b64_json", &n);
+    CHECK(img && n == 6 && img[0] == 0xFF); mem_release(img);
+    uint8_t pcm[64]; uint32_t rate = 0; char err[96];
+    CHECK_EQ_INT(provider_gemini_tts_event("step.delta", "{\"index\":1,\"delta\":{\"type\":\"audio\",\"data\":\"AAECAw==\",\"mime_type\":\"audio/l16\",\"sample_rate\":16000,\"channels\":1}}",
+                                           pcm, sizeof pcm, &rate, err, sizeof err), 4);
+    CHECK_EQ_INT(rate, 16000); CHECK(pcm[3] == 3);
+    CHECK_EQ_INT(provider_gemini_tts_event("error", "{\"error\":{\"code\":\"safety\",\"message\":\"blocked\"},\"event_type\":\"error\"}", pcm, sizeof pcm, &rate, err, sizeof err), 0);
+    CHECK_EQ_STR(err, "blocked");
+    CHECK_EQ_INT(provider_gemini_tts_event("step.start", "{\"index\":1,\"step\":{\"type\":\"model_output\"}}", pcm, sizeof pcm, &rate, err, sizeof err), 0);
+    CHECK_EQ_STR(err, "");
+}
+
+// The shared HTTP voice: segments are spoken in order on the worker, each flushed once; 24 kHz comes out at 16 kHz;
+// a cancel cuts the segment in flight and drops the queue, and nothing of theirs reaches the engine afterwards.
+static signal_t s_hold; static atomic_int s_ht_flushed, s_ht_errors, s_ht_samples; static char s_ht_order[64];
+static esp_err_t ht_speak(http_tts_t *t, const char *text, provider_error_t *err)
+{
+    if (!strcmp(text, "hold")) { signal_wait(s_hold, 5000); return ESP_OK; }   // a slow request, cut short by abort()
+    if (!strcmp(text, "bad")) { provider_error_set(err, PERR_NETWORK, 0, 0, "dropped"); return ESP_FAIL; }
+    strncat(s_ht_order, text, sizeof s_ht_order - strlen(s_ht_order) - 1);
+    static uint8_t pcm[2400 * 2];
+    http_tts_pcm(t, pcm, 1001, 24000); http_tts_pcm(t, pcm + 1001, sizeof pcm - 1001, 24000);   // an odd split
+    return ESP_OK;
+}
+static void ht_abort(void *v) { (void)v; signal_set(s_hold); }
+static void ht_audio(const int16_t *pcm, size_t n, void *u) { (void)pcm; (void)u; atomic_fetch_add(&s_ht_samples, (int)n); }
+static void ht_flushed(const provider_usage_t *u, void *x) { (void)u; (void)x; atomic_fetch_add(&s_ht_flushed, 1); }
+static void ht_error(const provider_error_t *e, void *x) { (void)e; (void)x; atomic_fetch_add(&s_ht_errors, 1); }
+TEST(test_http_tts_worker)
+{
+    s_hold = signal_create(); s_ht_order[0] = 0; s_ht_flushed = 0; s_ht_errors = 0; s_ht_samples = 0;
+    tts_params_t p = { .lang = LANG_ZH, .sample_rate = 16000 };
+    tts_events_t ev = { NULL, ht_audio, NULL, ht_flushed, ht_error };
+    http_tts_t *t = http_tts_create(&p, &ev, NULL, ht_speak, ht_abort, NULL);
+    CHECK(t != NULL); if (!t) return;
+    http_tts_text(t, "a", 1); http_tts_flush(t); http_tts_text(t, "b", 1); http_tts_flush(t); http_tts_text(t, "c", 1); http_tts_flush(t);
+    for (int i = 0; i < 200 && s_ht_flushed < 3; i++) clock_sleep_ms(10);
+    CHECK_EQ_INT(s_ht_flushed, 3); CHECK_EQ_STR(s_ht_order, "abc");
+    CHECK(s_ht_samples >= 3 * 1599 && s_ht_samples <= 3 * 1600);     // 2400 samples at 24 kHz each: 1600 at 16 kHz
+    http_tts_text(t, "hold", 4); http_tts_flush(t); http_tts_text(t, "d", 1); http_tts_flush(t);   // d waits behind the slow one
+    clock_sleep_ms(50);
+    http_tts_cancel(t);                                               // the engine aborts the turn
+    clock_sleep_ms(150);
+    CHECK_EQ_INT(s_ht_flushed, 3); CHECK_EQ_STR(s_ht_order, "abc");   // neither the cut one nor the dropped one reported
+    http_tts_text(t, "bad", 3); http_tts_flush(t);
+    for (int i = 0; i < 200 && !s_ht_errors; i++) clock_sleep_ms(10);
+    CHECK_EQ_INT(s_ht_errors, 1);
+    http_tts_text(t, "e", 1); http_tts_flush(t);
+    for (int i = 0; i < 200 && s_ht_flushed < 4; i++) clock_sleep_ms(10);
+    CHECK_EQ_INT(s_ht_flushed, 4); CHECK_EQ_STR(s_ht_order, "abce");
+    http_tts_flush(t);                                                // nothing pending: flushed at once
+    CHECK_EQ_INT(s_ht_flushed, 5);
+    http_tts_destroy(t);
+    signal_free(s_hold);
+}
+
 void test_provider(void)
 {
     RUN(test_volc_frames);
@@ -212,5 +304,7 @@ void test_provider(void)
     RUN(test_wire_anthropic_stream);
     RUN(test_preset_minimax);
     RUN(test_provider_configure);
+    RUN(test_vendors_openai_gemini);
+    RUN(test_http_tts_worker);
     RUN(test_fake_vendor_roundtrip);
 }

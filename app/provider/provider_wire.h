@@ -28,7 +28,9 @@ void wire_anthropic_event(wire_anthropic_t *w, const char *event, const char *da
 void wire_anthropic_http_error(wire_anthropic_t *w, int http_status, const char *body);
 
 // ---- OpenAI chat.completions (streaming; DashScope compatible-mode, Volcengine Ark) ----
-bool wire_openai_build(strbuf_t *out, const char *model, const chat_request_t *req, const char *extra_json);
+// max_field: the token limit's name ("max_tokens", or "max_completion_tokens" for newer reasoning models); temperature:
+// false never sends one.
+bool wire_openai_build(strbuf_t *out, const char *model, const chat_request_t *req, const char *extra_json, const char *max_field, bool temperature);
 typedef struct {
     chat_events_t ev; void *user;
     provider_usage_t usage; char stop_reason[24]; bool done;

@@ -115,8 +115,9 @@ function renderProviderDetails(){const vs=selectedVendors();
   $('provRegions').innerHTML=vs.filter(p=>(p.regions||[]).length>1).map(p=>{const cur=settings['region_'+p.id]||p.regions[0];
     return `<label>${esc(p.name)} 的服务区域</label><select id="region_${esc(p.id)}">${p.regions.map(g=>`<option value="${esc(g)}"${g===cur?' selected':''}>${esc(REGION_NAME[g]||g)}</option>`).join('')}</select>`}).join('');
   const seen=new Set(),show=$('showKeys').checked?'text':'password';let h='';
-  for(const p of vs)for(const c of (p.credentials||[])){const k=c.store||`${p.id}_${c.key}`;if(seen.has(k))continue;seen.add(k);
-    h+=`<label>${esc(c.label||p.name+' '+c.key)}${p.console_url?` <a class="muted" href="${esc(p.console_url)}" target="_blank">（去哪里申请）</a>`:''}</label><input class="key" data-key="${esc(k)}" type="${show}" value="${esc(secrets[k]||'')}">`}
+  for(const p of vs){let first=true;for(const c of (p.credentials||[])){const k=c.store||`${p.id}_${c.key}`;if(seen.has(k))continue;seen.add(k);
+    h+=`<label>${esc(c.label||p.name+' '+c.key)}${p.console_url?` <a class="muted" href="${esc(p.console_url)}" target="_blank">（去哪里申请）</a>`:''}</label><input class="key" data-key="${esc(k)}" type="${show}" value="${esc(secrets[k]||'')}">`;
+    if(first&&p.availability)h+=`<div class="muted" style="margin-top:3px">${esc(p.availability)}</div>`;first=false}}
   $('provKeys').innerHTML=h}
 function toggleKeys(){for(const el of document.querySelectorAll('#provKeys input.key'))el.type=$('showKeys').checked?'text':'password'}
 async function saveProviders(){const b={};for(const r of ROLES)b['provider_'+r]=$('prov_'+r).value;

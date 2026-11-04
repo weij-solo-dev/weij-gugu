@@ -1,0 +1,65 @@
+{
+  "id": "gemini",
+  "name": "Google Gemini",
+  "order": 6,
+  "console_url": "https://aistudio.google.com/apikey",
+  "_note": "The Gemini Developer API with a key (not Vertex AI), checked against aistudio.google.com/docs on 2026-11-04. Not offered in mainland China, Hong Kong or Macao. On the free tier prompts may be used to improve Google's products: use a paid (billed) key for a child. New keys are restricted 'authorization keys'. Chat goes through the OpenAI-compatible endpoint; recognition, voice and pictures through interactions. Gemini 3.6+ ignores temperature, so none is sent. Prices are list prices converted at about 7.1 CNY per USD (the voice doubles from 2027-01-01), for the cost ledger only.",
+  "availability": "中国大陆、香港、澳门不在 Gemini API 的服务范围。给孩子用请绑定付费账号：免费档的对话可能被用于改进 Google 的产品。",
+  "regions": [ "global" ],
+  "credentials": [ { "key": "api_key", "secret": true, "label": "Gemini API Key" } ],
+  "capabilities": { "asr_stream": false, "tts_bidi": false, "s2s": false, "image": true },
+  "asr": {
+    "api": "gemini_transcribe",
+    "url": { "global": "https://generativelanguage.googleapis.com/v1beta/interactions" },
+    "model": "gemini-3.5-transcribe",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "chat": {
+    "api": "openai_chat",
+    "url": { "global": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
+    "model": "gemini-3.5-flash-lite",
+    "temperature": false,
+    "extra_body": {
+      "low": { "reasoning_effort": "minimal" },
+      "medium": { "reasoning_effort": "low" },
+      "high": { "reasoning_effort": "medium" }
+    },
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "tts": {
+    "api": "gemini_interactions_tts",
+    "url": { "global": "https://generativelanguage.googleapis.com/v1beta/interactions" },
+    "model": "gemini-3.8-flash-lite-tts",
+    "per_language": {
+      "style": {
+        "en": "cheerful, gentle and a little slow, a small pigeon talking to a four-year-old",
+        "zh": "用标准普通话，开心、温柔、稍慢，像一只小鸽子在跟四岁的小朋友说话",
+        "yue": "用地道香港粵語，開心、溫柔、慢少少，好似一隻白鴿仔同四歲細路仔講嘢"
+      }
+    },
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "image": {
+    "api": "gemini_interactions_image",
+    "url": { "global": "https://generativelanguage.googleapis.com/v1beta/interactions" },
+    "model": "gemini-3.1-flash-lite-image",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "default_voice": { "*": "Leda" },
+  "voices": {
+    "*": [
+      { "id": "Leda", "name": "Leda · youthful" }, { "id": "Puck", "name": "Puck · upbeat" }, { "id": "Achird", "name": "Achird · friendly" },
+      { "id": "Sadachbia", "name": "Sadachbia · lively" }, { "id": "Zephyr", "name": "Zephyr · bright" }, { "id": "Aoede", "name": "Aoede · breezy" },
+      { "id": "Sulafat", "name": "Sulafat · warm" }, { "id": "Vindemiatrix", "name": "Vindemiatrix · gentle" }, { "id": "Achernar", "name": "Achernar · soft" },
+      { "id": "Kore", "name": "Kore · firm" }
+    ]
+  },
+  "prices_cny": {
+    "asr_per_hour": 2.13,
+    "tts_per_10k_chars": 2.7,
+    "chat_in_per_m": 2.13,
+    "chat_out_per_m": 17.75,
+    "chat_cache_read_per_m": 0.21,
+    "image_per_picture": 0.24
+  }
+}

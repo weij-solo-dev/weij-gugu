@@ -5,6 +5,7 @@
 #include "provider_internal.h"
 #include "foundation/log.h"
 #include "foundation/mem.h"
+#include "foundation/hexb64.h"
 #include "store/store.h"
 #include <string.h>
 #include <strings.h>
@@ -134,11 +135,44 @@ float provider_turn_cost_fen(const provider_usage_t *asr, const provider_usage_t
     return fen;
 }
 
+lang_t provider_guess_lang(const char *t)
+{
+    static const char *const yue[] = { "係", "唔", "佢", "嘅", "咗", "啲", "乜", "嘢", "喺", "點", "冇", "睇", NULL };
+    if (!t) return LANG_UNKNOWN;
+    for (int i = 0; yue[i]; i++) if (strstr(t, yue[i])) return LANG_YUE;
+    for (const unsigned char *p = (const unsigned char *)t; *p; p++) if (*p >= 0xE4 && *p <= 0xE9) return LANG_ZH;
+    for (const unsigned char *p = (const unsigned char *)t; *p; p++) if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')) return LANG_EN;
+    return LANG_UNKNOWN;
+}
+
+uint8_t *provider_json_b64(const char *json, const char *after, const char *field, size_t *n)
+{
+    *n = 0;
+    if (!json || !field) return NULL;
+    const char *from = after ? strstr(json, after) : json;
+    if (!from) return NULL;
+    char key[48]; snprintf(key, sizeof key, "\"%s\"", field);
+    const char *k = strstr(from, key);
+    if (!k) return NULL;
+    const char *q = strchr(k + strlen(key), '"');             // past the colon and any space: the opening quote
+    if (!q) return NULL;
+    const char *start = q + 1, *end = strchr(start, '"');
+    if (!end || end == start) return NULL;
+    size_t len = (size_t)(end - start), cap = len / 4 * 3 + 3;
+    uint8_t *out = mem_alloc_big(cap);
+    if (!out) return NULL;
+    *n = b64_decode(start, len, out, cap);
+    if (!*n) { mem_release(out); return NULL; }
+    return out;
+}
+
 // Vendor registration list (one line per vendor file).
 extern const provider_vtable_t provider_minimax;
 extern const provider_vtable_t provider_qwen;
 extern const provider_vtable_t provider_qwen_realtime;
 extern const provider_vtable_t provider_volc;
+extern const provider_vtable_t provider_openai;
+extern const provider_vtable_t provider_gemini;
 extern const provider_vtable_t provider_fake;
 
 static const char *default_vendor(provider_role_t role)   // the lowest-order preset whose vendor plays the role
@@ -209,6 +243,8 @@ esp_err_t provider_init(const char *preset_dir)
     provider_register(&provider_qwen);
     provider_register(&provider_qwen_realtime);
     provider_register(&provider_volc);
+    provider_register(&provider_openai);
+    provider_register(&provider_gemini);
     provider_register(&provider_fake);
     esp_err_t err = provider_preset_load_dir(preset_dir);
     if (err != ESP_OK) LOGW("presets: %s (%s)", preset_dir, esp_err_to_name(err));

@@ -35,15 +35,6 @@ static void auth_headers(net_header_t *h, char *bearer, size_t cap, bool anthrop
     h[2].name = "content-type"; h[2].value = "application/json";
 }
 
-// Heuristic language of a transcript (MiniMax does not return one): Cantonese particles, else CJK, else English.
-static lang_t guess_lang(const char *t)
-{
-    static const char *const yue[] = { "係", "唔", "佢", "嘅", "咗", "啲", "乜", "嘢", "喺", "點", "冇", "睇", NULL };
-    for (int i = 0; yue[i]; i++) if (strstr(t, yue[i])) return LANG_YUE;
-    for (const unsigned char *p = (const unsigned char *)t; *p; p++) if (*p >= 0xE4 && *p <= 0xE9) return LANG_ZH;
-    for (const unsigned char *p = (const unsigned char *)t; *p; p++) if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')) return LANG_EN;
-    return LANG_UNKNOWN;
-}
 
 // ------------------------------------------------------------------- ASR ----
 struct asr_session {
@@ -123,7 +114,7 @@ static esp_err_t mm_asr_finish(asr_session_t *s)
     } else {
         provider_usage_t u = { .audio_ms = (uint32_t)(samples * 1000 / s->p.sample_rate) };
         const char *lang = cJSON_GetStringValue(cJSON_GetObjectItem(j, "language"));
-        lang_t l = lang ? lang_from_code(lang) : guess_lang(text);
+        lang_t l = lang ? lang_from_code(lang) : provider_guess_lang(text);   // MiniMax does not say
         s->ev.on_final(text, l, &u, s->user);
     }
     if (j) cJSON_Delete(j);

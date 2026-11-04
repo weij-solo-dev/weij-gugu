@@ -186,6 +186,77 @@ TEST(test_live_image)
     art_free(&img);
 }
 
+// Any vendor, the same round trip: one chat reply, one sentence of voice, that voice through the recognizer. The keys
+// come the way the device reads them (each preset's secrets; on the host GUGU_<SECRET> from the environment), and a
+// vendor without its keys is skipped. GUGU_LIVE_IMAGE=1 also draws one picture through it.
+static void live_vendor(const char *asr_id, const char *chat_id, const char *tts_id, lang_t lang, const char *line, const char *expect)
+{
+    if (!getenv("GUGU_LIVE")) { printf("  (skipped: set GUGU_LIVE=1)\n"); return; }
+    store_init(GUGU_REPO_ROOT "/host/build/test_data", GUGU_REPO_ROOT "/content");
+    provider_init(GUGU_REPO_ROOT "/content/providers");
+    provider_configure();
+    provider_assign(PROVIDER_ROLE_ASR, asr_id); provider_assign(PROVIDER_ROLE_CHAT, chat_id); provider_assign(PROVIDER_ROLE_TTS, tts_id);
+    char why[96];
+    if (!provider_role_ready(PROVIDER_ROLE_CHAT, why, sizeof why) || !provider_role_ready(PROVIDER_ROLE_TTS, why, sizeof why) || !provider_role_ready(PROVIDER_ROLE_ASR, why, sizeof why)) {
+        printf("  (skipped: %s)\n", why); return;
+    }
+    // chat
+    const provider_vtable_t *v = provider_for(PROVIDER_ROLE_CHAT);
+    chat_events_t ev = { l_delta, l_done, l_err };
+    chat_session_t *c; acc[0] = 0; done_calls = 0; err_calls = 0;
+    CHECK(v->chat_open(&ev, NULL, &c) == ESP_OK);
+    chat_block_t sys[1] = { { "你是咕咕，一只住在孩子窗台鸽子屋里的小信鸽。一句话回答，不超过 20 个字。每句话前面加一个方括号表情标签，例如 [happy]。", true } };
+    chat_message_t m = { "user", "咕咕你今天去哪里玩了呀？" };
+    chat_request_t req = { .system = sys, .system_count = 1, .messages = &m, .message_count = 1, .effort = CHAT_EFFORT_LOW, .max_tokens = 120 };
+    t_send = clock_us(); v->chat_send(c, &req); v->chat_close(c);
+    printf("  chat %s: first delta %lld ms, reply: %s\n", chat_id, (long long)((t_first_delta - t_send) / 1000), acc);
+    CHECK(acc[0] != 0); CHECK_EQ_INT(done_calls, 1); CHECK_EQ_INT(err_calls, 0);
+    // voice
+    v = provider_for(PROVIDER_ROLE_TTS);
+    l_cap = 16000 * 30; l_pcm = mem_alloc_big(l_cap * 2); l_samples = 0; t_flushed = 0; err_calls = 0;
+    tts_params_t tp = { .lang = lang, .sample_rate = 16000, .speed = 1.0f };
+    tts_events_t te = { l_sstart, l_audio, NULL, l_flushed, l_err };
+    tts_session_t *t;
+    int64_t t0 = clock_us();
+    CHECK(v->tts_open(&tp, &te, NULL, &t) == ESP_OK);
+    int64_t t_sent = clock_us();
+    v->tts_text(t, line, strlen(line)); v->tts_flush(t);
+    for (int i = 0; i < 300 && t_flushed < t_sent && !err_calls; i++) clock_sleep_ms(100);
+    v->tts_close(t);
+    printf("  voice %s: open %lld ms, first audio %lld ms, %u ms of voice\n", tts_id, (long long)((t_sent - t0) / 1000),
+           (long long)((t_first_audio - t_sent) / 1000), (unsigned)(l_samples / 16));
+    CHECK(l_samples > 16000); CHECK_EQ_INT(err_calls, 0);
+    // the voice through the recognizer
+    v = provider_for(PROVIDER_ROLE_ASR);
+    asr_session_t *a; asr_params_t ap = { .sample_rate = 16000 }; asr_events_t ae = { NULL, l_final, l_err };
+    CHECK(v->asr_open(&ap, &ae, NULL, &a) == ESP_OK);
+    v->asr_feed(a, l_pcm, l_samples);
+    int64_t t_rel = clock_us(); asr_text[0] = 0;
+    v->asr_finish(a); v->asr_close(a);
+    printf("  asr %s: %lld ms -> \"%s\" (lang %s)\n", asr_id, (long long)((t_asr_done - t_rel) / 1000), asr_text, lang_code(asr_lang));
+    CHECK(strstr(asr_text, expect) != NULL);
+    mem_release(l_pcm);
+    if (getenv("GUGU_LIVE_IMAGE")) {
+        provider_assign(PROVIDER_ROLE_IMAGE, chat_id);
+        const provider_vtable_t *iv = provider_for(PROVIDER_ROLE_IMAGE);
+        if (iv && iv->image_generate && !strcmp(iv->id, chat_id)) {
+            char out[200]; snprintf(out, sizeof out, GUGU_REPO_ROOT "/host/build/test_data/art/live_%s.jpg", chat_id);
+            image_params_t ip = { .prompt = "a red lighthouse on a green hill by the sea, simple flat colours, children's picture-book illustration, no people, no text", .aspect = "1:1", .out_path = out };
+            provider_usage_t u = { 0 }; provider_error_t e = { 0 };
+            int64_t ti = clock_us();
+            esp_err_t r = iv->image_generate(&ip, &u, &e);
+            printf("  image %s: %s in %lld ms (%s)\n", chat_id, esp_err_to_name(r), (long long)((clock_us() - ti) / 1000), e.message);
+            art_image_t img;
+            CHECK(r == ESP_OK && art_import_backdrop(out, ART_GROUND_GRASS, &img) == ESP_OK);
+            if (r == ESP_OK) art_free(&img);
+        }
+    }
+}
+TEST(test_live_openai) { live_vendor("openai", "openai", "openai", LANG_YUE, "你好呀，我係咕咕，一隻識送信嘅鴿仔。", "咕咕"); }
+TEST(test_live_gemini) { live_vendor("gemini", "gemini", "gemini", LANG_YUE, "你好呀，我係咕咕，一隻識送信嘅鴿仔。", "咕咕"); }
+TEST(test_live_qwen)   { live_vendor("qwen_realtime", "qwen", "qwen", LANG_YUE, "你好呀，我係咕咕，一隻識送信嘅鴿仔。", "咕咕"); }
+TEST(test_live_volc)   { live_vendor("volc", "volc", "volc", LANG_ZH, "你好呀，我是咕咕，一只会送信的小鸽子。", "咕咕"); }
+
 void test_live(void)
 {
     RUN(test_live_image);
@@ -193,4 +264,8 @@ void test_live(void)
     RUN(test_live_minimax_tts_bidi_then_asr);
     RUN(test_live_trip_card);
     RUN(test_live_story_chain);
+    RUN(test_live_openai);
+    RUN(test_live_gemini);
+    RUN(test_live_qwen);
+    RUN(test_live_volc);
 }

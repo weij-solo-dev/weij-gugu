@@ -4,10 +4,11 @@
 #include <stdio.h>
 #include "cJSON.h"
 
-bool wire_openai_build(strbuf_t *out, const char *model, const chat_request_t *req, const char *extra_json)
+bool wire_openai_build(strbuf_t *out, const char *model, const chat_request_t *req, const char *extra_json, const char *max_field, bool temperature)
 {
-    strbuf_printf(out, "{\"model\":\"%s\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":%u", model, (unsigned)(req->max_tokens ? req->max_tokens : 256u));
-    if (req->temperature > 0) strbuf_printf(out, ",\"temperature\":%.2f", (double)req->temperature);
+    strbuf_printf(out, "{\"model\":\"%s\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"%s\":%u", model,
+                  max_field && *max_field ? max_field : "max_tokens", (unsigned)(req->max_tokens ? req->max_tokens : 256u));
+    if (temperature && req->temperature > 0) strbuf_printf(out, ",\"temperature\":%.2f", (double)req->temperature);
     strbuf_puts(out, ",\"messages\":[");
     bool first = true;
     if (req->system_count) {                      // one system message, blocks joined (no per-block cache control here)

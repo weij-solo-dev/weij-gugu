@@ -93,6 +93,9 @@ esp_err_t provider_preset_load_json(const char *json_text)
     copy_url(p->chat_url, sizeof p->chat_url, cJSON_GetObjectItem(chat, "url"), p->region);
     copy_str(p->chat_model, sizeof p->chat_model, cJSON_GetObjectItem(chat, "model"));
     copy_str(p->chat_model_alt, sizeof p->chat_model_alt, cJSON_GetObjectItem(chat, "model_alt"));
+    copy_str(p->chat_max_field, sizeof p->chat_max_field, cJSON_GetObjectItem(chat, "max_tokens_field"));
+    if (!p->chat_max_field[0]) snprintf(p->chat_max_field, sizeof p->chat_max_field, "max_tokens");
+    p->chat_temperature = !cJSON_IsFalse(cJSON_GetObjectItem(chat, "temperature"));
     cJSON *extra = cJSON_GetObjectItem(chat, "extra_body");
     const char *levels[3] = { "low", "medium", "high" };
     for (int i = 0; i < 3; i++) members_json(p->chat_extra[i], sizeof p->chat_extra[i], cJSON_GetObjectItem(extra, levels[i]));
@@ -101,6 +104,8 @@ esp_err_t provider_preset_load_json(const char *json_text)
     copy_url(p->tts_url, sizeof p->tts_url, cJSON_GetObjectItem(tts, "url"), p->region);
     copy_url(p->tts_url_http, sizeof p->tts_url_http, cJSON_GetObjectItem(tts, "url_http"), p->region);
     copy_str(p->tts_model, sizeof p->tts_model, cJSON_GetObjectItem(tts, "model"));
+    cJSON *rate = cJSON_GetObjectItem(tts, "sample_rate");
+    p->tts_rate = cJSON_IsNumber(rate) ? (uint32_t)rate->valuedouble : 0;
     cJSON *per = cJSON_GetObjectItem(tts, "per_language");
     cJSON *hint = per ? per->child : NULL;        // the first (only) hint parameter, e.g. language_boost
     const char *langs[3] = { "en", "zh", "yue" };

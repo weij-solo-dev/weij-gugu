@@ -1,0 +1,66 @@
+{
+  "id": "openai",
+  "name": "OpenAI",
+  "order": 5,
+  "console_url": "https://platform.openai.com/api-keys",
+  "_note": "Checked against developers.openai.com on 2026-11-04. Not offered in mainland China, Hong Kong or Macao (HTTP 403 there). The speech endpoint's gpt-4o-mini-tts is deprecated by OpenAI for 2027-01-06; its named successor speaks through the Realtime API. Cantonese is not on the speech languages list (recognition accepts yue). Prices are list prices converted at about 7.1 CNY per USD, for the cost ledger only.",
+  "availability": "中国大陆、香港、澳门不在 OpenAI 的服务范围（设备直连会被拒）；粤语只能识别，说的效果未经官方列出。",
+  "regions": [ "global" ],
+  "credentials": [ { "key": "api_key", "secret": true, "label": "OpenAI API Key" } ],
+  "capabilities": { "asr_stream": false, "tts_bidi": false, "s2s": false, "image": true },
+  "asr": {
+    "api": "openai_transcriptions",
+    "url": { "global": "https://api.openai.com/v1/audio/transcriptions" },
+    "model": "gpt-transcribe",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "chat": {
+    "api": "openai_chat",
+    "url": { "global": "https://api.openai.com/v1/chat/completions" },
+    "model": "gpt-6-luna",
+    "max_tokens_field": "max_completion_tokens",
+    "temperature": false,
+    "extra_body": {
+      "low": { "reasoning_effort": "none", "verbosity": "low" },
+      "medium": { "reasoning_effort": "low" },
+      "high": { "reasoning_effort": "medium" }
+    },
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "tts": {
+    "api": "openai_speech",
+    "url": { "global": "https://api.openai.com/v1/audio/speech" },
+    "model": "gpt-4o-mini-tts",
+    "sample_rate": 24000,
+    "per_language": {
+      "instructions": {
+        "en": "You are Gugu, a small friendly pigeon talking to a four-year-old: warm, playful, clear and a little slow.",
+        "zh": "用标准普通话说，像一只可爱的小鸽子在跟四岁的小朋友说话：温暖、活泼、清楚、稍慢。",
+        "yue": "用地道香港粵語讀出，唔好讀成普通話：好似一隻可愛嘅白鴿仔同四歲小朋友講嘢咁，溫暖、活潑、清楚、慢少少。"
+      }
+    },
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "image": {
+    "api": "openai_images",
+    "url": { "global": "https://api.openai.com/v1/images/generations" },
+    "model": "gpt-image-2",
+    "credential_map": { "apiKey": "api_key" }
+  },
+  "default_voice": { "*": "marin" },
+  "voices": {
+    "*": [
+      { "id": "marin", "name": "Marin" }, { "id": "cedar", "name": "Cedar" }, { "id": "coral", "name": "Coral" },
+      { "id": "sage", "name": "Sage" }, { "id": "shimmer", "name": "Shimmer" }, { "id": "nova", "name": "Nova" },
+      { "id": "ballad", "name": "Ballad" }, { "id": "fable", "name": "Fable" }
+    ]
+  },
+  "prices_cny": {
+    "asr_per_hour": 1.92,
+    "tts_per_10k_chars": 3.0,
+    "chat_in_per_m": 0.71,
+    "chat_out_per_m": 3.55,
+    "chat_cache_read_per_m": 0.071,
+    "image_per_picture": 0.043
+  }
+}

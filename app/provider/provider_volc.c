@@ -209,7 +209,7 @@ static esp_err_t v_chat_send(chat_session_t *s, const chat_request_t *req)
     const provider_preset_t *p = preset();
     strbuf_t body; strbuf_init(&body);
     int eff = req->effort < 3 ? req->effort : 0;
-    wire_openai_build(&body, p->chat_model, req, p->chat_extra[eff][0] ? p->chat_extra[eff] : NULL);
+    wire_openai_build(&body, p->chat_model, req, p->chat_extra[eff][0] ? p->chat_extra[eff] : NULL, p->chat_max_field, p->chat_temperature);
     wire_openai_init(&s->wire, &s->ev, s->user); sse_init(&s->sse, c_sse, s); atomic_store(&s->cancelled, false);
     char bearer[300]; snprintf(bearer, sizeof bearer, "Bearer %s", ark_key() ? ark_key() : "");
     net_header_t h[2] = { { "Authorization", bearer }, { "Content-Type", "application/json" } };
