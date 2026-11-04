@@ -393,20 +393,46 @@ def hand_pose(emotion):
             if emotion == k + tag or emotion in (k + tag + '_a', k + tag + '_b'): return k, side
     return None, 0
 
-def wing_arm(c, sx, sy, hx, hy, P):
-    """A wing used as an arm: a feathered limb from the shoulder (sx, sy) to the hand (hx, hy), outlined, with a rounded
-    mitten of a tip and two feather fingers pointing on."""
-    steps = max(1, int(max(abs(hx - sx), abs(hy - sy)) * 2))
+def wing_arm(c, sx, sy, hx, hy, P, elbow=None):
+    """A wing used as an arm: a feathered limb from the shoulder (sx, sy), through the elbow if given, to the hand (hx, hy),
+    outlined, with a rounded mitten of a tip and two feather fingers pointing on."""
+    pts = [(sx, sy)] + ([elbow] if elbow else []) + [(hx, hy)]
     for col, grow in ((P['line'], 1.0), (P['shade'], 0.0)):
-        for i in range(steps + 1):
-            t = i / steps
-            r = 3.0 - 0.6 * t + grow
-            c.ellipse(sx + (hx - sx) * t, sy + (hy - sy) * t, r, r, col)
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            steps = max(1, int(max(abs(bx - ax), abs(by - ay)) * 2))
+            for i in range(steps + 1):
+                t = i / steps
+                r = 3.0 - 0.6 * t + grow if not elbow else 2.8 + grow
+                c.ellipse(ax + (bx - ax) * t, ay + (by - ay) * t, r, r, col)
         c.ellipse(hx, hy, 2.6 + grow, 2.6 + grow, col)
+    sx, sy = pts[-2]
     dx, dy = hx - sx, hy - sy
     n = max(1e-6, (dx * dx + dy * dy) ** 0.5); ux, uy = dx / n, dy / n
     for k in (-1, 1):
         c.put(int(round(hx + ux * 2.2 - uy * 1.3 * k)), int(round(hy + uy * 2.2 + ux * 1.3 * k)), P['hi'])
+
+def gesture_arms(emotion, cx, cy, rx, ry, ey):
+    """The hands of the expressions (2026-11-04, the owner: "所有表情都可以选择手部动作"): for each face, the wings that
+    are arms, as (side, [shoulder, (elbow,) hand]). A face not listed keeps both wings at rest."""
+    both = lambda f: [(s, f(s)) for s in (-1, 1)]
+    G = {
+        'happy':     both(lambda s: [(cx + s * (rx - 3), cy - 2), (cx + s * (rx + 3), cy - ry + 3)]),                   # hands up: yay!
+        'laughing':  both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * 6, cy + ry - 6)]),                          # holding the belly
+        'surprised': both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 1), ey + 4)]),                            # hands up by the cheeks
+        'curious':   [(1, [(cx + rx - 3, cy - 1), (cx + 5, ey + 8)])],                                                  # a hand to the chin: hmm?
+        'shy':       [(1, [(cx + rx - 3, cy - 1), (cx - 1, ey + 6)])],                                                  # a wing over the beak
+        'sad':       [(1, [(cx + rx - 3, cy), (cx + 7, ey + 7)])],                                                      # wiping a tear
+        'sleepy':    [(1, [(cx + rx - 3, cy), (cx + rx - 1, ey + 1)])],                                                 # rubbing an eye
+        'angry':     [(-1, [(cx - rx + 3, cy - 1), (cx + 6, cy + 4)]), (1, [(cx + rx - 3, cy - 1), (cx - 6, cy + 2)])], # arms crossed: hmph
+        'scared':    both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * 4, ey + 8)]),                                   # hands to the mouth: eek
+        'proud':     both(lambda s: [(cx + s * (rx - 3), cy - 3), (cx + s * (rx + 4), cy + 2), (cx + s * (rx - 2), cy + 7)]),   # hands on hips
+        'dizzy':     [(-1, [(cx - rx + 3, cy - 1), (cx - 8, ey - 4)])],                                                 # a hand to the head
+        'wave':      [(1, [(cx + rx - 3, cy - 2), (cx + rx + 3, cy - ry)])],                                            # waving hello
+        'urge':      both(lambda s: [(cx + s * (rx - 3), cy - 2), (cx + s * 1, cy + 2)]),                               # hands wrung at the chest
+        'urge_you':  both(lambda s: [(cx + s * (rx - 3), cy - 2), (cx + s * 1, cy + 2)]),
+        'eyeroll':   both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 3), cy + 3), (cx + s * (rx + 5), cy - 2)]),   # a shrug: whatever
+    }
+    return G.get(emotion, [])
 
 def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, beak_open=False, eyes_closed=False):
     """Front-facing round pigeon. Emotions change eyes/beak/wings/body only.
@@ -447,6 +473,7 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         dy = wing_dy if side == 1 or emotion != 'wave' else 0
         if emotion in ('preen_a', 'preen_b'): dy = (-5 if emotion == 'preen_b' else -8) if side == 1 else 0   # the right wing lifted to be groomed
         if hk and side == hs and hk != 'hide': continue      # this wing is an arm, drawn in front after the body
+        if any(sd == side for sd, _ in gesture_arms(emotion, cx, cy, rx, ry, int(cy - 11))): continue   # an expression's hand
         if hk == 'hide': dy = -6 if side == hs else 0          # the arm behind the back, up a little
         if emotion == 'puff':
             continue
@@ -485,13 +512,13 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
     if 'vest' in parts:
         draw_vest(c, cx, cy, rx, ry, vest_color)
 
-    hand = None
+    hand, arms = None, []                                      # drawn after the cheeks (a blush must not land on an arm), before the eyes
     if hk and hk != 'hide':
         if hk == 'reach':           S, H = (cx + hs * (rx - 4), cy - 4), (cx + hs * (rx + 2), cy + ry - 3)
         elif hk in ('hold', 'sneak'): S, H = (cx + hs * (rx - 3), cy - 3), (cx + hs * 2, cy + 4)
         elif hk == 'lift':          S, H = (cx + hs * (rx - 3), cy + 1), (cx + hs * (rx + 1), cy - 12)
         else:                       S, H = (cx + hs * (rx - 3), cy - 1), (cx, cy + 1)        # bite: up to the open beak (its top row still shows)
-        wing_arm(c, S[0], S[1], H[0], H[1], P)
+        arms.append([S, H])
         hand = (int(round(H[0])), int(round(H[1])))
 
     # satchel strap + bag (left hip)
@@ -572,6 +599,9 @@ def gugu(emotion='neutral', scarf=True, bag=False, w=48, h=54, accessory=None, b
         body_paint(lo - 3, ey + 5, 3, 3, P['red2']); body_paint(ro + 1, ey + 5, 3, 3, P['red2'])
     elif emotion in ('neutral', 'curious', 'puff', 'peek', 'look_l', 'look_r', 'read_l', 'read_r', 'walk_l_a', 'walk_l_b', 'walk_r_a', 'walk_r_b') or hk in ('reach', 'hold', 'lift'):
         body_paint(lo - 2, ey + 5, 2, 1, P['cheek']); body_paint(ro + 1, ey + 5, 2, 1, P['cheek'])
+
+    for pts in arms + [pts for _, pts in gesture_arms(emotion, cx, cy, rx, ry, ey)]:
+        wing_arm(c, pts[0][0], pts[0][1], pts[-1][0], pts[-1][1], P, elbow=pts[1] if len(pts) == 3 else None)
 
     if eyes_closed:
         eye_shut(exl, ey); eye_shut(exr, ey)
