@@ -90,12 +90,14 @@ bool task_spawn(const char *name, task_fn_t fn, void *arg, uint32_t stack_bytes,
 mutex_t mutex_create(void) { return (mutex_t)xSemaphoreCreateRecursiveMutex(); }
 void mutex_lock(mutex_t m) { xSemaphoreTakeRecursive((SemaphoreHandle_t)m, portMAX_DELAY); }
 void mutex_unlock(mutex_t m) { xSemaphoreGiveRecursive((SemaphoreHandle_t)m); }
+void mutex_free(mutex_t m) { if (m) vSemaphoreDelete((SemaphoreHandle_t)m); }
 
 queue_t queue_create(size_t item_size, size_t depth) { return (queue_t)xQueueCreate(depth, item_size); }
 bool queue_send(queue_t q, const void *item, uint32_t timeout_ms) { return xQueueSend((QueueHandle_t)q, item, to_ticks(timeout_ms)) == pdTRUE; }
 bool queue_recv(queue_t q, void *item, uint32_t timeout_ms) { return xQueueReceive((QueueHandle_t)q, item, to_ticks(timeout_ms)) == pdTRUE; }
 size_t queue_count(queue_t q) { return uxQueueMessagesWaiting((QueueHandle_t)q); }
 void queue_reset(queue_t q) { xQueueReset((QueueHandle_t)q); }
+void queue_free(queue_t q) { if (q) vQueueDelete((QueueHandle_t)q); }
 
 signal_t signal_create(void) { return (signal_t)xSemaphoreCreateBinary(); }
 void signal_set(signal_t s) { xSemaphoreGive((SemaphoreHandle_t)s); }
@@ -106,3 +108,4 @@ void IRAM_ATTR signal_set_from_isr(signal_t s)
     if (woken) portYIELD_FROM_ISR();
 }
 bool signal_wait(signal_t s, uint32_t timeout_ms) { return xSemaphoreTake((SemaphoreHandle_t)s, to_ticks(timeout_ms)) == pdTRUE; }
+void signal_free(signal_t s) { if (s) vSemaphoreDelete((SemaphoreHandle_t)s); }

@@ -48,6 +48,7 @@ mutex_t mutex_create(void)
 }
 void mutex_lock(mutex_t m) { pthread_mutex_lock(&m->m); }
 void mutex_unlock(mutex_t m) { pthread_mutex_unlock(&m->m); }
+void mutex_free(mutex_t m) { if (!m) return; pthread_mutex_destroy(&m->m); free(m); }
 
 static void deadline(struct timespec *ts, uint32_t ms)
 {
@@ -93,8 +94,10 @@ bool queue_recv(queue_t q, void *item, uint32_t timeout_ms)
 }
 size_t queue_count(queue_t q) { pthread_mutex_lock(&q->m); size_t n = q->count; pthread_mutex_unlock(&q->m); return n; }
 void queue_reset(queue_t q) { pthread_mutex_lock(&q->m); q->count = 0; q->head = 0; pthread_cond_broadcast(&q->not_full); pthread_mutex_unlock(&q->m); }
+void queue_free(queue_t q) { if (!q) return; pthread_cond_destroy(&q->not_empty); pthread_cond_destroy(&q->not_full); pthread_mutex_destroy(&q->m); free(q->buf); free(q); }
 
 struct gugu_signal { pthread_mutex_t m; pthread_cond_t c; bool set; };
+void signal_free(signal_t s) { if (!s) return; pthread_cond_destroy(&s->c); pthread_mutex_destroy(&s->m); free(s); }
 signal_t signal_create(void) { struct gugu_signal *s = calloc(1, sizeof *s); pthread_mutex_init(&s->m, NULL); pthread_cond_init(&s->c, NULL); return s; }
 void signal_set(signal_t s) { pthread_mutex_lock(&s->m); s->set = true; pthread_cond_signal(&s->c); pthread_mutex_unlock(&s->m); }
 void signal_set_from_isr(signal_t s) { signal_set(s); }

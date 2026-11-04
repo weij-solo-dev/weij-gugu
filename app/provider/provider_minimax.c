@@ -310,7 +310,7 @@ static esp_err_t mm_tts_open(const tts_params_t *p, const tts_events_t *ev, void
     net_ws_events_t we = { .on_text = tts_on_text, .on_error = tts_on_error, .on_closed = tts_on_closed };
     int64_t t0 = clock_us();
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
-    if (err != ESP_OK) { mem_release(s); return err; }
+    if (err != ESP_OK) { signal_free(s->started); signal_free(s->flushed); mem_release(s); return err; }
     int li = p->lang == LANG_EN ? 0 : p->lang == LANG_ZH ? 1 : p->lang == LANG_YUE ? 2 : 1;
     const char *voice = provider_voice(pr, p->lang, p->voice_id);
     const char *boost = p->lang == LANG_UNKNOWN ? "auto" : (pr->lang_boost[li][0] ? pr->lang_boost[li] : "auto");
@@ -323,7 +323,7 @@ static esp_err_t mm_tts_open(const tts_params_t *p, const tts_events_t *ev, void
     net_ws_send_text(s->ws, start, strlen(start));
     if (!signal_wait(s->started, 8000) || atomic_load(&s->failed)) {
         LOGE("tts task_start not acknowledged");
-        net_ws_close(s->ws); mem_release(s);
+        net_ws_close(s->ws); signal_free(s->started); signal_free(s->flushed); mem_release(s);
         return ESP_ERR_TIMEOUT;
     }
     LOGI("tts session ready (%s, %s) in %lld ms", voice, boost, (long long)((clock_us() - t0) / 1000));
@@ -362,7 +362,8 @@ static void mm_tts_close(tts_session_t *s)
     if (!s) return;
     static const char F[] = "{\"event\":\"task_finish\"}";
     if (net_ws_is_connected(s->ws)) { net_ws_send_text(s->ws, F, sizeof F - 1); clock_sleep_ms(50); }
-    net_ws_close(s->ws);
+    net_ws_close(s->ws);                                   // no callback after this: the signals can go
+    signal_free(s->started); signal_free(s->flushed);
     mem_release(s);
 }
 

@@ -142,7 +142,7 @@ static esp_err_t q_tts_open(const tts_params_t *p, const tts_events_t *ev, void 
     net_ws_params_t wp = { .url = pr->tts_url, .headers = h, .header_count = 1, .connect_timeout_ms = 6000, .max_message = 256 * 1024 };
     net_ws_events_t we = { .on_text = tts_text_ev, .on_binary = tts_bin_ev, .on_error = tts_err_ev, .on_closed = tts_closed_ev };
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
-    if (err != ESP_OK) { free(s); return err; }
+    if (err != ESP_OK) { signal_free(s->started); signal_free(s->finished); free(s); return err; }
     LOGI("cosyvoice session connected");
     *out = s;
     return ESP_OK;
@@ -184,7 +184,7 @@ static esp_err_t q_tts_flush(tts_session_t *s)
 }
 
 static esp_err_t q_tts_cancel(tts_session_t *s) { strbuf_clear(&s->pending); return ESP_OK; }   // DashScope has no cancel; the next task simply follows
-static void q_tts_close(tts_session_t *s) { if (!s) return; net_ws_close(s->ws); strbuf_free(&s->pending); free(s); }
+static void q_tts_close(tts_session_t *s) { if (!s) return; net_ws_close(s->ws); signal_free(s->started); signal_free(s->finished); strbuf_free(&s->pending); free(s); }
 
 const provider_vtable_t provider_qwen = {
     .id = VENDOR,

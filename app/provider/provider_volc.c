@@ -139,7 +139,7 @@ static esp_err_t v_asr_open(const asr_params_t *p, const asr_events_t *ev, void 
     net_ws_params_t wp = { .url = pr->asr_url, .headers = h, .header_count = 5, .connect_timeout_ms = 6000, .max_message = 64 * 1024 };
     net_ws_events_t we = { .on_binary = asr_on_bin, .on_error = asr_on_err, .on_closed = asr_on_closed };
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
-    if (err != ESP_OK) { mem_release(s); return err; }
+    if (err != ESP_OK) { signal_free(s->final_sig); strbuf_free(&s->frame); mem_release(s); return err; }
     // first frame: the full client request
     char body[400];
     const char *lang = p->lang_hint == LANG_ZH ? "zh-CN" : p->lang_hint == LANG_EN ? "en-US" : p->lang_hint == LANG_YUE ? "yue-CN" : "";
@@ -191,7 +191,7 @@ static esp_err_t v_asr_finish(asr_session_t *s)
     return ESP_OK;
 }
 
-static void v_asr_close(asr_session_t *s) { if (!s) return; net_ws_close(s->ws); strbuf_free(&s->frame); mem_release(s); }
+static void v_asr_close(asr_session_t *s) { if (!s) return; net_ws_close(s->ws); signal_free(s->final_sig); strbuf_free(&s->frame); mem_release(s); }
 
 // ------------------------------------------------------------------ CHAT ----
 struct chat_session { chat_events_t ev; void *user; net_http_t *http; wire_openai_t wire; sse_parser_t sse; atomic_bool cancelled; };
@@ -275,6 +275,8 @@ static void tts_on_bin(const uint8_t *d, size_t n, void *user)
 static void tts_on_err(const char *what, void *user) { struct tts_session *s = user; if (atomic_exchange(&s->failed, true)) return; provider_error_t e; provider_error_set(&e, PERR_NETWORK, 0, 0, what); s->ev.on_error(&e, s->user); signal_set(s->conn_started); signal_set(s->sess_started); }
 static void tts_on_closed(int code, const char *r, void *user) { (void)code; (void)r; struct tts_session *s = user; signal_set(s->conn_started); signal_set(s->sess_started); }
 
+static void tts_free(struct tts_session *s) { signal_free(s->conn_started); signal_free(s->sess_started); strbuf_free(&s->frame); free(s); }
+
 static esp_err_t v_tts_open(const tts_params_t *p, const tts_events_t *ev, void *user, tts_session_t **out)
 {
     const provider_preset_t *pr = preset();
@@ -286,10 +288,10 @@ static esp_err_t v_tts_open(const tts_params_t *p, const tts_events_t *ev, void 
     net_ws_params_t wp = { .url = pr->tts_url, .headers = h, .header_count = 3, .connect_timeout_ms = 6000, .max_message = 256 * 1024 };
     net_ws_events_t we = { .on_binary = tts_on_bin, .on_error = tts_on_err, .on_closed = tts_on_closed };
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
-    if (err != ESP_OK) { free(s); return err; }
+    if (err != ESP_OK) { tts_free(s); return err; }
     volc_frame_build(&s->frame, MT_FULL_CLIENT, FL_EVENT, SER_JSON, 1, NULL, 0, "{}", 2);                 // StartConnection
     net_ws_send_binary(s->ws, (const uint8_t *)s->frame.s, s->frame.len);
-    if (!signal_wait(s->conn_started, 6000) || atomic_load(&s->failed)) { net_ws_close(s->ws); free(s); return ESP_ERR_TIMEOUT; }
+    if (!signal_wait(s->conn_started, 6000) || atomic_load(&s->failed)) { net_ws_close(s->ws); tts_free(s); return ESP_ERR_TIMEOUT; }
     const char *voice = provider_voice(pr, p->lang, p->voice_id);
     char body[512];
     snprintf(body, sizeof body, "{\"user\":{\"uid\":\"gugu\"},\"event\":100,\"namespace\":\"BidirectionalTTS\",\"req_params\":{\"speaker\":\"%s\","
@@ -297,7 +299,7 @@ static esp_err_t v_tts_open(const tts_params_t *p, const tts_events_t *ev, void 
              voice, (unsigned)(p->sample_rate ? p->sample_rate : 16000u));
     volc_frame_build(&s->frame, MT_FULL_CLIENT, FL_EVENT, SER_JSON, 100, s->session_id, 0, body, strlen(body));   // StartSession
     net_ws_send_binary(s->ws, (const uint8_t *)s->frame.s, s->frame.len);
-    if (!signal_wait(s->sess_started, 6000) || atomic_load(&s->failed)) { net_ws_close(s->ws); free(s); return ESP_ERR_TIMEOUT; }
+    if (!signal_wait(s->sess_started, 6000) || atomic_load(&s->failed)) { net_ws_close(s->ws); tts_free(s); return ESP_ERR_TIMEOUT; }
     LOGI("volc tts session ready (%s)", voice);
     *out = s;
     return ESP_OK;
@@ -326,7 +328,7 @@ static void v_tts_close(tts_session_t *s)
         volc_frame_build(&s->frame, MT_FULL_CLIENT, FL_EVENT, SER_JSON, 2, NULL, 0, "{}", 2); net_ws_send_binary(s->ws, (const uint8_t *)s->frame.s, s->frame.len);               // FinishConnection
         clock_sleep_ms(50);
     }
-    net_ws_close(s->ws); strbuf_free(&s->frame); free(s);
+    net_ws_close(s->ws); tts_free(s);
 }
 
 const provider_vtable_t provider_volc = {

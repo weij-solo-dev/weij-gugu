@@ -18,6 +18,7 @@ typedef struct gugu_mutex *mutex_t;
 mutex_t mutex_create(void);                 // recursive
 void    mutex_lock(mutex_t m);
 void    mutex_unlock(mutex_t m);
+void    mutex_free(mutex_t m);           // NULL is fine; nobody may hold or wait on it any more
 
 typedef struct gugu_queue *queue_t;
 queue_t queue_create(size_t item_size, size_t depth);
@@ -25,11 +26,15 @@ bool    queue_send(queue_t q, const void *item, uint32_t timeout_ms);
 bool    queue_recv(queue_t q, void *item, uint32_t timeout_ms);
 size_t  queue_count(queue_t q);
 void    queue_reset(queue_t q);
+void    queue_free(queue_t q);
 
 typedef struct gugu_signal *signal_t;       // binary: set() wakes one waiter, state is latched until taken
 signal_t signal_create(void);
 void     signal_set(signal_t s);
 void     signal_set_from_isr(signal_t s);   // the one primitive an interrupt may call (device: IRAM-safe)
 bool     signal_wait(signal_t s, uint32_t timeout_ms);
+// Every per-session primitive must be freed with its session: on the device each is ~88 B of internal RAM, and the
+// voice sessions that forgot leaked 176 B per call, check and bubble line (2026-11-04).
+void     signal_free(signal_t s);
 
 #define TASK_WAIT_FOREVER 0xFFFFFFFFu

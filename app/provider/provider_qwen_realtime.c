@@ -91,7 +91,7 @@ static esp_err_t rt_asr_open(const asr_params_t *p, const asr_events_t *ev, void
     net_ws_params_t wp = { .url = pr->asr_url, .headers = h, .header_count = 2, .connect_timeout_ms = 6000, .max_message = 64 * 1024 };
     net_ws_events_t we = { .on_text = rt_text, .on_error = rt_err, .on_closed = rt_closed };
     esp_err_t err = net_ws_open(&wp, &we, s, &s->ws);
-    if (err != ESP_OK) { mem_release(s); return err; }
+    if (err != ESP_OK) { signal_free(s->final_sig); mem_release(s); return err; }
     char upd[320];
     const char *lang = p->lang_hint == LANG_UNKNOWN ? "" : lang_code(p->lang_hint);
     snprintf(upd, sizeof upd, "{\"type\":\"session.update\",\"session\":{\"modalities\":[\"text\"],\"input_audio_format\":\"pcm\",\"sample_rate\":%u,\"turn_detection\":null%s%s%s}}",
@@ -143,6 +143,7 @@ static void rt_asr_close(asr_session_t *s)
     static const char F[] = "{\"type\":\"session.finish\"}";
     if (net_ws_is_connected(s->ws)) { net_ws_send_text(s->ws, F, sizeof F - 1); clock_sleep_ms(50); }
     net_ws_close(s->ws);
+    signal_free(s->final_sig);
     mem_release(s);
 }
 
