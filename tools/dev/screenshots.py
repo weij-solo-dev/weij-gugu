@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The v1.1 screenshot set from the host simulator: every scene at the four times of day, the home's lamp and
-window, an away scene with generated props, the yellow-key play and the shake. Pure Python; needs a built
+window, an away scene with generated props, the yellow key's feeding and the shake. Pure Python; needs a built
 simulator (host/build/gugu_host). Writes BMPs plus an index.html into --out and stages a trip card and art
 under host/data for the away shots (removed afterwards).
 
@@ -68,10 +68,10 @@ def main():
     names.append(shot(a.out, 'home_lamp_off', 2200, {'GUGU_TOD': '0', 'GUGU_TAP': '368,72,900'}))
     names.append(shot(a.out, 'home_window_touch', 2200, {'GUGU_TOD': '3', 'GUGU_TAP': '130,130,900'}))
     print('play:')
-    names.append(shot(a.out, 'yellow_once', 1100, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))
-    names.append(shot(a.out, 'yellow_loop', 1800, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@600;Y@900;Y@1200'}))
-    names.append(shot(a.out, 'yellow_dizzy', 1700, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@500;Y@700;Y@900;Y@1100;Y@1300'}))
-    names.append(shot(a.out, 'yellow_cross', 3600, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@500;Y@700;Y@900;Y@1100;Y@1300'}))
+    names.append(shot(a.out, 'feed_falling', 1000, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))      # the item falls (lands at 450 ms)
+    names.append(shot(a.out, 'feed_peck', 1450, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))         # pecked at 650 ms, gone at 900
+    names.append(shot(a.out, 'feed_reaction', 2100, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))     # Gugu's reaction to it
+    names.append(shot(a.out, 'feed_night', 2100, {'GUGU_TOD': '0', 'GUGU_TAP': 'Y@700'}))        # at night too
     names.append(shot(a.out, 'shake_ball', 1500, {'GUGU_TOD': '2', 'GUGU_TAP': 'S@600;S@900;S@1200'}))
     names.append(shot(a.out, 'shake_dizzy', 3000, {'GUGU_TOD': '2', 'GUGU_TAP': 'S@600;S@900;S@1200'}))
     names.append(shot(a.out, 'pickup', 1100, {'GUGU_TOD': '2', 'GUGU_TAP': 'P@700'}))

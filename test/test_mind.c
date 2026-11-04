@@ -106,9 +106,13 @@ TEST(test_mind_lines_and_language)
     mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .child_age_months = 42, .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
     CHECK(mind_init(&cfg) == ESP_OK);
     char s[400];
+    // the self-introduction teaches the keys as they work: hold blue to talk, press yellow to feed (it once promised a whistle)
     CHECK(mind_line_hello(LANG_ZH, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我是咕咕") != NULL);
+    CHECK(strstr(s, "按住蓝色的按键") != NULL); CHECK(strstr(s, "黄色的按键，就能喂我") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我係咕咕") != NULL);
+    CHECK(strstr(s, "撳住藍色個掣") != NULL); CHECK(strstr(s, "黃色個掣，就可以餵我") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "Hi, 小满! I'm Gugu") != NULL);
+    CHECK(strstr(s, "hold the blue button") != NULL); CHECK(strstr(s, "yellow button to feed me") != NULL); CHECK(strstr(s, "whistle") == NULL);
     char a[200], b[200];
     CHECK(mind_line_question(LANG_EN, 0, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_EN, 1, b, sizeof b) == ESP_OK); CHECK(strcmp(a, b) != 0);
     CHECK(mind_line_question(LANG_YUE, 15, a, sizeof a) == ESP_OK); CHECK(mind_line_question(LANG_YUE, 0, b, sizeof b) == ESP_OK); CHECK_EQ_STR(a, b);   // 15 questions: wraps

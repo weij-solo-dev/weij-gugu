@@ -221,20 +221,6 @@ const char *ui_scene_object_id(int index)
     return index >= 0 && index < s_n ? s_obj[index].def.id : "";
 }
 
-int ui_scene_next_visible(int after)
-{
-    int found = -1;
-    ui_lock();
-    if (!ui_scene_is_home && s_n > 0) {
-        for (int k = 1; k <= s_n; k++) {
-            int i = (((after < 0 ? -1 : after) + k) % s_n + s_n) % s_n;
-            if (!lv_obj_has_flag(s_obj[i].img, LV_OBJ_FLAG_HIDDEN)) { found = i; break; }
-        }
-    }
-    ui_unlock();
-    return found;
-}
-
 bool ui_scene_hit_gugu(int sx, int sy)
 {
     return inside(sx, sy, GUGU_BASE_X, GUGU_BASE_Y, GUGU_BASE_X + 48 * UI_SPRITE_SCALE, GUGU_BASE_Y + 54 * UI_SPRITE_SCALE);

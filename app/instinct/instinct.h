@@ -11,13 +11,13 @@ void instinct_set_busy(bool in_turn);       // a turn is on (the line opening, l
 void instinct_set_line_open(bool open);     // the conversation window, the 12 s after an answer included: no bubbles meanwhile
 void instinct_touched(int x, int y);        // app forwards touch events
 void instinct_set_tod_override(int tod);    // -1 follows the clock; else a world_tod_t, for screenshots and tests
-// The yellow key, in order: a bubble is up → the same as tapping it; the trip's scene has props → the next one reacts
-// (each press the next); otherwise it feeds Gugu: something falls (corn, a nut, a burger … a coin, a sock), Gugu pecks it
-// up and reacts (happy, laughing, an eye-roll, cross …); five in a minute and it is full. At night it only stirs.
+// The yellow key feeds Gugu, whatever is on screen: something falls (corn, a nut, a burger … a coin, a sock), Gugu pecks
+// it up and reacts (happy, laughing, an eye-roll, cross …); five in a minute and it is full; at night too, then it dozes
+// off again. Presses queue (three at most). A bubble and the scene's objects answer touches, never this key.
 void instinct_yellow_tap(void);
 void instinct_shaken(int intensity);        // IMU: rolls into a ball and bounces off the rim; when it stops, dizzy, then cross, then fine
 void instinct_picked_up(void);              // IMU: looks up at you
-void instinct_refuse(const char *why);      // the blue key when a call cannot start (offline, no key): a buzz, a head shake, a sad face
+void instinct_refuse(const char *why);      // a call that cannot start or a turn that failed: a buzz, a head shake, then the bubble says why (a sad face only if nothing known is wrong)
 // Can Gugu make a call right now? The app answers (only it sees the network and the keys); NULL = always yes.
 // While the answer stays no for PUZZLED_AFTER, a thought bubble with a settings gear sits at Gugu's upper right and
 // Gugu, worried, looks at you and then hard at the bubble, again and again (two quick stamps each time its eyes go

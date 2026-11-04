@@ -59,7 +59,6 @@ void ui_scene_set_tod(art_tod_t tod);           // living things leave at night,
 int  ui_scene_hit(int sx, int sy);              // screen px → an object index (home fittings are 100+), or -1
 const char *ui_scene_object_id(int index);
 ui_behave_t ui_scene_poke(int index);           // plays the object's behaviour and returns it, so the caller can pick a sound
-int  ui_scene_next_visible(int after);          // the next trip object after `after` (-1: the first) that is on screen, wrapping; -1 if none (home: none)
 bool ui_scene_hit_gugu(int sx, int sy);
 void ui_home_lamp(bool on);                     // the room's lamp (a touch on it toggles)
 bool ui_home_lamp_is_on(void);

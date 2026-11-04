@@ -16,7 +16,7 @@ warm, slightly husky voice.
 > few days (a real place, a reason that follows from the last trip, the day plan, child-sized facts, a friend, a
 > souvenir, postcards) and a **journey log** Gugu remembers and can be asked about; pictures generated per trip and
 > turned into pixel art on the device (a backdrop with four times of day, keyed props, the friend); a touchable
-> object layer (lamp, window, props); the yellow key's whistle play; the walkie-talkie sounds; 19 expressions; the
+> object layer (lamp, window, props); the yellow key feeds Gugu (something falls, it pecks it up and reacts); the walkie-talkie sounds; 19 expressions; the
 > IMU (shake → a bouncing ball, then dizzy, then cross; pick-up → a look). The planning document and the full
 > decision log live in [`PLAN.md`](PLAN.md) (Chinese).
 

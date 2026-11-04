@@ -75,7 +75,6 @@ static int64_t s_feed_t0, s_feed_done_at;
 static uint8_t s_feed_step; static bool s_feed_full;
 static int s_feed_queue;                // presses waiting for the current item (at most 3)
 static int64_t s_eaten[FEED_FULL_N]; static int s_eaten_i;
-static int s_prop_last = -1;            // the yellow key pokes the trip's props in turn
 // One random stream for the feeding, whatever task presses: newlib keeps rand() per FreeRTOS task, so a seed in the
 // key's task left the instinct task (queued drops) replaying the same feast after every boot.
 static uint32_t s_rng = 2463534242u;
@@ -231,7 +230,7 @@ static void readiness_tick(void)
     if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
 }
 
-// Feeding, the yellow key's third use: an item falls beside Gugu's feet, Gugu pecks it up and reacts (its own two
+// Feeding, the yellow key's one job: an item falls beside Gugu's feet, Gugu pecks it up and reacts (its own two
 // reactions per item), full after five in a minute. Day and night alike: at night it eats and dozes off again.
 static void feed_abort(void)
 {
@@ -287,7 +286,7 @@ static void feed_tick(int64_t now)   // every 40 ms while something is falling, 
     }
 }
 
-// An object of the scene reacts (a touch on it, or the yellow key): its behaviour, a buzz, a sound, a look from Gugu.
+// An object of the scene is touched: its behaviour, a buzz, a sound, a look from Gugu.
 static void poke_object(int hit)
 {
     const char *id = ui_scene_object_id(hit);
@@ -302,15 +301,15 @@ static void poke_object(int hit)
     LOGI("poked %s → %s", id, sfx);
 }
 
-// A bubble is up: the problem one opens pairing mode, a friendly one plays its line. False when no bubble is shown.
-static bool bubble_press(int64_t now)
+// The bubble is touched: the problem one opens pairing mode, a friendly one plays its line. False when none is shown.
+static bool bubble_tap(int64_t now)
 {
     ui_bubble_t b = ui_bubble_shown();
     if (b == UI_BUBBLE_NONE) return false;
     s_last_touch = now;
     if (b == UI_BUBBLE_SETUP || b == UI_BUBBLE_WIFI || b == UI_BUBBLE_SERVICE) {
         board_vibrate(30); audio_sfx_play("pop");
-        LOGI("bubble pressed (%s)", reason_name(s_reason));
+        LOGI("bubble tapped (%s)", reason_name(s_reason));
         if (s_bubble_cb) s_bubble_cb(s_bubble_user);
         return true;
     }
@@ -326,7 +325,7 @@ static bool bubble_press(int64_t now)
         s_speaking = true; s_speaking_question = q;
         s_mood_until = 0; ui_set_emotion(UI_EMO_HAPPY);
     }
-    LOGI("bubble pressed: %s", text);
+    LOGI("bubble tapped: %s", text);
     if (s_offer_cbs.heard) s_offer_cbs.heard(kind, text, q, s_offer_cbs.user);
     return true;
 }
@@ -338,12 +337,9 @@ void instinct_yellow_tap(void)
     s_last_interaction = now;
     static bool seeded;
     if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
-    if (bubble_press(now)) return;                            // 1. a bubble: the same as tapping it
-    int i = ui_scene_next_visible(s_prop_last);               // 2. the trip's props, each press the next
-    if (i >= 0) { s_prop_last = i; poke_object(i); return; }
-    if (s_shake_last) return;                                 // a ball does not eat (at night it eats too, then dozes off again)
-    if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // 3. the feed key: one more is coming
-    feed_start(now);
+    if (s_shake_last) return;                                 // a ball does not eat
+    if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // one more is coming
+    feed_start(now);                                          // a bubble or the trip's props on screen change nothing: they answer touches
 }
 
 void instinct_shaken(int intensity)
@@ -547,7 +543,7 @@ void instinct_touched(int x, int y)
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
     s_last_interaction = now;
-    if (ui_bubble_hit(x, y) && bubble_press(now)) return;    // the bubble: pairing mode, or Gugu says its line
+    if (ui_bubble_hit(x, y) && bubble_tap(now)) return;      // the bubble: pairing mode, or Gugu says its line
     int hit = ui_scene_hit(x, y);
     if (hit >= 0) { s_last_touch = now; poke_object(hit); return; }
     if (!ui_scene_hit_gugu(x, y)) return;
