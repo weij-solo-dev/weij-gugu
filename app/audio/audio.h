@@ -31,6 +31,8 @@ bool      audio_play_idle(void);                                   // nothing qu
 uint8_t   audio_play_level(void);                                  // 0–255 RMS of the last frame pulled by the output
 typedef void (*audio_marker_cb)(int id, void *user);
 void      audio_set_marker_cb(audio_marker_cb cb, void *user);     // from the audio task
+// The volume, 0–100: 100 is the loudest, every 10 below it 3 dB quieter (10 is 27 dB down), 0 silence; heard at once.
+#define AUDIO_VOLUME_DEFAULT 90
 void      audio_set_volume(uint8_t percent);
 
 // ---- self-test: is the microphone delivering, and does it hear the speaker? (pairing page, console) ----

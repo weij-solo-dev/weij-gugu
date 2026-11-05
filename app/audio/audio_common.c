@@ -12,6 +12,7 @@
 #include "foundation/clock.h"
 #include "foundation/task.h"
 #include <string.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdatomic.h>
 
@@ -25,7 +26,15 @@ static struct { int id; uint64_t at; } s_markers[MAX_MARKERS];
 static size_t s_marker_n;
 static atomic_uint_fast64_t s_written, s_played;     // sample counters
 static audio_marker_cb s_marker_cb; static void *s_marker_user;
-static atomic_int s_volume = 80;
+// The volume is heard in even steps (2026-11-05, the owner wanted the volume on the pairing page): 100 is the loudest,
+// every 10 below it is 3 dB quieter, so 10, the page's quietest, is 27 dB down; 0 is silence. It used to be a share of
+// the amplitude, which put nearly all the ear hears into 0–30 (50 was only 6 dB below 100). Applied as the output
+// pulls, so a change is heard at once, even in the middle of a sentence.
+#define VOLUME_DB_PER_UNIT 0.3f
+#define SELFTEST_VOLUME AUDIO_VOLUME_DEFAULT   // the self-test asks whether the speaker works, not how loud it is set
+static atomic_int s_volume = AUDIO_VOLUME_DEFAULT;
+static atomic_int s_gain = 32768;                    // Q15, from s_volume; 32768 leaves the sound as it is
+static int volume_gain(int v) { return v <= 0 ? 0 : v >= 100 ? 32768 : (int)lroundf(32768.0f * powf(10.0f, (float)(v - 100) * VOLUME_DB_PER_UNIT / 20.0f)); }
 static atomic_int s_level;
 static audio_capture_cb s_cap_cb; static void *s_cap_user;
 static atomic_bool s_cap_active;
@@ -34,6 +43,7 @@ static char s_sfx_dir[128] = "content/sfx";
 esp_err_t audio_common_init(const char *sfx_dir)
 {
     s_lock = mutex_create();
+    atomic_store(&s_gain, volume_gain(atomic_load(&s_volume)));
     s_ring_mem = mem_alloc_big(AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
     if (!s_ring_mem) return ESP_ERR_NO_MEM;
     ringbuf_init(&s_ring, s_ring_mem, AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
@@ -72,7 +82,7 @@ uint8_t audio_play_level(void) { return (uint8_t)atomic_load(&s_level); }
 uint32_t audio_play_queued_ms(void) { return (uint32_t)(ringbuf_used(&s_ring) / 2 * 1000 / AUDIO_SAMPLE_RATE); }
 bool audio_play_idle(void) { return ringbuf_used(&s_ring) == 0; }
 void audio_set_marker_cb(audio_marker_cb cb, void *user) { s_marker_user = user; s_marker_cb = cb; }
-void audio_set_volume(uint8_t percent) { atomic_store(&s_volume, percent > 100 ? 100 : percent); }
+void audio_set_volume(uint8_t percent) { int v = percent > 100 ? 100 : percent; atomic_store(&s_volume, v); atomic_store(&s_gain, volume_gain(v)); }
 
 // Called by the platform output path: fills `out` with up to `samples`, zero-padded, scaled by volume.
 // Fires markers whose position has been reached.
@@ -89,8 +99,8 @@ size_t audio_pull(int16_t *out, size_t samples)
     }
     s_marker_n = keep;
     mutex_unlock(s_lock);
-    int vol = atomic_load(&s_volume);
-    if (vol < 100) for (size_t i = 0; i < got; i++) out[i] = (int16_t)((int)out[i] * vol / 100);
+    int g = atomic_load(&s_gain);
+    if (g < 32768) for (size_t i = 0; i < got; i++) out[i] = (int16_t)((int32_t)out[i] * g / 32768);
     uint64_t acc = 0;
     for (size_t i = 0; i < got; i++) acc += (uint64_t)((int32_t)out[i] * out[i]);
     int rms = got ? (int)(__builtin_sqrt((double)(acc / got)) / 128.0) : 0;   // 32768 → 256
@@ -210,8 +220,10 @@ esp_err_t audio_selftest(audio_selftest_t *out)
     audio_capture_stop();
     out->ambient_ms = a.ms; out->ambient_peak = a.peak; out->ambient_rms = a.rms;
     audio_capture_start(selftest_cb, NULL);
+    atomic_store(&s_gain, volume_gain(SELFTEST_VOLUME));   // the beep at its own level, however far the volume is turned down
     out->sfx = audio_sfx_play("beep");
     clock_sleep_ms(450);
+    atomic_store(&s_gain, volume_gain(atomic_load(&s_volume)));
     audio_capture_stats_t b; audio_capture_stats(&b);
     audio_capture_stop();
     out->tone_ms = b.ms; out->tone_peak = b.peak; out->tone_rms = b.rms;

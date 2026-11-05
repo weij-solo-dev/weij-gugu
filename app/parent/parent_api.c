@@ -118,6 +118,17 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         if (s_hooks.apply) s_hooks.apply(wifi, s_hooks.user);
         return reply(out, out_len, "{\"ok\":true}");
     }
+    if (post && !strcmp(path, "/api/volume")) {          // the speaker section's slider: kept, and in use at once
+        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
+        cJSON *v = cJSON_GetObjectItem(j, "volume");
+        bool ok = cJSON_IsNumber(v) && v->valuedouble >= 0 && v->valuedouble <= 100;
+        int vol = ok ? (int)v->valuedouble : 0;
+        cJSON_Delete(j);
+        if (!ok) return reply(out, out_len, "{\"error\":\"volume is 0 to 100\"}"), 400;
+        store_setting_set_int("volume", vol);
+        if (s_hooks.volume) s_hooks.volume(vol, s_hooks.user);
+        return reply(out, out_len, "{\"ok\":true}");
+    }
     if (post && !strcmp(path, "/api/test/sound")) {      // the owner taps "test the speaker"
         if (s_hooks.test_sound) s_hooks.test_sound(s_hooks.user);
         return reply(out, out_len, s_hooks.test_sound ? "{\"ok\":true}" : "{\"ok\":false}");

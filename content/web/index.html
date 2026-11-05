@@ -14,11 +14,11 @@ button.secondary{background:#8c6442}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .muted{color:#888;font-size:12px}.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
 .call{cursor:pointer}.call:hover{background:#fdf6ea}
+input[type=range]{padding:0;border:0;accent-color:#d9413b}
 </style></head><body>
-<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-04</span></header>
+<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-05</span></header>
 <main>
 <section><h2>设备状态</h2><div id="devstatus" class="muted">加载中…</div>
-<button class="secondary" onclick="testAudio()">测试扬声器和麦克风</button> <span id="soundMsg" class="muted"></span>
 <div style="margin-top:6px"><button onclick="location.href='/api/logs'">导出日志</button> <button class="secondary" onclick="copyLogs()">复制日志</button> <span id="logMsg" class="muted"></span></div>
 <textarea id="logText" readonly style="display:none;width:100%;height:160px;margin-top:8px;font-size:11px"></textarea>
 <p class="muted">出了问题：先点"导出日志"（下载一个 txt 文件），把文件发给开发者；手机上不方便发文件就点"复制日志"再粘贴。日志里不含密码和密钥。</p></section>
@@ -31,8 +31,13 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 <div class="row"><div><label>孩子的名字</label><input id="child_name"></div><div><label>年龄（月）</label><input id="child_age_months" type="number"></div></div>
 <div class="row"><div><label>交互语种（听和说）</label><select id="lang" onchange="renderVoice()"><option value="zh">普通话</option><option value="yue">粤语</option><option value="en">English</option></select></div></div>
 <p class="muted">咕咕用这个语种听孩子说话、用它回答，自己说的话也用它；保存后立即生效，咕咕会用新语种再自我介绍一次。</p>
-<div class="row"><div><label>音量 (0–100)</label><input id="volume" type="number"></div><div><label>一次连续聊天最长（分钟）</label><input id="max_call_min" type="number"></div></div>
+<div class="row"><div><label>一次连续聊天最长（分钟）</label><input id="max_call_min" type="number"></div><div></div></div>
 <button onclick="saveSettings()">保存设置</button> <span id="saveMsg" class="muted"></span></section>
+<section><h2>扬声器</h2>
+<label>音量 <b id="volLabel"></b></label>
+<div class="row" style="align-items:center"><span class="muted" style="flex:none">轻</span><input id="volume" type="range" min="1" max="10" step="1" value="9" oninput="volumeShow()" onchange="volumeSet()"><span class="muted" style="flex:none">响</span></div>
+<button class="secondary" onclick="testSound()">试听</button> <button class="secondary" onclick="testAudio()">测试扬声器和麦克风</button> <span id="soundMsg" class="muted"></span>
+<p class="muted">拖完马上生效，咕咕会用新的音量咕一声；"试听"再咕一声。"测试扬声器和麦克风"用固定的音量响一声哔，看麦克风听不听得到，不受上面音量影响。</p></section>
 <section><h2>咕咕的声音</h2>
 <label>音色（<span id="voiceWhere"></span>）</label><select id="voice_pick" onchange="voicePicked()"></select>
 <div id="voiceCustomRow" style="display:none"><label>自定义音色 ID</label><input id="voice_custom" placeholder="服务商音色列表里的 ID，或你自己复刻 / 设计的音色"></div>
@@ -59,14 +64,15 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 async function load(){
-  try{const s=await j('/api/status');$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
+  try{const s=await j('/api/status');devStatus=s;$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
     const ok=v=>v?'<b style="color:#2a7">✓</b>':'<b style="color:#d33">✗</b>';
-    $('devstatus').innerHTML=`固件 ${s.version||'?'} · 上次启动：${s.reset_reason||'?'} · 音频 ${ok(s.audio)} · 音量 ${s.volume??'?'} · Wi-Fi 已配置 ${ok(s.wifi_configured)} · 已联网 ${ok(s.online)} · 密钥已配置 ${ok(s.key_configured)}`}catch(e){$('devstatus').textContent='读取失败'}
+    $('devstatus').innerHTML=`固件 ${s.version||'?'} · 上次启动：${s.reset_reason||'?'} · 音频 ${ok(s.audio)} · Wi-Fi 已配置 ${ok(s.wifi_configured)} · 已联网 ${ok(s.online)} · 密钥已配置 ${ok(s.key_configured)}`}catch(e){$('devstatus').textContent='读取失败'}
   try{presets=await j('/api/providers')}catch(e){presets=[]}
   try{secrets=await j('/api/secrets');loadedSecrets=secrets;for(const k of ['wifi_ssid','wifi_pass'])if(secrets[k]!==undefined)$(k).value=secrets[k]}catch(e){}
   try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
   scanWifi();
-  try{settings=await j('/api/settings');for(const k of ['child_name','child_age_months','lang','volume'])if(settings[k]!==undefined)$(k).value=settings[k];if(settings.max_call_ms)$('max_call_min').value=Math.round(settings.max_call_ms/60000)}catch(e){}
+  try{settings=await j('/api/settings');for(const k of ['child_name','child_age_months','lang'])if(settings[k]!==undefined)$(k).value=settings[k];if(settings.max_call_ms)$('max_call_min').value=Math.round(settings.max_call_ms/60000)}catch(e){}
+  $('volume').value=Math.max(1,Math.min(10,Math.round((settings.volume??devStatus.volume??90)/10)));volumeShow();
   renderProviders();renderVoice();
   try{const t=await j('/api/trip');if(!t){$('trip').textContent='还没有计划中的出门。'}else{const kind={deliver:'送信',vacation:'度假',visit:'探亲'}[t.kind]||t.kind;
     $('trip').innerHTML=`<div><b>${kind}</b> · ${t.place.name}（${t.place.country}）· ${t.depart_date} 出发，住 ${t.nights} 晚，${t.return_date} 回家</div><div style="margin:6px 0">${t.reason}${t.recipient?'<br>收件人：'+t.recipient:''}${t.letter?'<br>信里写：'+t.letter:''}</div><div><b>它会讲的事</b><ul>${(t.facts||[]).map(f=>`<li>${f}</li>`).join('')}</ul></div><div><b>每天</b><ol>${(t.days||[]).map(d=>`<li>${d}</li>`).join('')}</ol></div><div class="muted">朋友：${(t.friend||{}).name||''}（${(t.friend||{}).animal||''}）· 纪念品：${t.souvenir||''} · 生成于 ${t.generated_at||''}</div>`;
@@ -86,16 +92,21 @@ async function forget(book,key){if(!confirm('删除后咕咕就忘了这件事�
 async function testSound(){const r=await j('/api/test/sound',{method:'POST'});$('soundMsg').textContent=r.ok?'已播放，听到咕一声了吗？':'失败'}
 async function testAudio(){$('soundMsg').textContent='测试中（约 1 秒，会响一声哔）…';try{const t=await j('/api/test/audio',{method:'POST'});
   if(t.error){$('soundMsg').textContent='没法测：'+t.error;return}
-  const verdict=!t.ambient_ms?'麦克风没有数据（录音通路不工作）':t.tone_peak>4*t.ambient_peak+800?'正常：麦克风听到了扬声器的哔声':'麦克风没听到哔声：扬声器可能没声音（或音量为 0）';
-  $('soundMsg').textContent=`${verdict}。安静时峰值 ${t.ambient_peak}，哔声时峰值 ${t.tone_peak}，音量 ${t.volume}`}catch(e){$('soundMsg').textContent='测试失败'}}
+  const verdict=!t.ambient_ms?'麦克风没有数据（录音通路不工作）':t.tone_peak>4*t.ambient_peak+800?'正常：麦克风听到了扬声器的哔声':'麦克风没听到哔声：扬声器可能没声音';
+  $('soundMsg').textContent=`${verdict}。安静时峰值 ${t.ambient_peak}，哔声时峰值 ${t.tone_peak}`}catch(e){$('soundMsg').textContent='测试失败'}}
+// ---- the volume: ten steps the same size to the ear (the device: 100 the loudest, every 10 below it 3 dB quieter) ----
+function volumeShow(){$('volLabel').textContent=$('volume').value+' / 10'}
+async function volumeSet(){const v=+$('volume').value*10;volumeShow();$('soundMsg').textContent='';
+  try{const r=await j('/api/volume',{method:'POST',body:JSON.stringify({volume:v})});if(!r.ok)throw 0;settings.volume=v;
+    await j('/api/test/sound',{method:'POST'});$('soundMsg').textContent='已生效，听到这一声的大小了吗？'}catch(e){$('soundMsg').textContent='没保存上，再拖一下试试'}}
 async function copyLogs(){$('logMsg').textContent='读取中…';try{const r=await fetch('/api/logs?view=1');const txt=await r.text();const ta=$('logText');ta.style.display='block';ta.value=txt;ta.focus();ta.select();ta.setSelectionRange(0,txt.length);
   let ok=false;try{ok=document.execCommand('copy')}catch(e){}
   if(!ok&&navigator.clipboard){try{await navigator.clipboard.writeText(txt);ok=true}catch(e){}}
   $('logMsg').textContent=ok?`已复制 ${Math.round(txt.length/1024)} KB，去粘贴吧`:'已显示在下面的框里，长按全选后复制'}catch(e){$('logMsg').textContent='读取失败'}}
 async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
-async function saveSettings(){const b={};for(const k of ['child_name','lang'])b[k]=$(k).value;for(const k of ['child_age_months','volume'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
+async function saveSettings(){const b={};for(const k of ['child_name','lang'])b[k]=$(k).value;for(const k of ['child_age_months'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;
   const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});$('saveMsg').textContent=r.ok?'已保存并生效':'失败'}
-let loadedSecrets={},presets=[],settings={},secrets={};
+let loadedSecrets={},presets=[],settings={},secrets={},devStatus={};
 async function saveSecrets(){let n=0;for(const k of ['wifi_ssid','wifi_pass']){const v=$(k).value;if(!v)continue;const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:k,value:v})});if(r.ok)n++}
   const wifi=$('wifi_ssid').value!==(loadedSecrets.wifi_ssid||'')||$('wifi_pass').value!==(loadedSecrets.wifi_pass||'');
   await j('/api/apply',{method:'POST',body:JSON.stringify({wifi})});

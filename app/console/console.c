@@ -294,7 +294,7 @@ static int cmd_selftest(int argc, char **argv)
     printf("volume %u; quiet: %u ms, peak %d, rms %d; beep: %u ms, peak %d, rms %d (%s)\n", t.volume, (unsigned)t.ambient_ms, t.ambient_peak, t.ambient_rms,
            (unsigned)t.tone_ms, t.tone_peak, t.tone_rms, esp_err_to_name(t.sfx));
     printf("%s\n", !t.ambient_ms ? "the microphone delivers nothing" : t.tone_peak > 4 * t.ambient_peak + 800 ? "the microphone hears the speaker: both work"
-                                                     : "the microphone does not hear the beep: the speaker may be silent (or the volume 0)");
+                                                     : "the microphone does not hear the beep: the speaker may be silent");
     return 0;
 }
 
@@ -450,7 +450,7 @@ static const cmd_t CMDS[] = {
     { "tap", "tap x y — a touch at that screen point (the bubble sits around 340,165)", cmd_tap },
     { "selftest", "speaker → microphone loopback: does the microphone hear a beep?", cmd_selftest },
     { "sfx", "sfx <name> — play a sound effect", cmd_sfx },
-    { "vol", "vol <0-100>", cmd_vol },
+    { "vol", "vol <0-100> — the volume, kept: 100 the loudest, every 10 below it 3 dB quieter", cmd_vol },
 };
 
 static int cmd_help(int argc, char **argv)

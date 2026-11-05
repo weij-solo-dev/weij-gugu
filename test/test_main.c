@@ -10,6 +10,8 @@ void test_engine(void);
 void test_world(void);
 void test_art(void);
 void test_life(void);
+void test_audio(void);
+void test_parent(void);
 void test_live(void);
 
 int main(void)
@@ -23,6 +25,8 @@ int main(void)
     test_world();
     test_art();
     test_life();
+    test_audio();
+    test_parent();
     test_live();
     printf("%d checks, %d failures\n", mt_checks, mt_failures);
     return mt_failures ? 1 : 0;

@@ -17,6 +17,7 @@ typedef struct {
     void (*trip_delete)(void *user);
     void (*memory_forget)(const char *book, const char *key, void *user);   // book: journey (key = trip id) | about_child | canon_grown (key = index)
     void (*test_sound)(void *user);                                        // the page's "test the speaker" button
+    void (*volume)(int percent, void *user);                               // the page moved the volume (0–100, already saved): use it now
     int  (*test_audio)(char *json, size_t cap, void *user);                 // "test speaker and microphone": a beep listened to; the levels as JSON
     void (*apply)(bool wifi_changed, void *user);                          // secrets were saved: take them into use now (keys at once, Wi-Fi joins)
     int  (*check)(char *json, size_t cap, void *user);                     // "test": do the vendors now assigned answer? Waits for the answer

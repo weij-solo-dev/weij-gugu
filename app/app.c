@@ -131,6 +131,7 @@ static void on_service_checked(bool ok, int kind, const char *why, void *user)
     if (atomic_exchange(&s_service_ok, ok) != ok) store_event("service %s: %s", ok ? "back" : "trouble", why);
 }
 static void on_test_sound(void *user) { (void)user; store_event("speaker test from the page"); audio_sfx_play("coo"); ui_play_action(UI_ACT_WAVE); ui_set_emotion(UI_EMO_HAPPY); }
+static void on_volume(int percent, void *user) { (void)user; audio_set_volume((uint8_t)percent); store_event("volume %d from the page", percent); }
 static int on_test_audio(char *json, size_t cap, void *user)
 {
     (void)user;
@@ -217,6 +218,7 @@ static void on_apply(bool wifi_changed, void *user)   // the page saved secrets:
         store_event("interaction language: %s", lang_code(l));
     }
     mind_set_child(store_setting_str("child_name", NULL), store_setting_int("child_age_months", 0));
+    audio_set_volume((uint8_t)store_setting_int("volume", AUDIO_VOLUME_DEFAULT));   // saved with the settings: heard now, not after a reboot
 }
 
 // ---- the friendly bubbles: life makes the lines, instinct shows and plays them ----
@@ -340,7 +342,7 @@ void app_main(void)
     world_init(DATA_DIR);
     esp_err_t audio_err = audio_init();          // a silent device is still a device: keep going, record it
     if (audio_err != ESP_OK) LOGE("audio init failed: %s", esp_err_to_name(audio_err));
-    audio_set_volume((uint8_t)store_setting_int("volume", 80));
+    audio_set_volume((uint8_t)store_setting_int("volume", AUDIO_VOLUME_DEFAULT));
     instinct_init();                       // the right scene is up before the network comes
 
     net_init();
@@ -372,7 +374,7 @@ void app_main(void)
                          .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_outcome = on_call_outcome };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .test_audio = on_test_audio, .apply = on_apply,
+    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply,
                           .check = on_page_check, .voice_test = on_voice_test, .user = NULL };
     parent_set_hooks(&ph);
     life_init();
@@ -412,8 +414,8 @@ void app_main(void)
         char boot[720], path[200], fw[16], crash[200] = "", bt[200] = "";
         board_firmware_id(fw, sizeof fw);
         bool crashed = board_crash_report(crash, sizeof crash, bt, sizeof bt);   // the last run's crash, if a core dump says so
-        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-04\",\"firmware\":\"%s\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d%s%s%s%s%s}",
-                 fw, board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", 80),
+        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-05\",\"firmware\":\"%s\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d%s%s%s%s%s}",
+                 fw, board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", AUDIO_VOLUME_DEFAULT),
                  crashed ? ",\"crash\":\"" : "", crashed ? crash : "", crashed ? "\",\"backtrace\":\"" : "", crashed ? bt : "", crashed ? "\"" : "");
         snprintf(path, sizeof path, "%s/logs/boot.json", DATA_DIR);
         atomic_file_write(path, boot, strlen(boot));
