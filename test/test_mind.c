@@ -93,13 +93,15 @@ TEST(test_mind_memory_books)
     snprintf(p, sizeof p, "%s/memory/about_child.json", TEST_DATA);
     const char *two = "[{\"text\":\"小满怕打雷\",\"date\":\"2026-11-02\"},{\"text\":\"小满有个好朋友叫豆豆\",\"date\":\"2026-11-02\"}]";
     CHECK(atomic_file_write(p, two, strlen(two)));
+    CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 0);    // mind keeps a copy of each book until it writes it itself
+    CHECK(mind_init(&cfg) == ESP_OK);                                  // a write from outside (this test, a wipe) must re-init mind
     CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 2);
     CHECK(strstr(buf, "豆豆") != NULL);
     CHECK(mind_book_forget("about_child", 0) == ESP_OK);
     CHECK_EQ_INT(mind_book_text("about_child", buf, sizeof buf), 1);
     CHECK(strstr(buf, "怕打雷") == NULL);
     CHECK(mind_book_forget("about_child", 5) == ESP_ERR_NOT_FOUND);
-    atomic_file_write(p, "[]", 2);
+    atomic_file_write(p, "[]", 2); mind_init(&cfg);
     // forgetting a trip removes every entry of it
     CHECK(mind_journey_forget("t-m1") == ESP_OK);
     CHECK(!mind_journey_has(JOURNEY_RETURNED, "t-m1", NULL));

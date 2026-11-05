@@ -4,6 +4,7 @@
 #include "foundation/log.h"
 #include "foundation/task.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <unistd.h>
 
 int console_dispatch(char *line);
@@ -14,6 +15,8 @@ static void console_task(void *arg)
     char line[256];
     while (fgets(line, sizeof line, stdin)) { console_dispatch(line); printf("gugu> "); fflush(stdout); }
 }
+
+size_t console_read_raw(uint8_t *buf, size_t n, uint32_t timeout_ms) { (void)timeout_ms; return fread(buf, 1, n, stdin); }   // put, from stdin
 
 esp_err_t console_init(void)
 {

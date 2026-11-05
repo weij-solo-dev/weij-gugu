@@ -643,7 +643,10 @@ esp_err_t instinct_init(void)
 {
     if (!s_offer_lock) s_offer_lock = mutex_create();
     ui_set_idle(true);
-    if (!task_spawn("gugu_instinct", instinct_task, NULL, 6144, 1, 0)) return ESP_FAIL;
+    // 10 KB: this task writes the event log (a LittleFS append took 3.4 KB of stack on the device), logs (2.3 KB), loads
+    // pictures (2.6 KB) and draws through LVGL. With 6 KB its usual peak left 2.8 KB, and about one boot in ten
+    // overflowed while the trip's scene was being put up (2026-11-05, PLAN.md 踩坑 45).
+    if (!task_spawn("gugu_instinct", instinct_task, NULL, 10240, 1, 0)) return ESP_FAIL;
     return ESP_OK;
 }
 

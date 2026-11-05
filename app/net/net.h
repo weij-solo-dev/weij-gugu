@@ -39,6 +39,7 @@ typedef struct {
     char *body;                  // buffered body (NUL-terminated) when on_body is NULL; caller mem_release()s
     size_t body_len;
     int64_t t_connect_us, t_first_byte_us, t_done_us;   // relative to the request start
+    int64_t t_sent_us;           // the whole request body was handed to the network (device: into the socket's send buffer); 0: not known (host)
     bool reused_connection;      // served on the keep-alive connection left by the previous request / pre-warm
 } net_http_response_t;
 

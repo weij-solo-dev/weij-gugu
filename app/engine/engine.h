@@ -15,6 +15,8 @@ typedef struct {
     int64_t t2_first_token;    // first text delta from the model
     int64_t t3_first_audio;    // first PCM from the TTS
     int64_t t4_turn_done;      // last audio of the turn handed over
+    int64_t t_chat_sent;       // the prompt was built and the request went to the model (between t1 and t2)
+    int64_t t_first_segment;   // the first sentence was complete and handed to the voice (between t2 and t3)
 } engine_timing_t;
 
 typedef enum {

@@ -10,6 +10,7 @@
 #include "foundation/mem.h"
 #include "foundation/strbuf.h"
 #include "foundation/atomic_file.h"
+#include "foundation/task.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
@@ -21,8 +22,47 @@ static char s_dir[128];
 static void journey_path(char *p, size_t cap) { snprintf(p, cap, "%s/memory/journey.jsonl", s_dir); }
 static void book_path(char *p, size_t cap, const char *book) { snprintf(p, cap, "%s/memory/%s.json", s_dir, book); }
 
+// Every turn's prompt reads the journey (twice) and both books, and file reads on the device are slow: those four reads
+// and an event-log line were the ~85 ms between the transcript and the request to the model (2026-11-05 latency bench).
+// Each file's text stays in PSRAM after its first read until this file writes that file again. Every writer of the
+// three files is in this file; anything that rewrites them elsewhere (a wipe of /data) must call mind_memory_init again.
+#define MEMORY_COPIES 3
+static struct { char path[200]; char *txt; size_t n; } s_copy[MEMORY_COPIES];
+static mutex_t s_copy_lock;
+
+static char *memory_read(const char *path, size_t *n)   // as file_read_all: a NUL-terminated copy to mem_release(), NULL when missing
+{
+    mutex_lock(s_copy_lock);
+    int slot = -1, empty = -1;
+    for (int i = 0; i < MEMORY_COPIES; i++) {
+        if (s_copy[i].txt && !strcmp(s_copy[i].path, path)) slot = i;
+        else if (!s_copy[i].txt && empty < 0) empty = i;
+    }
+    if (slot < 0) {
+        size_t len = 0; char *txt = file_read_all(path, &len);
+        if (!txt) { mutex_unlock(s_copy_lock); return NULL; }      // a missing file is looked for again next time
+        slot = empty >= 0 ? empty : 0;
+        mem_release(s_copy[slot].txt);
+        snprintf(s_copy[slot].path, sizeof s_copy[slot].path, "%s", path); s_copy[slot].txt = txt; s_copy[slot].n = len;
+    }
+    char *out = mem_alloc_big(s_copy[slot].n + 1);
+    if (out) { memcpy(out, s_copy[slot].txt, s_copy[slot].n); out[s_copy[slot].n] = '\0'; if (n) *n = s_copy[slot].n; }
+    mutex_unlock(s_copy_lock);
+    return out;
+}
+
+static void memory_written(const char *path)   // NULL: all of them
+{
+    mutex_lock(s_copy_lock);
+    for (int i = 0; i < MEMORY_COPIES; i++)
+        if (s_copy[i].txt && (!path || !strcmp(s_copy[i].path, path))) { mem_release(s_copy[i].txt); s_copy[i].txt = NULL; }
+    mutex_unlock(s_copy_lock);
+}
+
 esp_err_t mind_memory_init(const char *data_dir)
 {
+    if (!s_copy_lock) s_copy_lock = mutex_create();
+    memory_written(NULL);
     snprintf(s_dir, sizeof s_dir, "%s", data_dir ? data_dir : "");
     if (!s_dir[0]) return ESP_OK;
     const char *books[] = { "about_child", "canon_grown", NULL };
@@ -78,6 +118,7 @@ esp_err_t mind_journey_add(journey_kind_t k, const world_trip_t *t, const char *
     if (!line) return ESP_ERR_NO_MEM;
     char p[200]; journey_path(p, sizeof p);
     bool ok = file_append(p, line, strlen(line)) && file_append(p, "\n", 1);
+    memory_written(p);
     cJSON_free(line);
     LOGI("journey: %s %s %s", kind_name(k), t->id, date);
     return ok ? ESP_OK : ESP_FAIL;
@@ -90,7 +131,7 @@ static bool journey_load(journey_t *jl)
     memset(jl, 0, sizeof *jl);
     if (!s_dir[0]) return false;
     char p[200]; journey_path(p, sizeof p);
-    size_t n; jl->txt = file_read_all(p, &n);
+    size_t n; jl->txt = memory_read(p, &n);
     if (!jl->txt) return false;
     int lines = 1; for (const char *c = jl->txt; *c; c++) if (*c == '\n') lines++;
     jl->items = mem_alloc_big((size_t)lines * sizeof(cJSON *));
@@ -223,6 +264,7 @@ esp_err_t mind_journey_forget(const char *trip_id)
     }
     mem_release(txt);
     bool ok = atomic_file_write(p, b.s ? b.s : "", b.len);
+    memory_written(p);
     strbuf_free(&b);
     LOGI("journey: forgot %s (%d entries)", trip_id, dropped);
     return ok ? ESP_OK : ESP_FAIL;
@@ -234,7 +276,7 @@ size_t mind_book_text(const char *book, char *dst, size_t cap)
     size_t o = 0; dst[0] = '\0';
     if (!s_dir[0]) return 0;
     char p[200]; book_path(p, sizeof p, book);
-    size_t n; char *txt = file_read_all(p, &n);
+    size_t n; char *txt = memory_read(p, &n);
     if (!txt) return 0;
     cJSON *arr = cJSON_Parse(txt); mem_release(txt);
     size_t count = 0;
@@ -258,6 +300,7 @@ esp_err_t mind_book_forget(const char *book, int index)
     cJSON_DeleteItemFromArray(arr, index);
     char *out = cJSON_Print(arr); cJSON_Delete(arr);
     bool ok = out && atomic_file_write(p, out, strlen(out));
+    memory_written(p);
     cJSON_free(out);
     return ok ? ESP_OK : ESP_FAIL;
 }

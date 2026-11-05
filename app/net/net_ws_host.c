@@ -11,6 +11,8 @@
 #include <openssl/rand.h>
 #include <openssl/sha.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -148,6 +150,7 @@ esp_err_t net_ws_open(const net_ws_params_t *p, const net_ws_events_t *ev, void 
     if (getaddrinfo(host, portstr, &hints, &res) != 0) { free(w); return ESP_ERR_NOT_FOUND; }
     w->fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (connect(w->fd, res->ai_addr, res->ai_addrlen) != 0) { freeaddrinfo(res); close(w->fd); free(w); return ESP_FAIL; }
+    { int one = 1; setsockopt(w->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); }   // a frame is two writes (header, payload): Nagle would hold the second (net_esp.c)
     freeaddrinfo(res);
     w->ctx = SSL_CTX_new(TLS_client_method());
     SSL_CTX_set_default_verify_paths(w->ctx);

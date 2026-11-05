@@ -21,6 +21,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -408,6 +410,40 @@ static int cmd_parent(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+// put <path> <bytes>: a file from the Mac, such as the test recordings tools/dev/latency_bench.py replays. The console
+// stops reading lines and takes the bytes in pieces of PUT_CHUNK, saying "put: ok <n>" after each, so the sender never
+// outruns the USB receive buffer (the driver drops what does not fit). Written atomically; the FNV-1a hash is printed for
+// the sender to compare.
+#define PUT_CHUNK 2048
+size_t console_read_raw(uint8_t *buf, size_t n, uint32_t timeout_ms);   // console_esp.c / console_host.c: bytes, not lines
+static void put_flush(void) { fflush(stdout); fsync(fileno(stdout)); }
+static int cmd_put(int argc, char **argv)
+{
+    if (argc < 3) { printf("usage: put <path> <bytes>\n"); return 1; }
+    long total = strtol(argv[2], NULL, 10);
+    if (total <= 0 || total > 4 * 1024 * 1024) { printf("put: size must be 1 byte to 4 MB\n"); return 1; }
+    char dir[160]; snprintf(dir, sizeof dir, "%s", argv[1]);
+    char *slash = strrchr(dir, '/');
+    if (slash && slash != dir) { *slash = '\0'; mkdir(dir, 0775); }      // one level is enough: /data/bench
+    uint8_t *buf = mem_alloc_big((size_t)total);
+    if (!buf) { printf("put: no memory for %ld bytes\n", total); return 1; }
+    printf("put: ready %d\n", PUT_CHUNK); put_flush();
+    size_t got = 0;
+    while (got < (size_t)total) {
+        size_t want = (size_t)total - got < PUT_CHUNK ? (size_t)total - got : PUT_CHUNK;
+        size_t n = console_read_raw(buf + got, want, 5000);
+        got += n;
+        if (n < want) { printf("put: stopped at %zu of %ld bytes\n", got, total); mem_release(buf); return 1; }
+        printf("put: ok %zu\n", got); put_flush();
+    }
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < got; i++) { h ^= buf[i]; h *= 16777619u; }
+    bool ok = atomic_file_write(argv[1], buf, got);
+    mem_release(buf);
+    printf("put: %s %zu bytes fnv %08x\n", ok ? "saved" : "write failed", got, (unsigned)h);
+    return ok ? 0 : 1;
+}
+
 static int cmd_sfx(int argc, char **argv) { if (argc < 2) return 1; printf("%s\n", esp_err_to_name(audio_sfx_play(argv[1]))); return 0; }
 static int cmd_vol(int argc, char **argv) { if (argc < 2) return 1; audio_set_volume((uint8_t)atoi(argv[1])); store_setting_set_int("volume", atoi(argv[1])); return 0; }
 
@@ -429,6 +465,7 @@ static const cmd_t CMDS[] = {
     { "mem", "heap regions (free, largest block, low-water mark) and every task's stack headroom", cmd_mem },
     { "ls", "ls [dir]", cmd_ls },
     { "cat", "cat <path>", cmd_cat },
+    { "put", "put <path> <bytes> — receive a file over this port (the sender waits for \"put: ready\", then for \"put: ok\" after each 2 KB)", cmd_put },
     { "parent", "parent [off] — pairing mode: the hotspot and the page (yellow key held 3 s does the same)", cmd_parent },
     { "trip", "trip [new [kind] [place] [nights] | clear | json] — the trip card and where Gugu is", cmd_trip },
     { "clock", "clock [+hours|-hours|reset] — shift the clock to walk through a trip", cmd_clock },

@@ -33,6 +33,7 @@ static mind_tag_t s_seg_emotion[32];
 static bool s_seg_marker_pending[32];
 static atomic_uint s_voice_samples;  // PCM the engine delivered for the current turn: proof the answer had sound
 static atomic_int s_turns_done, s_turns_failed, s_turns_empty;   // empty: the key was held but no words were heard
+static char s_heard[128];             // what the recognizer heard, for the event log once the turn is over (see log_heard)
 static call_state_cb s_state_cb; static void *s_state_user;
 
 const char *call_state_name(call_state_t s)
@@ -99,18 +100,23 @@ static void flush_preroll(void)
     while ((got = ringbuf_read(&s_preroll, buf, sizeof buf)) > 0) engine_on_audio(s_engine, buf, got / 2);
 }
 
-// The key is up and the utterance is complete: hand it to the engine.
+// The key is up and the utterance is complete: hand it to the engine first, then the rest. The event log, the state's
+// listeners (another event line), the face and the static's file read took ~90 ms on the device, and the recording
+// waited for them when the hand-over came last (2026-11-05 latency bench).
 static void start_turn(void)
 {
-    audio_capture_stats_t cs; audio_capture_stats(&cs);
-    LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
-    store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
     atomic_store(&s_turn_active, true);
     atomic_store(&s_voice_samples, 0);
+    engine_on_release(s_engine, NULL);                            // the turn's clock starts here
+    audio_capture_stats_t cs; audio_capture_stats(&cs);
     set_state(CALL_THINKING);
-    ui_set_emotion(UI_EMO_CURIOUS);
+    // An engine that fails at once (offline, and the voice must reopen) can report before THINKING is set; its error then
+    // found LISTENING and left the state alone. The turn is over (s_turn_active cleared): back to waiting.
+    if (!atomic_load(&s_turn_active) && call_state() == CALL_THINKING) set_state(CALL_WAITING);
     audio_sfx_play("static");                                      // the walkie-talkie: over, the answer is on its way
-    engine_on_release(s_engine, NULL);
+    ui_set_emotion(UI_EMO_CURIOUS);
+    LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
+    store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
 }
 
 // ---- speaker markers → face ----
@@ -124,23 +130,27 @@ static void marker_cb(int id, void *user)
     if (call_state() == CALL_THINKING) set_state(CALL_SPEAKING);
 }
 
+static long long since_release(const engine_timing_t *t, int64_t at) { return at ? (long long)((at - t->t0_release) / 1000) : -1; }
+
 static void log_turn(const engine_event_t *ev)
 {
     const engine_timing_t *t = &ev->u.done.timing;
-    MEM_BIG_BSS static char line[1600], reply[700], tr[300];
+    MEM_BIG_BSS static char line[1700], reply[700], tr[300];
     // escape minimal JSON (quotes/newlines) for the two text fields
     size_t o = 0; for (const char *p = ev->u.done.reply; *p && o < sizeof reply - 3; p++) { if (*p == '"' || *p == '\\') reply[o++] = '\\'; reply[o++] = *p == '\n' ? ' ' : *p; } reply[o] = 0;
     o = 0; for (const char *p = ev->u.done.transcript; *p && o < sizeof tr - 3; p++) { if (*p == '"' || *p == '\\') tr[o++] = '\\'; tr[o++] = *p == '\n' ? ' ' : *p; } tr[o] = 0;
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm); char ts[32];
     strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%S", &tm);
+    // Every stage from the release: the transcript, the request out (prompt built), the first word back, the first
+    // sentence handed to the voice, the first sound from the voice, the first sample played, the last audio.
+    long long asr = since_release(t, t->t1_transcript), sent = since_release(t, t->t_chat_sent), tok = since_release(t, t->t2_first_token),
+              seg = since_release(t, t->t_first_segment), tts = since_release(t, t->t3_first_audio), play = since_release(t, s_t5_first_play),
+              done = since_release(t, t->t4_turn_done);
     snprintf(line, sizeof line,
              "{\"t\":\"%s\",\"lang\":\"%s\",\"transcript\":\"%s\",\"reply\":\"%s\",\"segments\":%d,\"tags\":%d,"
-             "\"ms\":{\"asr\":%lld,\"first_token\":%lld,\"first_tts\":%lld,\"first_play\":%lld,\"done\":%lld},"
+             "\"ms\":{\"asr\":%lld,\"chat_sent\":%lld,\"first_token\":%lld,\"first_seg\":%lld,\"first_tts\":%lld,\"first_play\":%lld,\"done\":%lld},"
              "\"usage\":{\"asr_ms\":%u,\"in_tokens\":%u,\"out_tokens\":%u,\"cached\":%u,\"tts_chars\":%u}}",
-             ts, lang_code(ev->u.done.lang), tr, reply, ev->u.done.segments, ev->u.done.tags,
-             (long long)((t->t1_transcript - t->t0_release) / 1000), (long long)((t->t2_first_token - t->t0_release) / 1000),
-             (long long)((t->t3_first_audio - t->t0_release) / 1000), (long long)(s_t5_first_play ? (s_t5_first_play - t->t0_release) / 1000 : -1),
-             (long long)((t->t4_turn_done - t->t0_release) / 1000),
+             ts, lang_code(ev->u.done.lang), tr, reply, ev->u.done.segments, ev->u.done.tags, asr, sent, tok, seg, tts, play, done,
              (unsigned)ev->u.done.asr.audio_ms, (unsigned)ev->u.done.chat.in_tokens, (unsigned)ev->u.done.chat.out_tokens,
              (unsigned)ev->u.done.chat.cached_tokens, (unsigned)ev->u.done.tts.chars);
     store_call_turn(&s_log, line);
@@ -150,11 +160,17 @@ static void log_turn(const engine_event_t *ev)
              ts, s_log.id, (double)fen, (unsigned)ev->u.done.asr.audio_ms, (unsigned)ev->u.done.chat.in_tokens, (unsigned)ev->u.done.chat.cached_tokens,
              (unsigned)ev->u.done.chat.out_tokens, (unsigned)ev->u.done.tts.chars);
     store_ledger_add(ledger);
-    LOGI("turn: asr %lld ms, first token %lld ms, first tts %lld ms, first play %lld ms, done %lld ms | %s -> %s",
-         (long long)((t->t1_transcript - t->t0_release) / 1000), (long long)((t->t2_first_token - t->t0_release) / 1000),
-         (long long)((t->t3_first_audio - t->t0_release) / 1000), (long long)(s_t5_first_play ? (s_t5_first_play - t->t0_release) / 1000 : -1),
-         (long long)((t->t4_turn_done - t->t0_release) / 1000), ev->u.done.transcript, ev->u.done.reply);
+    LOGI("turn: asr %lld ms, sent %lld ms, first token %lld ms, first segment %lld ms, first tts %lld ms, first play %lld ms, done %lld ms | %s -> %s",
+         asr, sent, tok, seg, tts, play, done, ev->u.done.transcript, ev->u.done.reply);
     s_last_timing = *t;
+}
+
+// The event log learns what was heard when the turn is over: the line used to be written between the transcript and
+// the request to the model, on the engine's task, and a flash write there is time the child waits (2026-11-05).
+static void log_heard(void)
+{
+    if (s_heard[0]) store_event("%s", s_heard);
+    s_heard[0] = '\0';
 }
 
 // A turn failed or the service is too slow: the child sees and feels it at once (the app's reaction), and the
@@ -182,7 +198,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         break;
     case ENGINE_EV_TRANSCRIPT:
         LOGI("heard (%s): %s", lang_code(ev->u.transcript.lang), ev->u.transcript.text);
-        { char said[80]; snprintf(said, sizeof said, "%s", ev->u.transcript.text); mind_utf8_cut(said, 60); store_event("heard (%s): %s", lang_code(ev->u.transcript.lang), said); }
+        { char said[80]; snprintf(said, sizeof said, "%s", ev->u.transcript.text); mind_utf8_cut(said, 60); snprintf(s_heard, sizeof s_heard, "heard (%s): %s", lang_code(ev->u.transcript.lang), said); }
         break;
     case ENGINE_EV_TAG:
         switch (ev->u.tag) {
@@ -211,6 +227,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
     case ENGINE_EV_SEGMENT_END:
         break;
     case ENGINE_EV_TURN_DONE:
+        log_heard();
         log_turn(ev);
         if (s_cfg.on_outcome) s_cfg.on_outcome(true, "", "", s_cfg.outcome_user);   // the service answered: whatever went wrong before is over
         {
@@ -237,6 +254,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         if (call_state() == CALL_THINKING) set_state(CALL_WAITING);
         break;
     case ENGINE_EV_ERROR:
+        log_heard();
         LOGW("engine error at %s: %s", ev->u.error.stage, ev->u.error.err.message);
         atomic_fetch_add(&s_turns_failed, 1);
         atomic_store(&s_turn_active, false);
@@ -246,6 +264,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
         else if (call_state() == CALL_THINKING || call_state() == CALL_SPEAKING) set_state(CALL_WAITING);
         break;
     case ENGINE_EV_ABORTED:
+        log_heard();
         atomic_store(&s_turn_active, false);
         break;
     }

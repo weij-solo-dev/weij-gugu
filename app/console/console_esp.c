@@ -4,6 +4,7 @@
 #include "console/console.h"
 #include "foundation/log.h"
 #include "foundation/task.h"
+#include "foundation/clock.h"
 #include "driver/usb_serial_jtag.h"
 #include <stdio.h>
 #include <unistd.h>
@@ -28,9 +29,21 @@ static void console_task(void *arg)
     }
 }
 
+size_t console_read_raw(uint8_t *buf, size_t n, uint32_t timeout_ms)   // put: bytes as they come, no line editing
+{
+    size_t got = 0;
+    int64_t until = clock_us() + (int64_t)timeout_ms * 1000;
+    while (got < n && clock_us() < until) {
+        int r = usb_serial_jtag_read_bytes(buf + got, n - got, pdMS_TO_TICKS(50));
+        if (r > 0) got += (size_t)r;
+    }
+    return got;
+}
+
 esp_err_t console_init(void)
 {
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    cfg.rx_buffer_size = 4096;                    // holds a whole 2 KB piece of a put while the console task is busy elsewhere
     esp_err_t err = usb_serial_jtag_driver_install(&cfg);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
     if (!task_spawn("gugu_console", console_task, NULL, 6144, 2, 0)) return ESP_FAIL;

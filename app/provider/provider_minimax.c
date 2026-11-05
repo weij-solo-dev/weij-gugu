@@ -93,8 +93,9 @@ static esp_err_t mm_asr_finish(asr_session_t *s)
     int64_t t0 = clock_us();
     esp_err_t err = net_http_perform(s->http, &req, &resp);
     strbuf_free(&body);
-    LOGI("asr upload %u ms audio: http %d in %lld ms (connect %lld, reused %d)", (unsigned)(samples * 1000 / s->p.sample_rate),
-         resp.status, (long long)((clock_us() - t0) / 1000), (long long)(resp.t_connect_us / 1000), (int)resp.reused_connection);
+    LOGI("asr upload %u ms audio (%u KB): http %d in %lld ms (connect %lld, body sent %lld, answer %lld, reused %d)", (unsigned)(samples * 1000 / s->p.sample_rate),
+         (unsigned)(pcm_bytes / 1024), resp.status, (long long)((clock_us() - t0) / 1000), (long long)(resp.t_connect_us / 1000),
+         (long long)(resp.t_sent_us / 1000), (long long)(resp.t_first_byte_us / 1000), (int)resp.reused_connection);
     provider_error_t e;
     if (err != ESP_OK || resp.status != 200) {
         provider_error_set(&e, err == ESP_ERR_TIMEOUT ? PERR_TIMEOUT : provider_classify_http(resp.status), resp.status, 0,
@@ -211,6 +212,7 @@ struct tts_session {
     uint32_t chars_sent;
     uint32_t chars_reported;
     uint32_t chars_billed;
+    bool audio_seen;           // this segment's first audio came (logged: its size says what the first sound waits for)
     int16_t pcm[1024];
 };
 
@@ -238,6 +240,7 @@ static void tts_on_text(const char *msg, size_t n, void *user)
     if (!strncmp(ev, "sentence_end", el)) { if (s->ev.on_sentence_end) s->ev.on_sentence_end(s->user); return; }
     if (!strncmp(ev, "task_continued", el)) {
         size_t hl; const char *hex = json_str(msg, "audio", &hl);
+        if (hex && !s->audio_seen) { s->audio_seen = true; LOGI("tts first audio of a segment: %u ms in a %u KB message", (unsigned)(hl / 64), (unsigned)(n / 1024)); }
         while (hex && hl >= 4) {
             size_t take = hl > sizeof s->pcm * 2 ? sizeof s->pcm * 2 : hl;
             take &= ~(size_t)3;
@@ -250,6 +253,7 @@ static void tts_on_text(const char *msg, size_t n, void *user)
         return;
     }
     if (!strncmp(ev, "task_flushed", el)) {
+        s->audio_seen = false;
         provider_usage_t u = { .chars = s->chars_sent - s->chars_reported };
         s->chars_reported = s->chars_sent;
         signal_set(s->flushed);

@@ -1,5 +1,5 @@
 // Offline end-to-end turn through the cascade engine with the fake vendor: event order, segment /
-// emotion pairing, timing fields, dialogue memory.
+// emotion pairing, timing fields (every stage stamped, in order, from the moment the key was let go), dialogue memory.
 #include "minitest.h"
 #include "engine/engine.h"
 #include "provider/provider.h"
@@ -33,7 +33,9 @@ TEST(test_engine_fake_turn)
     CHECK_EQ_INT(ready, 1);
     int16_t frame[320] = {0};
     for (int i = 0; i < 50; i++) engine_on_audio(e, frame, 320);
+    int64_t before = clock_us();
     CHECK(engine_on_release(e, "小满刚摸了你一下。") == ESP_OK);
+    int64_t after = clock_us();
     for (int i = 0; i < 300 && !ev_count[ENGINE_EV_TURN_DONE] && !errors; i++) clock_sleep_ms(20);
     CHECK_EQ_INT(errors, 0);
     CHECK_EQ_INT(ev_count[ENGINE_EV_TRANSCRIPT], 1);
@@ -44,6 +46,9 @@ TEST(test_engine_fake_turn)
     CHECK(audio_samples > 16000 * 3);
     CHECK(strstr(done_reply, "鸭子") != NULL && strstr(done_reply, "[") == NULL);
     CHECK(done_t.t1_transcript >= done_t.t0_release && done_t.t2_first_token >= done_t.t1_transcript && done_t.t4_turn_done >= done_t.t3_first_audio);
+    CHECK(done_t.t0_release >= before && done_t.t0_release <= after);    // the turn's clock starts at the release, not when the engine's task gets to it
+    CHECK(done_t.t_chat_sent >= done_t.t1_transcript && done_t.t2_first_token >= done_t.t_chat_sent);            // words → request → first word
+    CHECK(done_t.t_first_segment >= done_t.t2_first_token && done_t.t3_first_audio >= done_t.t_first_segment);   // first word → first sentence → first sound
     chat_message_t m[12]; size_t n = mind_dialog_messages(m, 12);
     CHECK_EQ_INT(n, 2); CHECK_EQ_STR(m[0].role, "user"); CHECK_EQ_STR(m[1].role, "assistant");
     // second turn reuses the sessions

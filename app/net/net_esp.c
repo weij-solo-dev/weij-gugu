@@ -14,6 +14,7 @@
 #include "esp_http_client.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
+#include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include <string.h>
@@ -162,7 +163,30 @@ struct net_http {
     atomic_bool cancel;
     atomic_int status;
     bool alive;          // the previous request (or pre-warm) left a keep-alive connection open in the client
+    void (*stream)(const uint8_t *chunk, size_t n, void *user); void *stream_user;   // the request in flight wants its body as it comes
 };
+
+// Nagle off. Our writes are small and each one is wanted at the other end now: esp_http_client sends the headers, then
+// the body; esp_websocket_client sends every frame as two TLS records, header then payload. With Nagle on (lwIP's
+// default) a short segment waits until the server has acknowledged the one before, which a server delays up to its
+// delayed-ACK timer, and an upload stalls once for every 4 KB TLS record (its last, short segment): a 100 KB recording
+// went out at ~200 KB/s on a link that carries several times that (2026-11-05 latency bench).
+static void nodelay(int fd) { int one = 1; if (fd >= 0) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); }
+static void nodelay_all(void)   // esp_websocket_client keeps its socket to itself: every TCP socket lwIP has (closed or UDP ones refuse)
+{
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; fd++) nodelay(fd);
+}
+
+// A streamed body (the model's SSE) is handed on per TLS read, as the parser sees it. esp_http_client_read() returns only
+// when the whole buffer it was given is full (or the body ends), so reading the stream through it handed the first
+// words over in 2 KB batches: the first sentence reached the voice when 2 KB of events had arrived, ~0.4 s late.
+static esp_err_t http_event(esp_http_client_event_t *e)
+{
+    struct net_http *c = e->user_data;
+    if (e->event_id == HTTP_EVENT_ON_DATA && c && c->stream && !atomic_load(&c->cancel) && esp_http_client_get_status_code(e->client) == 200)
+        c->stream((const uint8_t *)e->data, (size_t)e->data_len, c->stream_user);
+    return ESP_OK;
+}
 
 esp_err_t net_http_open(const char *base_url, net_http_t **out)
 {
@@ -177,6 +201,8 @@ esp_err_t net_http_open(const char *base_url, net_http_t **out)
         .buffer_size = 4096,
         .buffer_size_tx = 2048,
         .disable_auto_redirect = true,
+        .event_handler = http_event,
+        .user_data = c,
     };
     c->h = esp_http_client_init(&cfg);
     if (!c->h) { free(c); return ESP_FAIL; }
@@ -218,6 +244,7 @@ esp_err_t net_http_perform(net_http_t *c, const net_http_request_t *req, net_htt
     // has meanwhile dropped shows up as a failed send or an empty/invalid response; that case is retried once
     // on a fresh connection, which is possible whenever the request body is in memory (not a body_read stream).
     int64_t t0 = clock_us();
+    c->stream = req->on_body; c->stream_user = req->user;    // http_event hands a 200 body over as it arrives
     size_t body_len = req->body_read ? req->body_total : req->body_len;
     bool reused = c->alive, retried = false;
     esp_err_t err;
@@ -229,6 +256,7 @@ retry:
     }
     resp->t_connect_us = clock_us() - t0;
     resp->reused_connection = reused;
+    nodelay(esp_http_client_get_socket(h));
     if (req->body_read) {
         uint8_t *buf = mem_alloc_dma(2048); size_t n;
         while ((n = req->body_read(buf, 2048, req->user)) > 0) {
@@ -245,6 +273,7 @@ retry:
         }
     }
     if (err != ESP_OK) goto close;
+    resp->t_sent_us = clock_us() - t0;
     int64_t content_len = esp_http_client_fetch_headers(h);
     int status = content_len < 0 ? 0 : esp_http_client_get_status_code(h);
     if (content_len < 0 || status == 0) {
@@ -261,8 +290,7 @@ retry:
         int r = esp_http_client_read(h, (char *)chunk, 2048);
         if (r < 0) { err = ESP_FAIL; break; }
         if (r == 0) { if (esp_http_client_is_complete_data_received(h) || content_len == 0) break; else continue; }
-        if (req->on_body && status == 200) req->on_body(chunk, (size_t)r, req->user);
-        else strbuf_append(&buf, (const char *)chunk, (size_t)r);
+        if (!(req->on_body && status == 200)) strbuf_append(&buf, (const char *)chunk, (size_t)r);   // a stream went out through http_event already
     }
     mem_release(chunk);
     resp->body = buf.s; resp->body_len = buf.len;
@@ -270,6 +298,7 @@ close:
     if (err == ESP_OK) c->alive = true;                       // keep-alive: the connection stays in the client for the next perform
     else { esp_http_client_close(h); c->alive = false; }      // a failed or cancelled exchange leaves the stream in an unknown state
 done:
+    c->stream = NULL; c->stream_user = NULL;
     for (size_t i = 0; i < req->header_count; i++) esp_http_client_delete_header(h, req->headers[i].name);
     resp->t_done_us = clock_us() - t0;
     return err;
@@ -374,6 +403,7 @@ esp_err_t net_ws_open(const net_ws_params_t *p, const net_ws_events_t *ev, void 
     if (err != ESP_OK) { esp_websocket_client_destroy(w->h); free(w); return err; }
     EventBits_t bits = xEventGroupWaitBits(w->eg, BIT0 | BIT1, pdFALSE, pdFALSE, pdMS_TO_TICKS(p->connect_timeout_ms ? p->connect_timeout_ms : 8000));
     if (!(bits & BIT0)) { LOGE("ws connect failed: %s", p->url); net_ws_close(w); return ESP_ERR_TIMEOUT; }
+    nodelay_all();
     LOGI("ws connected %s in %lld ms", p->url, (long long)((clock_us() - t0) / 1000));
     *out = w;
     return ESP_OK;

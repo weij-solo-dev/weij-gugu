@@ -129,10 +129,13 @@ void audio_capture_stats(audio_capture_stats_t *out)
     out->rms = n ? (int)__builtin_sqrt((double)(sq / n)) : 0;
 }
 
+static atomic_int s_delivering;   // a capture callback is running (deliver_capture)
+
 void audio_capture_stop(void)
 {
     atomic_store(&s_cap_active, false);
     audio_platform_capture(false);
+    while (atomic_load(&s_delivering)) clock_sleep_ms(1);   // a frame on its way finishes first: the caller hands the recording on next
 }
 
 bool audio_capture_active(void) { return atomic_load(&s_cap_active); }
@@ -141,8 +144,9 @@ static atomic_bool s_injecting;   // a replay is standing in for the microphone:
 
 static void deliver_capture(const int16_t *pcm, size_t samples)
 {
+    atomic_fetch_add(&s_delivering, 1);
     audio_capture_cb cb = s_cap_cb;
-    if (!atomic_load(&s_cap_active) || !cb) return;
+    if (!atomic_load(&s_cap_active) || !cb) { atomic_fetch_sub(&s_delivering, 1); return; }
     int peak = atomic_load(&s_cap_peak); uint64_t sq = 0;
     for (size_t i = 0; i < samples; i++) {
         int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
@@ -151,6 +155,7 @@ static void deliver_capture(const int16_t *pcm, size_t samples)
     }
     atomic_store(&s_cap_peak, peak); atomic_fetch_add(&s_cap_sq, sq); atomic_fetch_add(&s_cap_samples, (unsigned)samples);
     cb(pcm, samples, s_cap_user);
+    atomic_fetch_sub(&s_delivering, 1);
 }
 
 void audio_push_capture(const int16_t *pcm, size_t samples)

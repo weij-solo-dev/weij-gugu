@@ -13,7 +13,7 @@
 #include <stdatomic.h>
 
 enum cmd { CMD_START, CMD_TURN, CMD_END, CMD_QUIT };
-struct msg { enum cmd cmd; lang_t lang; char where[96]; char events[96]; };
+struct msg { enum cmd cmd; lang_t lang; char where[96]; char events[96]; int64_t at; };   // at: when the key was let go (CMD_TURN)
 
 typedef struct {
     engine_t *e;
@@ -85,6 +85,7 @@ static void seg_boundary(cascade_t *c)
 {
     if (c->seg_text.len == 0) return;
     int idx = atomic_load(&c->seg_sent);
+    if (idx == 0) c->t.t_first_segment = clock_us();
     c->seg_emotion[idx & 31] = c->pending_emotion;
     free(c->seg_texts[idx & 31]);
     c->seg_texts[idx & 31] = strdup(c->seg_text.s);
@@ -153,10 +154,10 @@ static void fail(cascade_t *c, const char *stage, const provider_error_t *err)
     emit(c, &ev);
 }
 
-static void run_turn(cascade_t *c, const char *events)
+static void run_turn(cascade_t *c, const char *events, int64_t released_at)
 {
     const provider_vtable_t *vasr = provider_for(PROVIDER_ROLE_ASR), *vchat = provider_for(PROVIDER_ROLE_CHAT);
-    memset(&c->t, 0, sizeof c->t); c->t.t0_release = clock_us();
+    memset(&c->t, 0, sizeof c->t); c->t.t0_release = released_at ? released_at : clock_us();
     c->transcript[0] = '\0'; c->asr_failed = c->chat_failed = c->chat_done = false;
     strbuf_clear(&c->reply); strbuf_clear(&c->seg_text);
     atomic_store(&c->seg_sent, 0); atomic_store(&c->seg_flushed, 0); atomic_store(&c->seg_playing, 0); c->pending_emotion = TAG_NEUTRAL;
@@ -177,13 +178,16 @@ static void run_turn(cascade_t *c, const char *events)
         engine_event_t nh = { .kind = ENGINE_EV_NOTHING_HEARD }; emit(c, &nh); return;
     }
     c->reply_lang = mind_reply_lang(c->reply_lang, c->transcript);
+    int64_t tp0 = clock_us();
     engine_event_t tev = { .kind = ENGINE_EV_TRANSCRIPT, .u.transcript = { c->transcript, c->reply_lang } };
     emit(c, &tev);
     mind_dialog_add("user", c->transcript);
 
     // 2. prompt + chat (deltas drive the tag parser, segments drive the TTS)
+    int64_t tp1 = clock_us();
     mind_prompt_t pr;
     mind_prompt_build(&pr, c->reply_lang, NULL, events);
+    LOGI("prompt: transcript handed on in %lld ms, built in %lld ms", (long long)((tp1 - tp0) / 1000), (long long)((clock_us() - tp1) / 1000));
     chat_message_t msgs[12];
     size_t nmsg = mind_dialog_messages(msgs, 12);
     chat_request_t req = { .system = pr.blocks, .system_count = pr.count, .messages = msgs, .message_count = nmsg,
@@ -191,6 +195,7 @@ static void run_turn(cascade_t *c, const char *events)
     tag_sink_t sink = { on_text, on_tag, on_segment_end };
     tag_parser_init(&c->tags, &sink, c);
     if (!c->chat) { provider_error_t e; provider_error_set(&e, PERR_OTHER, 0, 0, "no chat session"); fail(c, "chat", &e); return; }
+    c->t.t_chat_sent = clock_us();
     vchat->chat_send(c->chat, &req);
     tag_parser_finish(&c->tags);
     seg_boundary(c);
@@ -286,7 +291,7 @@ static void engine_task(void *arg)
         atomic_store(&c->busy, true);
         atomic_store(&c->abort, false);
         if (m.cmd == CMD_START) { c->lang_hint = m.lang; c->reply_lang = m.lang; open_sessions(c, m.lang); }
-        else if (m.cmd == CMD_TURN) { run_turn(c, m.events[0] ? m.events : NULL); if (atomic_load(&c->abort)) { engine_event_t ev = { .kind = ENGINE_EV_ABORTED }; emit(c, &ev); } }
+        else if (m.cmd == CMD_TURN) { run_turn(c, m.events[0] ? m.events : NULL, m.at); if (atomic_load(&c->abort)) { engine_event_t ev = { .kind = ENGINE_EV_ABORTED }; emit(c, &ev); } }
         else if (m.cmd == CMD_END) close_sessions(c);
         atomic_store(&c->busy, false);
     }
@@ -309,7 +314,7 @@ static esp_err_t cs_on_audio(engine_t *e, const int16_t *pcm, size_t n)
 static esp_err_t cs_on_release(engine_t *e, const char *events)
 {
     cascade_t *c = e->impl;
-    struct msg m = { .cmd = CMD_TURN };
+    struct msg m = { .cmd = CMD_TURN, .at = clock_us() };    // the turn's clock starts here, not when the engine task gets to it
     snprintf(m.events, sizeof m.events, "%s", events ? events : "");
     return queue_send(c->q, &m, 100) ? ESP_OK : ESP_ERR_TIMEOUT;
 }

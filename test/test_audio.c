@@ -1,6 +1,7 @@
 // test_audio.c — the volume the owner sets is heard in even steps: 100 is the loudest and every 10 below it is 3 dB
 // quieter, down to 10, the page's quietest (27 dB below); 0 is silence. The self-test's beep keeps its own level, so
-// "does the speaker work" never depends on how far the volume was turned down.
+// "does the speaker work" never depends on how far the volume was turned down. A frame still on its way into a call
+// when the key comes up is through before audio_capture_stop() returns.
 #include "minitest.h"
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
@@ -80,8 +81,29 @@ TEST(test_audio_selftest_keeps_its_own_level)
     audio_set_volume(AUDIO_VOLUME_DEFAULT);
 }
 
+
+// The call hands the recording to the recognizer the moment the key is up (2026-11-05: first, not after the bookkeeping),
+// so a microphone frame still being copied in must be through before audio_capture_stop() returns.
+static atomic_int s_cb_started, s_cb_done;
+static void slow_cb(const int16_t *pcm, size_t n, void *user) { (void)pcm; (void)n; (void)user; atomic_store(&s_cb_started, 1); usleep(50000); atomic_store(&s_cb_done, 1); }
+static void *push_one(void *arg) { (void)arg; int16_t f[320] = {0}; audio_push_capture(f, 320); return NULL; }
+
+TEST(test_audio_capture_stop_waits_for_a_frame)
+{
+    audio_once();
+    atomic_store(&s_cb_started, 0); atomic_store(&s_cb_done, 0);
+    audio_capture_start(slow_cb, NULL);
+    pthread_t th; pthread_create(&th, NULL, push_one, NULL);
+    for (int i = 0; i < 500 && !atomic_load(&s_cb_started); i++) usleep(1000);
+    CHECK_EQ_INT(atomic_load(&s_cb_started), 1);
+    audio_capture_stop();
+    CHECK_EQ_INT(atomic_load(&s_cb_done), 1);                    // the frame was through before stop returned
+    pthread_join(th, NULL);
+}
+
 void test_audio(void)
 {
     RUN(test_audio_volume_steps);
     RUN(test_audio_selftest_keeps_its_own_level);
+    RUN(test_audio_capture_stop_waits_for_a_frame);
 }

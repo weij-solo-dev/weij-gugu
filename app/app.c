@@ -79,9 +79,9 @@ static void on_board_event(const board_event_t *ev, void *user)
         if (ev->a == BOARD_KEY_YELLOW) toggle_pairing_mode();      // fires while the key is still down
         break;
     case BOARD_EV_KEY_UP:
-        store_event("key %s up after %d ms", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow", ev->b);
         if (ev->a == BOARD_KEY_YELLOW) { if (ev->b < BOARD_HOLD_MS) instinct_yellow_tap(); }   // the yellow key is play, never voice; a long press already did its job
-        else call_key(CALL_KEY_BLUE, false, ev->b);
+        else call_key(CALL_KEY_BLUE, false, ev->b);    // first: the answer's clock runs from here, and an event-log line is a flash write
+        store_event("key %s up after %d ms", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow", ev->b);
         break;
     case BOARD_EV_TOUCH_DOWN: instinct_touched(ev->a, ev->b); break;
     case BOARD_EV_SHAKE: instinct_shaken(ev->a); break;
