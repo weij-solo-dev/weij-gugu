@@ -22,6 +22,8 @@ typedef struct {
     // only plays the no-signal sound.
     void (*on_outcome)(bool ok, const char *stage, const char *why, void *user);
     void *outcome_user;
+    void (*on_story_over)(bool bedtime, void *user);   // a story ended (told to the end, stopped, or hung up): the app's goodnight
+    void *story_user;
 } call_config_t;
 
 esp_err_t    call_init(engine_t *engine, const call_config_t *cfg);
@@ -31,6 +33,9 @@ void         call_hangup(void);
 call_state_t call_state(void);
 const char  *call_state_name(call_state_t s);
 void         call_set_lang(lang_t lang);   // the interaction language for the next call (the pairing page changed it)
+// A story without the child's words (the shelf, the bedtime bubble): the line opens if it is closed (no beep, no
+// microphone) and Gugu starts telling. `request` stands in for what the child would have said.
+esp_err_t    call_story(const char *request, bool bedtime);
 typedef void (*call_state_cb)(call_state_t state, void *user);
 void         call_set_state_listener(call_state_cb cb, void *user);
 // Replay harness: dial, feed a 16 kHz WAV as the utterance, release, wait for the turn to finish.

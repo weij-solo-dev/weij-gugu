@@ -166,7 +166,16 @@ TEST(test_engine_story)
     char names[2][40]; char path[200]; char *saved = NULL;
     if (mind_story_shelf(names, 2) > 0) { snprintf(path, sizeof path, "%s/stories/%s", store_data_dir(), names[0]); saved = file_read_all(path, NULL); }
     CHECK(saved && strstr(saved, "从前有一只小恐龙") && strstr(saved, "大象用长鼻子") && strstr(saved, "故事讲完啦"));
+    CHECK(saved && strstr(saved, "[surprised] 走着走着") != NULL);    // each sentence's face kept
     mem_release(saved);
+    int shelf_before = mind_story_shelf(names, 2) > 0 ? 1 : 0, before_said = seg_said_n; story_n = 0;
+    memset(ev_count, 0, sizeof ev_count);
+    say(e, "再讲一遍");                                           // the same story again, from the shelf: no model, no new copy
+    CHECK(wait_for(2, 6000));
+    CHECK(story_n >= 2 && story_phase[0] == ENGINE_STORY_BEGIN && story_phase[1] == ENGINE_STORY_END);
+    CHECK(seg_said_n - before_said == 6 + 4 + 3);                 // every sentence of the three parts
+    char names2[2][40];
+    CHECK(shelf_before == 1 && mind_story_shelf(names2, 2) > 0 && !strcmp(names2[0], names[0]));
     engine_end_call(e); clock_sleep_ms(100); engine_destroy(e);
 }
 

@@ -54,15 +54,16 @@ void      mind_strip_tags(char *text);                                          
 void      mind_set_asked(const char *question, uint32_t ttl_ms);
 
 // ---- stories (mind_story.c; content/prompts/story.md): told in parts, kept on a shelf under data/stories/ ----
-typedef enum { STORY_INTENT_NONE = 0, STORY_INTENT_START, STORY_INTENT_STOP, STORY_INTENT_MORE } story_intent_t;
+typedef enum { STORY_INTENT_NONE = 0, STORY_INTENT_START, STORY_INTENT_STOP, STORY_INTENT_MORE, STORY_INTENT_AGAIN } story_intent_t;
 // What the child's words mean for a story: asking for one (or saying yes to the one Gugu just offered in last_reply),
-// asking to stop, asking for more. The caller decides what applies (stop and more only while a story is on).
+// asking to stop, asking for more, asking for the last one again ("再讲一遍", not "再讲一个"). The caller decides what applies (stop and more only while a story is on).
 story_intent_t mind_story_intent(const char *said, const char *last_reply);
 // The prompt for one part of `parts`: block C carries today and the story's rules; child_said is the answer to the
 // last part's question (NULL: none came); bedtime ends the story with goodnight; go_on: the part was cut off while the
 // model wrote it (the child broke in), so it is finished from where the dialogue's last part stops.
 esp_err_t mind_story_prompt_build(mind_prompt_t *out, lang_t lang, int part, int parts, const char *child_said, bool bedtime, bool go_on);
-esp_err_t mind_story_save(lang_t lang, const char *text, char *path_out, size_t cap);   // tags stripped; keeps the newest 30
+esp_err_t mind_story_save(lang_t lang, const char *text, char *path_out, size_t cap);   // the text with its tags and without; keeps the newest 30
+char     *mind_story_newest(lang_t lang);   // the newest story in this language, with its tags (mem_release), or NULL
 int       mind_story_shelf(char (*names)[40], int cap);                                 // file names, newest first
 
 // ---- mood baseline (v1.0: a fixed sentence per time of day) ----

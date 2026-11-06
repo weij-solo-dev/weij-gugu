@@ -46,7 +46,7 @@ typedef struct {
         struct { const int16_t *pcm; size_t samples; int segment; } audio;
         struct { engine_timing_t timing; provider_usage_t asr, chat, tts; const char *reply; const char *transcript; lang_t lang; int segments; int tags; } done;
         struct { provider_error_t err; const char *stage; } error;   // stage: "prewarm" | "asr" | "chat" | "tts"
-        struct { engine_story_phase_t phase; int part, parts; } story;
+        struct { engine_story_phase_t phase; int part, parts; bool bedtime, finished; } story;   // finished: END after the last part
     } u;
 } engine_event_t;
 

@@ -61,7 +61,7 @@ void ui_stage_beat(int beat, int per_bar);   // the lights and the sway on a bea
 void ui_stage_cheer(void);                   // a tap during the show: sparkles round Gugu, a jump
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
-typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb
+typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA, UI_BUBBLE_STORY } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb, a moon and a book (bedtime)
 void ui_show_bubble(ui_bubble_t b);          // the thought bubble at Gugu's upper right, bobbing gently (a call could not start)
 bool ui_bubble_hit(int x, int y);            // a touch on the bubble while it is up
 ui_bubble_t ui_bubble_shown(void);          // the bubble on screen now, or UI_BUBBLE_NONE

@@ -43,6 +43,8 @@ story_intent_t mind_story_intent(const char *said, const char *last_reply)
     static const char *const STOP[] = { "不听", "不想听", "不要听", "别讲", "不要讲", "不讲了", "停一下", "停下", "唔聽", "唔想聽", "唔好講", "stop", "no more", NULL };
     static const char *const MORE[] = { "继续", "接着讲", "然后呢", "后来呢", "还有呢", "繼續", "跟住", "然後呢", "後來呢", "仲有呢", "what happens next", "then what", "keep going", "go on", NULL };
     if (any(low, STOP)) return STORY_INTENT_STOP;
+    static const char *const AGAIN[] = { "再讲一遍", "再讲一次", "再说一遍", "再讲一下刚才", "还要听刚才", "講多次", "再講一次", "再講一遍", "again", "one more time", "same story", NULL };
+    if (any(low, AGAIN)) return STORY_INTENT_AGAIN;
     if (any(low, MORE)) return STORY_INTENT_MORE;
     static const char *const STORY[] = { "故事", "故仔", "story", "stories", NULL };
     static const char *const TELL[] = { "讲", "講", "说", "說", "听", "聽", "tell", "read", "hear", "another", "want", "time", "about", NULL };
@@ -94,6 +96,29 @@ esp_err_t mind_story_prompt_build(mind_prompt_t *out, lang_t lang, int part, int
 static void shelf_dir(char *dst, size_t cap) { snprintf(dst, cap, "%s/stories", store_data_dir()); }
 static int by_name_desc(const void *a, const void *b) { return strcmp((const char *)b, (const char *)a); }
 
+char *mind_story_newest(lang_t lang)
+{
+    char names[30][40];
+    int n = mind_story_shelf(names, 30);
+    for (int i = 0; i < n; i++) {
+        char path[200]; snprintf(path, sizeof path, "%s/stories/%.39s", store_data_dir(), names[i]);
+        char *txt = file_read_all(path, NULL);
+        cJSON *j = txt ? cJSON_Parse(txt) : NULL;
+        if (txt) mem_release(txt);
+        if (!j) continue;
+        const cJSON *l = cJSON_GetObjectItem(j, "lang"), *t = cJSON_GetObjectItem(j, "tagged"), *plain = cJSON_GetObjectItem(j, "text");
+        const char *body = cJSON_IsString(t) && *t->valuestring ? t->valuestring : cJSON_IsString(plain) ? plain->valuestring : NULL;
+        char *out = NULL;
+        if (body && cJSON_IsString(l) && !strcmp(l->valuestring, lang_code(lang))) {
+            size_t len = strlen(body); out = mem_alloc_big(len + 1);
+            if (out) memcpy(out, body, len + 1);
+        }
+        cJSON_Delete(j);
+        if (out) return out;
+    }
+    return NULL;
+}
+
 int mind_story_shelf(char (*names)[40], int cap)
 {
     char dir[160]; shelf_dir(dir, sizeof dir);
@@ -142,6 +167,7 @@ esp_err_t mind_story_save(lang_t lang, const char *text, char *path_out, size_t 
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "t", iso); cJSON_AddStringToObject(o, "lang", lang_code(lang));
     cJSON_AddStringToObject(o, "title", title); cJSON_AddStringToObject(o, "text", start);
+    cJSON_AddStringToObject(o, "tagged", text ? text : "");          // told again with its faces (mind_story_newest)
     char *json = cJSON_PrintUnformatted(o);
     cJSON_Delete(o); mem_release(clean);
     bool ok = json && atomic_file_write(path, json, strlen(json));

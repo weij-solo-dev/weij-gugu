@@ -86,7 +86,7 @@ void ui_show_bubble(ui_bubble_t b)
     bool on = b != UI_BUBBLE_NONE;
     if (s_bubble_img && on && b != s_bubble) {
         lv_image_set_src(s_bubble_img, b == UI_BUBBLE_WIFI ? &spr_bubble_wifi : b == UI_BUBBLE_SERVICE ? &spr_bubble_service : b == UI_BUBBLE_HELLO ? &spr_bubble_hello :
-                                       b == UI_BUBBLE_IDEA ? &spr_bubble_idea : &spr_bubble_setup);
+                                       b == UI_BUBBLE_IDEA ? &spr_bubble_idea : b == UI_BUBBLE_STORY ? &spr_bubble_story : &spr_bubble_setup);
     }
     if (on) s_bubble = b;
     if (s_bubble_img) {

@@ -16,7 +16,7 @@ warm, slightly husky voice.
 > few days (a real place, a reason that follows from the last trip, the day plan, child-sized facts, a friend, a
 > souvenir, postcards) and a **journey log** Gugu remembers and can be asked about; pictures generated per trip and
 > turned into pixel art on the device (a backdrop with four times of day, keyed props, the friend); a touchable
-> object layer (lamp, window, props); the yellow key feeds Gugu (something falls, it pecks it up and reacts); the walkie-talkie sounds; 19 expressions; the
+> object layer (lamp, window, props); the yellow gift key gives Gugu something (it falls, Gugu picks it up with its wings and reacts; five quick presses and Gugu puts on a show, a song on a disco stage); ask for a story and Gugu tells one in three parts, with a question for the child between them; the walkie-talkie sounds; 19 expressions; the
 > IMU (shake → a bouncing ball, then dizzy, then cross; pick-up → a look). The planning document and the full
 > decision log live in [`PLAN.md`](PLAN.md) (Chinese).
 
@@ -37,7 +37,7 @@ warm, slightly husky voice.
   Gugu may only retell what the card says. Parents can read and delete the card.
 - **It remembers the child.** Names, friends, fears, new skills, brought up naturally days later.
 - **Parents see everything, without an account.** Every call transcript, postcard and memory is on
-  the device; holding the yellow key for three seconds enters pairing mode: a hotspot whose name and password
+  the device; holding the yellow gift key for three seconds enters pairing mode: a hotspot whose name and password
   show on the screen, and a web page where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
 
 ## How it is built

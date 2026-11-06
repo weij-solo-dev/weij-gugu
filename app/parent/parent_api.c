@@ -60,6 +60,45 @@ static char *jsonl_to_array(const char *path)
 
 static bool safe_rel(const char *rel) { return rel && *rel && !strstr(rel, "..") && rel[0] != '/'; }
 
+// A story's file name as the shelf writes it: 20261106-143345-00.json, nothing else.
+static bool story_name_ok(const char *n)
+{
+    size_t l = strlen(n);
+    if (l < 10 || l > 40 || strcmp(n + l - 5, ".json")) return false;
+    for (size_t i = 0; i < l - 5; i++) if (!((n[i] >= '0' && n[i] <= '9') || n[i] == '-')) return false;
+    return true;
+}
+static int name_desc(const void *a, const void *b) { return strcmp((const char *)b, (const char *)a); }
+// [{"name":…,"t":…,"lang":…,"title":…,"chars":…}], newest first (the text itself stays on the device until asked for)
+static char *stories_list(const char *dir)
+{
+    char (*names)[48] = malloc(sizeof *names * 64); int n = 0;
+    DIR *d = names ? opendir(dir) : NULL;
+    for (struct dirent *e; d && (e = readdir(d)) && n < 64;) if (story_name_ok(e->d_name)) snprintf(names[n++], 48, "%.47s", e->d_name);
+    if (d) closedir(d);
+    if (n) qsort(names, (size_t)n, sizeof *names, name_desc);
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < n; i++) {
+        char path[240]; snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        char *txt = file_read_all(path, NULL);
+        cJSON *st = txt ? cJSON_Parse(txt) : NULL;
+        if (txt) mem_release(txt);
+        if (!st) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", names[i]);
+        const char *keys[] = { "t", "lang", "title" };
+        for (int k = 0; k < 3; k++) { const cJSON *v = cJSON_GetObjectItem(st, keys[k]); cJSON_AddStringToObject(o, keys[k], cJSON_IsString(v) ? v->valuestring : ""); }
+        const cJSON *tx = cJSON_GetObjectItem(st, "text");
+        size_t chars = 0; if (cJSON_IsString(tx)) for (const char *q = tx->valuestring; *q; q++) if (((unsigned char)*q & 0xC0) != 0x80) chars++;
+        cJSON_AddNumberToObject(o, "chars", (double)chars);
+        cJSON_AddItemToArray(arr, o);
+        cJSON_Delete(st);
+    }
+    free(names);
+    char *json = cJSON_PrintUnformatted(arr); cJSON_Delete(arr);
+    return json ? json : strdup("[]");
+}
+
 int parent_api_handle(const char *method, const char *path, const char *query, const char *body, size_t body_len,
                       char **out, size_t *out_len, const char **ctype, const char **disposition)
 {
@@ -136,6 +175,30 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
     if (get && !strcmp(path, "/api/calls")) {
         snprintf(p, sizeof p, "%s/calls/index.jsonl", store_data_dir());
         *out = jsonl_to_array(p); *out_len = strlen(*out); return 200;
+    }
+    // The story shelf (data/stories/, mind_story.c): the list newest first, one story whole, and forgetting one.
+    if (get && !strcmp(path, "/api/stories")) {
+        snprintf(p, sizeof p, "%s/stories", store_data_dir());
+        *out = stories_list(p); *out_len = strlen(*out); return 200;
+    }
+    if (get && !strcmp(path, "/api/story")) {
+        char name[48]; query_get(query, "name", name, sizeof name);
+        if (!story_name_ok(name)) return reply(out, out_len, "{\"error\":\"bad name\"}"), 400;
+        snprintf(p, sizeof p, "%s/stories/%s", store_data_dir(), name);
+        size_t n; char *s = file_read_all(p, &n);
+        if (!s) return reply(out, out_len, "{\"error\":\"no such story\"}"), 404;
+        *out = strdup(s); *out_len = n; mem_release(s); return 200;
+    }
+    if (post && !strcmp(path, "/api/story/forget")) {        // {"name":"20261106-143345-00.json"}
+        cJSON *j = cJSON_ParseWithLength(body, body_len);
+        const cJSON *nm = j ? cJSON_GetObjectItem(j, "name") : NULL;
+        char name[48] = ""; if (cJSON_IsString(nm)) snprintf(name, sizeof name, "%s", nm->valuestring);
+        cJSON_Delete(j);
+        if (!story_name_ok(name)) return reply(out, out_len, "{\"error\":\"bad name\"}"), 400;
+        snprintf(p, sizeof p, "%s/stories/%s", store_data_dir(), name);
+        bool ok = remove(p) == 0;
+        store_event("story forgotten from the page: %s", name);
+        return reply(out, out_len, ok ? "{\"ok\":true}" : "{\"ok\":false}");
     }
     if (get && !strcmp(path, "/api/call")) {
         char rel[160]; query_get(query, "file", rel, sizeof rel);

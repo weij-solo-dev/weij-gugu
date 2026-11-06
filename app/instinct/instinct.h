@@ -38,7 +38,9 @@ void instinct_set_bubble_cb(void (*tapped)(void *user), void *user);   // the bu
 // The app makes the lines (life) and hands each over when it is ready; instinct shows its bubble when no problem
 // bubble is up, glances at it now and then, and plays the line when the bubble is tapped (the beak moving with it).
 // A light bulb is asked for in the day, after a quiet spell (setting idea_idle_min, 20), at most ideas_per_day (3).
-typedef enum { INSTINCT_OFFER_NONE = 0, INSTINCT_OFFER_HELLO, INSTINCT_OFFER_IDEA } instinct_offer_t;
+// The moon-and-book bubble (INSTINCT_OFFER_STORY, 2026-11-06) comes by itself at bedtime (setting bedtime_min, minutes
+// after midnight, 1200 = 20:00; -1 never), once an evening, and a tap asks for a bedtime story (instinct_set_story_cb).
+typedef enum { INSTINCT_OFFER_NONE = 0, INSTINCT_OFFER_HELLO, INSTINCT_OFFER_IDEA, INSTINCT_OFFER_STORY } instinct_offer_t;
 void instinct_offer(instinct_offer_t kind, const char *wav_path, const char *text, bool question);
 typedef struct {
     void (*want_idea)(void *user);                                                       // time for a light bulb: make a line
@@ -47,3 +49,8 @@ typedef struct {
 } instinct_offer_cbs_t;
 void instinct_set_offer_cbs(const instinct_offer_cbs_t *cbs);
 void instinct_hush(void);   // stop a line mid-way (the blue key went down)
+// Stories asked for without words: the shelf at home (a book), the bedtime bubble. The app opens the line (call_story).
+void instinct_set_story_cb(void (*want)(const char *request, bool bedtime, void *user), void *user);
+// A bedtime story is over: Gugu falls asleep and the screen dims slowly; a touch, a key or a call wakes it all.
+void instinct_goodnight(void);
+void instinct_wake(void);                   // any key: the screen comes back (the pairing card must be readable)

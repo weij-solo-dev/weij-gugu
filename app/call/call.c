@@ -37,6 +37,8 @@ static atomic_int s_turns_done, s_turns_failed, s_turns_empty;   // empty: the k
 static char s_heard[128];             // what the recognizer heard, for the event log once the turn is over (see log_heard)
 static atomic_int s_seg_sounding = -1;   // the segment the speaker started last this turn (& 31): where a story pauses
 static atomic_bool s_story_wait;      // a story's part ended on a question: waiting for the child (STORY_WAIT_MS)
+static atomic_bool s_story_pending;   // call_story while the line was closed: the story starts when it opens
+static char s_story_request[200]; static bool s_story_bedtime;
 static call_state_cb s_state_cb; static void *s_state_user;
 
 const char *call_state_name(call_state_t s)
@@ -124,6 +126,34 @@ static void start_turn(void)
     store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
 }
 
+// A story nobody asked for in words (the shelf, the bedtime bubble): Gugu opens the book and starts telling.
+static void story_turn(void)
+{
+    atomic_store(&s_turn_active, true); atomic_store(&s_voice_samples, 0); atomic_store(&s_seg_sounding, -1);
+    s_t5_first_play = 0;
+    set_state(CALL_THINKING);
+    ui_pose(UI_POSE_BOOK);
+    engine_story_start(s_engine, s_story_request, s_story_bedtime);
+}
+
+esp_err_t call_story(const char *request, bool bedtime)
+{
+    snprintf(s_story_request, sizeof s_story_request, "%s", request ? request : "");
+    s_story_bedtime = bedtime;
+    call_state_t st = call_state();
+    LOGI("story asked for (%s)%s", call_state_name(st), bedtime ? ", bedtime" : "");
+    if (st == CALL_WAITING) { story_turn(); return ESP_OK; }
+    if (st != CALL_IDLE && st != CALL_ENDED) return ESP_ERR_INVALID_STATE;   // the child is talking, or Gugu is
+    store_call_begin(&s_log);
+    s_call_t0 = clock_us();
+    atomic_store(&s_captured, 0);
+    atomic_store(&s_story_pending, true);
+    set_state(CALL_CONNECTING);                                    // no beep, no microphone: nobody pressed the key
+    ui_pose(UI_POSE_BOOK);
+    engine_start_call(s_engine, s_cfg.lang_hint, s_cfg.where);
+    return ESP_OK;
+}
+
 // ---- speaker markers → face ----
 static void marker_cb(int id, void *user)
 {
@@ -196,6 +226,7 @@ void call_engine_event(const engine_event_t *ev, void *user)
     switch (ev->kind) {
     case ENGINE_EV_READY:
         store_event("line open after %lld ms (key %s)", (long long)((clock_us() - s_call_t0) / 1000), atomic_load(&s_blue_down) ? "held" : "released");
+        if (call_state() == CALL_CONNECTING && atomic_exchange(&s_story_pending, false)) { story_turn(); break; }   // call_story: straight into it
         if (call_state() == CALL_CONNECTING) {
             flush_preroll();
             if (atomic_load(&s_blue_down)) set_state(CALL_LISTENING);   // s_captured keeps the pre-roll count
@@ -277,7 +308,11 @@ void call_engine_event(const engine_event_t *ev, void *user)
     case ENGINE_EV_STORY:                         // a story (engine.h): the book comes out; a part asks the child; it is over
         if (ev->u.story.phase == ENGINE_STORY_BEGIN) { store_event("story begins"); ui_pose(UI_POSE_BOOK); }
         else if (ev->u.story.phase == ENGINE_STORY_ASK) { atomic_store(&s_story_wait, true); store_event("story: part %d of %d told, waiting for the child", ev->u.story.part, ev->u.story.parts); }
-        else { atomic_store(&s_story_wait, false); store_event("story over after part %d of %d", ev->u.story.part, ev->u.story.parts); }
+        else {
+            atomic_store(&s_story_wait, false);
+            store_event("story over after part %d of %d%s", ev->u.story.part, ev->u.story.parts, ev->u.story.bedtime ? " (bedtime)" : "");
+            if (s_cfg.on_story_over) s_cfg.on_story_over(ev->u.story.bedtime && ev->u.story.finished, s_cfg.story_user);   // goodnight only after the whole bedtime story
+        }
         break;
     }
 }
@@ -355,7 +390,7 @@ void call_hangup(void)
     store_event("hung up: %s", summary);
     store_logs_flush();                                            // the call's log lines reach flash now, not in 30 s
     atomic_store(&s_turns_done, 0); atomic_store(&s_turns_failed, 0); atomic_store(&s_turns_empty, 0);
-    atomic_store(&s_story_wait, false);
+    atomic_store(&s_story_wait, false); atomic_store(&s_story_pending, false);
     if (ui_get_pose() == UI_POSE_BOOK) ui_pose(UI_POSE_NONE);
     ui_set_emotion(UI_EMO_NEUTRAL);
     set_state(CALL_IDLE);

@@ -51,7 +51,7 @@ typedef struct {
     bool asr_failed; provider_error_t asr_err;
     // the story (engine.h): told in parts; between parts the call waits for the child
     int story_part, story_parts;          // story_part 0: no story
-    bool story_bedtime, story_paused;
+    bool story_bedtime, story_paused, story_finished;
     strbuf_t story_text;                  // every part as written, for the shelf
     char *part_seg[STORY_SEGS]; mind_tag_t part_emo[STORY_SEGS];
     int part_n, fed;                      // this part's sentences so far; the next one to hand to the voice
@@ -250,7 +250,7 @@ static void story_begin(cascade_t *c, bool bedtime)
 {
     c->story_part = 1; c->story_parts = STORY_PARTS; c->story_bedtime = bedtime; c->story_paused = false;
     strbuf_clear(&c->story_text);
-    engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_BEGIN, 1, STORY_PARTS } };
+    engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_BEGIN, 1, STORY_PARTS, bedtime } };
     emit(c, &ev);
     LOGI("story begins (%d parts%s)", STORY_PARTS, bedtime ? ", bedtime" : "");
 }
@@ -266,9 +266,12 @@ static void part_record(cascade_t *c)
 {
     if (c->part_told >= c->part_n) return;
     strbuf_t t; strbuf_init(&t);
-    for (int i = c->part_told; i < c->part_n; i++) strbuf_append(&t, c->part_seg[i], strlen(c->part_seg[i]));
+    for (int i = c->part_told; i < c->part_n; i++) {
+        strbuf_append(&t, c->part_seg[i], strlen(c->part_seg[i]));
+        char tag[24]; snprintf(tag, sizeof tag, "[%s]", mind_tag_name(c->part_emo[i]));   // the shelf keeps each sentence's face
+        strbuf_append(&c->story_text, tag, strlen(tag)); strbuf_append(&c->story_text, c->part_seg[i], strlen(c->part_seg[i]));
+    }
     mind_dialog_add("assistant", t.s ? t.s : "");
-    strbuf_append(&c->story_text, t.s ? t.s : "", t.len);
     strbuf_free(&t);
     c->part_told = c->part_n;
 }
@@ -278,10 +281,10 @@ static void story_end(cascade_t *c, bool keep)
     if (!c->story_part) return;
     part_record(c);
     if (keep && c->story_text.len) mind_story_save(c->reply_lang, c->story_text.s, NULL, 0);
-    engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_END, c->story_part, c->story_parts } };
+    engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_END, c->story_part, c->story_parts, c->story_bedtime, c->story_finished } };
     LOGI("story over after part %d of %d", c->story_part, c->story_parts);
     part_clear(c);
-    c->story_part = 0; c->story_paused = false; c->pacing = false;
+    c->story_part = 0; c->story_paused = false; c->story_finished = false; c->pacing = false;
     strbuf_clear(&c->story_text);
     emit(c, &ev);
 }
@@ -328,10 +331,10 @@ static void part_done(cascade_t *c)
     part_record(c);
     emit_done(c);
     if (c->story_part < c->story_parts) {
-        engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_ASK, c->story_part, c->story_parts } };
+        engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_ASK, c->story_part, c->story_parts, c->story_bedtime } };
         part_clear(c);
         emit(c, &ev);
-    } else story_end(c, true);
+    } else { c->story_finished = true; story_end(c, true); }
 }
 
 static void story_cut(cascade_t *c)   // a part did not get through: a pause keeps the story, a failure ends it
@@ -389,6 +392,30 @@ static void story_resume(cascade_t *c, const char *said)
     part_done(c);
 }
 
+// "再讲一遍": the newest story off the shelf, told again as it was (its faces too), no request to the model, no new copy.
+static void story_retell(cascade_t *c, const char *tagged)
+{
+    story_end(c, true);
+    c->story_part = 1; c->story_parts = 1; c->story_bedtime = false; c->story_paused = false;
+    strbuf_clear(&c->story_text);
+    engine_event_t ev = { .kind = ENGINE_EV_STORY, .u.story = { ENGINE_STORY_BEGIN, 1, 1, false } };
+    emit(c, &ev);
+    LOGI("story told again from the shelf");
+    part_clear(c);
+    c->pacing = true;
+    tag_sink_t sink = { on_text, on_tag, on_segment_end };
+    tag_parser_init(&c->tags, &sink, c);
+    tag_parser_feed(&c->tags, tagged, strlen(tagged));
+    tag_parser_finish(&c->tags);
+    seg_boundary(c);
+    c->part_complete = true;
+    c->part_told = c->part_n;                     // already on the shelf
+    if (c->reply.len) mind_dialog_add("assistant", c->reply.s);
+    if (!story_drain(c)) { story_cut(c); return; }
+    emit_done(c);
+    story_end(c, false);
+}
+
 static void run_story_next(cascade_t *c)          // no answer came: the next part
 {
     if (!c->story_part || c->story_paused) return;
@@ -436,7 +463,11 @@ static void run_turn(cascade_t *c, const char *events, int64_t released_at)
     story_intent_t si = mind_story_intent(c->transcript, gugu_said);
     mind_dialog_add("user", c->transcript);
 
-    // 1b. stories: a new one, the answer to a part's question, or what the child said when it broke in
+    // 1b. stories: the last one again, a new one, the answer to a part's question, or what the child said when it broke in
+    if (si == STORY_INTENT_AGAIN) {
+        char *again = mind_story_newest(c->reply_lang);
+        if (again) { story_retell(c, again); mem_release(again); return; }   // none on the shelf yet: the model answers
+    }
     if (c->chat && si == STORY_INTENT_START) { story_end(c, true); story_begin(c, false); story_part(c, NULL); return; }
     if (c->story_part && si == STORY_INTENT_STOP) {
         story_end(c, true);

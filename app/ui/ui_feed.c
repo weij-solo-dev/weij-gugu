@@ -1,4 +1,4 @@
-// ui_feed.c — the yellow key's food: an item falls from above the circle and lands on the ground beside Gugu's feet with
+// ui_feed.c — the gift key's food (the yellow key, 礼物键): an item falls from above the circle and lands on the ground beside Gugu's feet with
 // a small bounce (just behind the pigeon), on the row Gugu's feet stand on. Then Gugu handles it (instinct runs the steps,
 // 2026-11-04, the owner: look at it, a face, then do something): picked up with a wing, held at the chest in both, held
 // up beside the glasses for a look, bitten and eaten, hidden behind the back, or kicked out of the round window in an

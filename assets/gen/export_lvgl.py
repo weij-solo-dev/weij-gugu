@@ -115,7 +115,7 @@ def main():
         images.append((f'spr_win_{tod}', pg.window(tod), True))
     images.append(('spr_acc_sun_hat', pg.acc_sun_hat(), True))
     images.append(('spr_acc_camera', pg.acc_camera(), True))
-    for icon in ('setup', 'wifi', 'service', 'hello', 'idea'): images.append((f'spr_bubble_{icon}', pg.bubble(icon), True))
+    for icon in ('setup', 'wifi', 'service', 'hello', 'idea', 'story'): images.append((f'spr_bubble_{icon}', pg.bubble(icon), True))
     for pz in POSES:
         images.append((f'spr_pose_{pz}', pg.gugu(pz), True))
     images.append(('spr_news', pg.newspaper(), True))

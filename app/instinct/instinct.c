@@ -17,6 +17,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <stdlib.h>
 
 static atomic_bool s_busy;                   // a turn is on: the child talks or Gugu answers
@@ -47,6 +48,13 @@ static instinct_offer_cbs_t s_offer_cbs;
 static mutex_t s_offer_lock;
 static struct { instinct_offer_t kind; char path[160]; char text[240]; bool question; int64_t since; } s_offer;
 static bool s_speaking, s_speaking_question;
+// Stories asked for without words (instinct.h): the shelf, the bedtime bubble; the goodnight dimming after one.
+static void (*s_story_cb)(const char *request, bool bedtime, void *user); static void *s_story_user;
+#define STORY_OFFER_EXPIRE_US (40 * 60 * 1000000LL)   // a bedtime bubble nobody tapped fades after this long
+#define DIM_LEVEL 6                                     // percent: the screen after a bedtime story, Gugu asleep
+#define BRIGHT_LEVEL 80                                 // percent: the screen as the board starts it
+static int s_dim;                                       // 0: awake; else the brightness being faded to DIM_LEVEL
+static void wake_up(void); static void dim_tick(void); static void bedtime_schedule(int64_t now);
 static int64_t s_last_interaction, s_idea_asked, s_peek_next;
 
 // The feed key (2026-11-04, owner: "投喂一颗食物（坚果、汉堡等）也可能是物件（比如金币等），然后 gugu 完成拾起作出相关反应";
@@ -378,7 +386,7 @@ static void idle_stop(void)
 
 static void idle_tick(int64_t now, world_tod_t tod)   // every 250 ms
 {
-    bool quiet = resting() && !s_puzzled && !s_speaking && !atomic_load(&s_line_open) && ui_bubble_shown() == UI_BUBBLE_NONE;
+    bool quiet = resting() && !s_puzzled && !s_speaking && !atomic_load(&s_line_open) && ui_bubble_shown() == UI_BUBBLE_NONE && !s_dim;   // asleep after a bedtime story: no idle life
     if (s_idle_kind) {
         if (!quiet || now >= s_idle_end) { idle_stop(); return; }
         if (s_idle_kind == IDLE_LOOK && s_idle_mark && now >= s_idle_mark) { ui_pose(UI_POSE_LOOK_R); s_idle_mark = 0; }   // and the other way
@@ -422,6 +430,10 @@ static void poke_object(int hit)
     else if (!strcmp(id, "window")) { ui_play_action(UI_ACT_WHISTLE); mood(UI_EMO_CURIOUS, 2500); }
     else ui_play_action(UI_ACT_NOD);
     LOGI("poked %s → %s", id, sfx);
+    if (!strcmp(id, "shelf") && s_story_cb) {                  // a book off the shelf: a story (2026-11-06)
+        store_event("the shelf: a story");
+        s_story_cb("（孩子点了书架上的一本书）给我讲个故事吧。", instinct_night(), s_story_user);
+    }
 }
 
 // The bubble is touched: the problem one opens pairing mode, a friendly one plays its line. False when none is shown.
@@ -444,6 +456,13 @@ static bool bubble_tap(int64_t now)
     if (kind == INSTINCT_OFFER_NONE) return false;
     ui_show_bubble(UI_BUBBLE_NONE);
     board_vibrate(20);
+    if (kind == INSTINCT_OFFER_STORY) {                       // the moon and the book: a bedtime story
+        audio_sfx_play("pop");
+        LOGI("bedtime bubble tapped");
+        store_event("bedtime bubble tapped: a bedtime story");
+        if (s_story_cb) s_story_cb("（睡前，孩子点了月亮和书的泡泡）给我讲个睡前故事吧。", true, s_story_user);
+        return true;
+    }
     if (audio_play_file(path) == ESP_OK) {
         s_speaking = true; s_speaking_question = q;
         s_mood_until = 0; ui_set_emotion(UI_EMO_HAPPY);
@@ -455,6 +474,7 @@ static bool bubble_tap(int64_t now)
 
 void instinct_yellow_tap(void)
 {
+    wake_up();
     if (atomic_load(&s_busy) || s_speaking) { LOGI("yellow: not now (%s)", s_speaking ? "a line is playing" : "a turn is on"); return; }
     int64_t now = clock_us();
     s_last_interaction = now;
@@ -469,6 +489,7 @@ void instinct_yellow_tap(void)
 
 void instinct_shaken(int intensity)
 {
+    wake_up();
     show_stop("shaken");
     s_last_interaction = clock_us();
     if (atomic_load(&s_busy)) return;
@@ -566,10 +587,11 @@ static void offer_tick(int64_t now)   // every 250 ms, when no problem bubble is
     if (s_puzzled || !s_offer_lock) return;
     mutex_lock(s_offer_lock);
     if (s_offer.kind == INSTINCT_OFFER_IDEA && now - s_offer.since > IDEA_EXPIRE_US) { s_offer.kind = INSTINCT_OFFER_NONE; LOGI("light bulb faded"); }
+    if (s_offer.kind == INSTINCT_OFFER_STORY && now - s_offer.since > STORY_OFFER_EXPIRE_US) { s_offer.kind = INSTINCT_OFFER_NONE; LOGI("bedtime bubble faded"); }
     instinct_offer_t kind = s_offer.kind;
     mutex_unlock(s_offer_lock);
     bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_shake_last && !s_speaking;
-    ui_show_bubble(show ? (kind == INSTINCT_OFFER_HELLO ? UI_BUBBLE_HELLO : UI_BUBBLE_IDEA) : UI_BUBBLE_NONE);
+    ui_show_bubble(show ? (kind == INSTINCT_OFFER_HELLO ? UI_BUBBLE_HELLO : kind == INSTINCT_OFFER_STORY ? UI_BUBBLE_STORY : UI_BUBBLE_IDEA) : UI_BUBBLE_NONE);
     if (show && resting() && now >= s_peek_next) {       // a glance up at the bubble now and then
         s_peek_next = now + PEEK_EVERY_US;
         mood(UI_EMO_PEEK, PEEK_MS);
@@ -626,11 +648,13 @@ static void instinct_task(void *arg)
         moods_tick();
         urge_tick();
         offer_tick(now);
+        dim_tick();
         idle_tick(now, tod);
         if (now < next1s) continue;
         next1s = now + 1000000;
         readiness_tick();
         idea_schedule(now);
+        bedtime_schedule(now);
         world_state(&st);
         world_tod_t now_tod = tod_of(&st);
         bool changed = st.away != away || now_tod != tod;
@@ -665,10 +689,56 @@ void instinct_set_busy(bool in_turn)
     if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
     if (in_turn) feed_abort();                                // and whatever was falling goes
     if (in_turn) show_stop("a call");                         // the show ends: the child wants to talk
+    if (in_turn) wake_up();
     if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
 
 void instinct_set_line_open(bool open) { atomic_store(&s_line_open, open); s_last_interaction = clock_us(); }
+
+void instinct_set_story_cb(void (*want)(const char *request, bool bedtime, void *user), void *user) { s_story_user = user; s_story_cb = want; }
+
+// After a bedtime story: asleep, the screen fading to DIM_LEVEL over ten seconds (dim_tick); anything wakes it.
+void instinct_goodnight(void)
+{
+    atomic_store(&s_rest, UI_EMO_SLEEPY);
+    ui_set_emotion(UI_EMO_SLEEPY);
+    s_dim = BRIGHT_LEVEL;
+    store_event("goodnight: Gugu sleeps, the screen dims");
+    LOGI("goodnight");
+}
+static void wake_up(void)
+{
+    if (!s_dim) return;
+    s_dim = 0;
+    board_display_set_brightness(BRIGHT_LEVEL);
+    atomic_store(&s_rest, UI_EMO_NEUTRAL);
+    LOGI("awake again");
+}
+void instinct_wake(void) { wake_up(); }
+static void dim_tick(void)                                     // every 250 ms
+{
+    if (!s_dim || s_dim <= DIM_LEVEL) return;
+    s_dim -= 2; if (s_dim < DIM_LEVEL) s_dim = DIM_LEVEL;
+    board_display_set_brightness((uint8_t)s_dim);
+}
+// Bedtime: the moon-and-book bubble, once an evening, from bedtime_min for an hour and a half (the family's clock).
+static void bedtime_schedule(int64_t now)                      // every second
+{
+    int bed = store_setting_int("bedtime_min", 20 * 60);
+    if (bed < 0 || !s_story_cb || s_puzzled || s_speaking || atomic_load(&s_busy) || atomic_load(&s_line_open) || show_on()) return;
+    if (s_offer.kind != INSTINCT_OFFER_NONE) return;
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+    int m = tm.tm_hour * 60 + tm.tm_min;
+    if (m < bed || m >= bed + 90) return;
+    char today[11]; world_today(today, sizeof today);
+    if (!strcmp(store_setting_str("story_offer_day", ""), today)) return;
+    store_setting_set_str("story_offer_day", today);
+    mutex_lock(s_offer_lock);
+    s_offer.kind = INSTINCT_OFFER_STORY; s_offer.path[0] = '\0'; s_offer.text[0] = '\0'; s_offer.question = false; s_offer.since = now;
+    mutex_unlock(s_offer_lock);
+    LOGI("bedtime: the story bubble");
+    store_event("bedtime: the story bubble is up");
+}
 
 // ---- lent to the show (instinct_internal.h) ----
 void instinct_feed_stop(void) { feed_abort(); idle_stop(); }
@@ -681,6 +751,7 @@ bool instinct_can_play(void) { return !atomic_load(&s_busy) && !s_shake_last && 
 // empty wall and sky do nothing.
 void instinct_touched(int x, int y)
 {
+    wake_up();
     if (atomic_load(&s_busy)) return;
     if (show_tap()) return;                                   // the show: a tap is applause
     int64_t now = clock_us();

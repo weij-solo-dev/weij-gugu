@@ -305,6 +305,14 @@ def bubble(icon='setup'):
         c.put(14, 6, P['eyew']); c.put(14, 7, P['eyew']); c.put(15, 5, P['eyew'])   # a glint
         c.rect(14, 14, 4, 1, grey); c.rect(15, 15, 2, 1, grey)   # the screw base
         for (x, y) in ((16, 2), (10, 3), (11, 4), (22, 3), (21, 4), (8, 8), (9, 8), (23, 8), (24, 8)): c.put(x, y, P['glow2'] if 'glow2' in P else P['straw2'])   # rays
+    elif icon == 'story':                                    # bedtime (2026-11-06): a crescent moon over an open book
+        for y in range(H):
+            for x in range(W):
+                if math.hypot(x + 0.5 - 19.0, y + 0.5 - 6.0) <= 3.6 and math.hypot(x + 0.5 - 20.6, y + 0.5 - 4.8) > 3.0: c.put(x, y, P['glow'])
+        c.rect(9, 9, 6, 5, P['paper']); c.rect(17, 9, 6, 5, P['paper'])                  # two pages
+        c.vline(16, 9, 14, ink); c.hline(9, 22, 14, ink); c.put(15, 14, ink); c.put(16, 15, ink)
+        for y in (10, 12): c.hline(10, 13, y, P['ink']); c.hline(18, 21, y, P['ink'])
+        c.vline(8, 9, 13, ink); c.vline(23, 9, 13, ink); c.hline(9, 14, 8, ink); c.hline(17, 22, 8, ink)
     return c
 
 def lens_mask(x0, y0, w, h):
@@ -895,6 +903,9 @@ def room(state='home', night=False, moons=2, W=116, H=116, lamp_on=None, lift=RO
     c.rect(50, 16, 22, 2, P['shelf']); c.rect(50, 18, 22, 1, P['wood2'])
     c.rect(53, 10, 4, 6, P['sv1']); c.rect(54, 9, 2, 1, P['sv1'])        # a small blue shell/bottle
     c.rect(62, 11, 6, 5, P['sv2']); c.rect(63, 10, 4, 1, P['sv2'])        # a yellow something
+    # picture books at the shelf's right end (2026-11-06): a tap on the shelf takes one down and Gugu tells a story
+    for bx, bh, col in ((68, 8, P['red2']), (70, 9, P['green'])):
+        c.rect(bx, 16 - bh, 2, bh, col); c.put(bx, 16 - bh, P['hi'])
     # chalkboard (right middle) with moons
     c.rect(82, 50, 24, 18, P['frame']); c.rect(84, 52, 20, 14, P['board'])
     for i in range(moons):

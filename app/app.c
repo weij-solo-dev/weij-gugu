@@ -46,7 +46,11 @@ static int64_t s_last_check;
 static bool can_dial(char *why, size_t cap);
 static instinct_ready_t readiness(char *why, size_t cap);
 
-// Pairing mode (匹配模式): the yellow key held 3 s brings the hotspot and its page up, held 3 s again takes them down.
+// Pairing mode (匹配模式): the gift key (yellow) held 3 s brings the hotspot and its page up, held 3 s again takes them down.
+// Stories asked for without words (instinct: the shelf, the bedtime bubble) open the line; a bedtime story's end is goodnight.
+static void on_story_wanted(const char *request, bool bedtime, void *user) { (void)user; call_story(request, bedtime); }
+static void on_story_over(bool bedtime, void *user) { (void)user; if (bedtime) instinct_goodnight(); }
+
 static void toggle_pairing_mode(void)
 {
     if (parent_is_active()) { parent_exit(); ui_hide_notice(); LOGI("pairing mode off"); store_event("pairing off"); return; }
@@ -62,6 +66,7 @@ static void on_board_event(const board_event_t *ev, void *user)
     (void)user;
     switch (ev->kind) {
     case BOARD_EV_KEY_DOWN:
+        instinct_wake();                                            // asleep after a bedtime story: any key lights the screen
         store_event("key %s down", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow");
         if (ev->a == BOARD_KEY_BLUE) {
             instinct_hush();                       // a line from the bubble stops: the child wants to talk
@@ -359,6 +364,7 @@ void app_main(void)
     configure_providers();
     instinct_set_ready_probe(ready_probe, NULL);   // vendors are known from here on: instinct may ask whether a call could start
     instinct_set_bubble_cb(on_bubble_tap, NULL);
+    instinct_set_story_cb(on_story_wanted, NULL);   // the shelf, the bedtime bubble: Gugu opens the line and tells one
 
     s_lang = lang_from_code(store_setting_str("lang", "zh"));
     if (s_lang == LANG_UNKNOWN) s_lang = LANG_ZH;
@@ -372,7 +378,8 @@ void app_main(void)
     call_config_t cc = { .idle_timeout_ms = (uint32_t)store_setting_int("idle_timeout_ms", 12000),
                          .max_call_ms = (uint32_t)store_setting_int("max_call_ms", 10 * 60 * 1000),
                          .lang_hint = s_lang, .where = NULL,           // NULL: the mind takes "where" from the world
-                         .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_outcome = on_call_outcome };
+                         .answer_deadline_ms = (uint32_t)store_setting_int("answer_deadline_ms", 15000), .on_outcome = on_call_outcome,
+                         .on_story_over = on_story_over };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
     parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply,

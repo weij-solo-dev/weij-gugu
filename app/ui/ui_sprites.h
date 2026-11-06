@@ -94,6 +94,7 @@ extern const lv_image_dsc_t spr_bubble_wifi;
 extern const lv_image_dsc_t spr_bubble_service;
 extern const lv_image_dsc_t spr_bubble_hello;
 extern const lv_image_dsc_t spr_bubble_idea;
+extern const lv_image_dsc_t spr_bubble_story;
 extern const lv_image_dsc_t spr_pose_look_l;
 extern const lv_image_dsc_t spr_pose_look_r;
 extern const lv_image_dsc_t spr_pose_read_l;

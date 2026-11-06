@@ -116,13 +116,14 @@ TEST(test_mind_lines_and_language)
     mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .child_age_months = 42, .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
     CHECK(mind_init(&cfg) == ESP_OK);
     char s[400];
-    // the self-introduction teaches the keys as they work: hold blue to talk, press yellow to feed (it once promised a whistle)
+    // the self-introduction teaches the keys as they work: hold blue to talk, press the yellow gift key for a present, press
+    // it many times for a song (the show), ask for a story (it once promised a whistle)
     CHECK(mind_line_hello(LANG_ZH, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我是咕咕") != NULL);
-    CHECK(strstr(s, "按住蓝色的按键") != NULL); CHECK(strstr(s, "黄色的按键，就能喂我") != NULL); CHECK(strstr(s, "吹哨") == NULL);
+    CHECK(strstr(s, "按住蓝色的按键") != NULL); CHECK(strstr(s, "黄色的礼物键") != NULL && strstr(s, "唱歌") != NULL && strstr(s, "讲个故事") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我係咕咕") != NULL);
-    CHECK(strstr(s, "撳住藍色個掣") != NULL); CHECK(strstr(s, "黃色個掣，就可以餵我") != NULL); CHECK(strstr(s, "吹哨") == NULL);
+    CHECK(strstr(s, "撳住藍色個掣") != NULL); CHECK(strstr(s, "黃色嘅禮物掣") != NULL && strstr(s, "唱歌") != NULL && strstr(s, "講個故仔") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "Hi, 小满! I'm Gugu") != NULL);
-    CHECK(strstr(s, "hold the blue button") != NULL); CHECK(strstr(s, "yellow button to feed me") != NULL); CHECK(strstr(s, "whistle") == NULL);
+    CHECK(strstr(s, "hold the blue button") != NULL); CHECK(strstr(s, "yellow gift button") != NULL && strstr(s, "sing you a song") != NULL && strstr(s, "tell me a story") != NULL); CHECK(strstr(s, "whistle") == NULL);
     CHECK(mind_line_sample(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "我係咕咕") != NULL);   // the voice preview's line
     CHECK(mind_line_sample(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "I'm Gugu") != NULL);
     char a[200], b[200];
@@ -176,6 +177,10 @@ TEST(test_mind_story)
     CHECK_EQ_INT(mind_story_intent("stop please", NULL), STORY_INTENT_STOP);
     CHECK_EQ_INT(mind_story_intent("然后呢？", NULL), STORY_INTENT_MORE);
     CHECK_EQ_INT(mind_story_intent("繼續講", NULL), STORY_INTENT_MORE);
+    CHECK_EQ_INT(mind_story_intent("再讲一遍", NULL), STORY_INTENT_AGAIN);            // the same one again …
+    CHECK_EQ_INT(mind_story_intent("刚才那个故事再讲一遍", NULL), STORY_INTENT_AGAIN);
+    CHECK_EQ_INT(mind_story_intent("講多次", NULL), STORY_INTENT_AGAIN);
+    CHECK_EQ_INT(mind_story_intent("再讲一个", "故事讲完啦！"), STORY_INTENT_START);    // … and another one is a new one
 
     mind_prompt_t p; memset(&p, 0, sizeof p);
     CHECK(mind_story_prompt_build(&p, LANG_ZH, 1, 3, NULL, false, false) == ESP_OK);
@@ -208,7 +213,12 @@ TEST(test_mind_story)
     char *saved = file_read_all(path, NULL);
     CHECK(saved != NULL);
     CHECK(saved && strstr(saved, "\"title\":\"从前有一只小恐龙，叫嘟嘟。\"") != NULL);   // the first sentence names it
-    CHECK(saved && strstr(saved, "它想去看海") != NULL && strstr(saved, "[happy]") == NULL);   // the text, tags gone
+    CHECK(saved && strstr(saved, "\"text\":\"从前有一只小恐龙") != NULL);                  // the text without tags …
+    CHECK(saved && strstr(saved, "\"tagged\":\"[happy] 从前") != NULL);                     // … and with them, to tell it again
+    char *again = mind_story_newest(LANG_ZH);
+    CHECK(again && strstr(again, "[curious] 它想去看海") != NULL);
+    mem_release(again);
+    CHECK(mind_story_newest(LANG_EN) == NULL);                                        // none in English yet
     mem_release(saved);
     for (int i = 0; i < 33; i++) { char t[64]; snprintf(t, sizeof t, "[happy] 第 %d 个故事。", i); mind_story_save(LANG_ZH, t, NULL, 0); }
     int n = mind_story_shelf(names, 40);
