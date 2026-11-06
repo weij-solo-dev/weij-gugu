@@ -67,6 +67,30 @@ static int selftest_beep_peak(int volume, audio_selftest_t *t)
     return e == ESP_OK ? atomic_load(&s_peak) : -1;
 }
 
+static int voice_level(int volume, int16_t amplitude)   // a square wave of this amplitude, played and pulled at this volume
+{
+    audio_set_volume((uint8_t)volume);
+    int16_t in[320], out[320];
+    for (int i = 0; i < 320; i++) in[i] = (int16_t)(i % 2 ? amplitude : -amplitude);
+    audio_play_flush();
+    audio_play_pcm(in, 320);
+    audio_pull(out, 320);
+    return audio_play_level();
+}
+
+// The beak follows the voice, not the speaker (2026-11-06): the level was taken after the volume, so turning Gugu down
+// also stilled the beak, and on a scale (RMS / 128) where Gugu's own voice read about 8 against a threshold of 28.
+TEST(test_audio_level_is_the_voice_not_the_volume)
+{
+    audio_once();
+    CHECK_EQ_INT(voice_level(100, 3000), voice_level(20, 3000));     // turned down 24 dB: the same voice, the same level
+    CHECK_EQ_INT(voice_level(60, 3000), 3000 / 32);
+    CHECK_EQ_INT(voice_level(100, 1024), 32);                        // a quiet voice (−30 dBFS) reads 32 of 255
+    CHECK_EQ_INT(voice_level(100, 20000), 255);                      // loud is the top
+    CHECK_EQ_INT(voice_level(100, 0), 0);
+    audio_set_volume(AUDIO_VOLUME_DEFAULT);
+}
+
 TEST(test_audio_selftest_keeps_its_own_level)
 {
     audio_once();
@@ -105,5 +129,6 @@ void test_audio(void)
 {
     RUN(test_audio_volume_steps);
     RUN(test_audio_selftest_keeps_its_own_level);
+    RUN(test_audio_level_is_the_voice_not_the_volume);
     RUN(test_audio_capture_stop_waits_for_a_frame);
 }

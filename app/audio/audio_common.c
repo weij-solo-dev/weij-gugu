@@ -99,12 +99,12 @@ size_t audio_pull(int16_t *out, size_t samples)
     }
     s_marker_n = keep;
     mutex_unlock(s_lock);
+    uint64_t acc = 0;                                  // the voice's loudness for the beak: before the volume, so turning
+    for (size_t i = 0; i < got; i++) acc += (uint64_t)((int32_t)out[i] * out[i]);   // Gugu down does not still it
+    int rms = got ? (int)(__builtin_sqrt((double)(acc / got)) / 32.0) : 0;    // RMS / 32: Gugu's voice reads about 30, 8160 and up 255
+    atomic_store(&s_level, rms > 255 ? 255 : rms);
     int g = atomic_load(&s_gain);
     if (g < 32768) for (size_t i = 0; i < got; i++) out[i] = (int16_t)((int32_t)out[i] * g / 32768);
-    uint64_t acc = 0;
-    for (size_t i = 0; i < got; i++) acc += (uint64_t)((int32_t)out[i] * out[i]);
-    int rms = got ? (int)(__builtin_sqrt((double)(acc / got)) / 128.0) : 0;   // 32768 → 256
-    atomic_store(&s_level, rms > 255 ? 255 : rms);
     if (got < samples) memset(out + got, 0, (samples - got) * 2);
     for (size_t i = 0; i < nf; i++) if (s_marker_cb) s_marker_cb(fire[i], s_marker_user);
     return got;

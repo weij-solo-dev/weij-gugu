@@ -28,7 +28,7 @@ esp_err_t audio_play_marker(int id);                               // on_marker(
 void      audio_play_flush(void);                                  // drop everything queued, silence now
 uint32_t  audio_play_queued_ms(void);
 bool      audio_play_idle(void);                                   // nothing queued and nothing sounding
-uint8_t   audio_play_level(void);                                  // 0–255 RMS of the last frame pulled by the output
+uint8_t   audio_play_level(void);                                  // 0–255: the last frame pulled, RMS / 32 before the volume (the beak)
 typedef void (*audio_marker_cb)(int id, void *user);
 void      audio_set_marker_cb(audio_marker_cb cb, void *user);     // from the audio task
 // The volume, 0–100: 100 is the loudest, every 10 below it 3 dB quieter (10 is 27 dB down), 0 silence; heard at once.
@@ -44,5 +44,5 @@ typedef struct {
 esp_err_t audio_selftest(audio_selftest_t *out);           // ESP_ERR_INVALID_STATE while a call holds the microphone
 
 // ---- local sound effects (16 kHz mono PCM / WAV files under content/sfx) ----
-esp_err_t audio_sfx_play(const char *name);                        // "beep", "static", "coo", "whistle", "nosignal" …
+esp_err_t audio_sfx_play(const char *name);                        // "beep", "over", "coo", "whistle", "nosignal" …
 esp_err_t audio_play_file(const char *path);                       // a 16 kHz mono WAV anywhere (data/voice/…): queued like an sfx

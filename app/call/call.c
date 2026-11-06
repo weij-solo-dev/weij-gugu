@@ -113,7 +113,7 @@ static void start_turn(void)
     // An engine that fails at once (offline, and the voice must reopen) can report before THINKING is set; its error then
     // found LISTENING and left the state alone. The turn is over (s_turn_active cleared): back to waiting.
     if (!atomic_load(&s_turn_active) && call_state() == CALL_THINKING) set_state(CALL_WAITING);
-    audio_sfx_play("static");                                      // the walkie-talkie: over, the answer is on its way
+    audio_sfx_play("over");                                        // the walkie-talkie: "over", two soft notes; the answer is on its way
     ui_set_emotion(UI_EMO_CURIOUS);
     LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
     store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);

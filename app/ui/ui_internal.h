@@ -22,6 +22,7 @@ void ui_anim_emotion_changed(ui_emotion_t e);
 void ui_show_base(const lv_image_dsc_t *base);  // switch the pigeon's base sprite (scaled once into PSRAM)
 void ui_show_beak(const ui_patch_t *p);         // beak-open overlay; NULL hides it
 void ui_show_eyes(const ui_patch_t *p);         // eyes-closed overlay; NULL hides it
+void ui_show_grip(const ui_patch_t *p);         // a pose's hand over the item it holds; NULL hides it
 
 // ui_scene.c ↔ ui.c / ui_anim.c
 extern bool ui_scene_is_home;                   // which hit table applies; ui.c sets it with the scene

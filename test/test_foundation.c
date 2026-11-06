@@ -2,6 +2,7 @@
 #include "foundation/resample.h"
 #include <math.h>
 #include "foundation/motion.h"
+#include "foundation/lipsync.h"
 #include "foundation/logcap.h"
 #include "foundation/log.h"
 #include <math.h>
@@ -164,8 +165,51 @@ TEST(test_resample_24k_to_16k)
     CHECK(tone_rms(out + 200, n - 400) / tone_rms(in, N) < 0.1);
 }
 
+// The beak follows a voice measured against itself (2026-11-06, the owner: "gugu 回复时，嘴巴可以动起来"): Gugu's own voice
+// sat far under the fixed threshold, so the beak never moved. Steps come every 40 ms, like the UI's mouth timer.
+static int flaps(lipsync_t *ls, uint8_t level, int steps, uint32_t *t, bool *ever_shut)
+{
+    int opens = 0; bool prev = ls->open;
+    for (int i = 0; i < steps; i++, *t += 40) {
+        int w = level + (i % 3 == 1 ? level / 5 : 0);                  // a voice wobbles a little from frame to frame
+        uint8_t l = (uint8_t)(w > 255 ? 255 : w);
+        bool o = lipsync_step(ls, l, *t);
+        if (o && !prev) opens++;
+        if (!o && ever_shut) *ever_shut = true;
+        prev = o;
+    }
+    return opens;
+}
+
+TEST(test_lipsync_follows_any_voice)
+{
+    const uint8_t voices[] = { 12, 32, 90, 230 };                    // a whisper of a voice … one at full scale
+    for (size_t v = 0; v < sizeof voices; v++) {
+        lipsync_t ls; lipsync_init(&ls); uint32_t t = 1000; bool shut = false;
+        CHECK_EQ_INT(flaps(&ls, 0, 25, &t, NULL), 0);                  // a second of silence: shut
+        CHECK(lipsync_step(&ls, voices[v], t)); t += 40;                // the first syllable opens it at once
+        int opens = flaps(&ls, voices[v], 25, &t, &shut);               // a second of talking
+        CHECK(opens >= 4 && opens <= 6);                                // flaps about five times a second
+        CHECK(shut);
+        lipsync_step(&ls, 0, t); t += 40; lipsync_step(&ls, 0, t); t += 40;
+        CHECK(!lipsync_step(&ls, 0, t));                                // a pause shuts it within a few steps
+    }
+}
+
+TEST(test_lipsync_ignores_breath)
+{
+    lipsync_t ls; lipsync_init(&ls); uint32_t t = 0;
+    CHECK_EQ_INT(flaps(&ls, LIPSYNC_FLOOR - 2, 50, &t, NULL), 0);       // under the floor: never a word
+    lipsync_init(&ls); t = 0;
+    flaps(&ls, 120, 25, &t, NULL);                                      // loud talking …
+    for (int i = 0; i < 3; i++, t += 40) lipsync_step(&ls, 0, t);
+    CHECK_EQ_INT(flaps(&ls, 20, 5, &t, NULL), 0);                      // … then a murmur a sixth as loud: not a syllable
+}
+
 void test_foundation(void)
 {
+    RUN(test_lipsync_follows_any_voice);
+    RUN(test_lipsync_ignores_breath);
     RUN(test_resample_24k_to_16k);
     RUN(test_motion_detector);
     RUN(test_logcap_ring);

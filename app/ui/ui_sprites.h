@@ -134,15 +134,25 @@ extern const lv_image_dsc_t spr_acc_sunglasses_pose_sly_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sly_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_reach_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_reach_r;
+extern const lv_image_dsc_t spr_grip_hold_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_hold_l;
+extern const lv_image_dsc_t spr_grip_hold_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_hold_r;
+extern const lv_image_dsc_t spr_grip_lift_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_lift_l;
+extern const lv_image_dsc_t spr_grip_lift_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_lift_r;
+extern const lv_image_dsc_t spr_grip_sneak_l_a;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_l_a;
+extern const lv_image_dsc_t spr_grip_sneak_l_b;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_l_b;
+extern const lv_image_dsc_t spr_grip_sneak_r_a;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_r_a;
+extern const lv_image_dsc_t spr_grip_sneak_r_b;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_sneak_r_b;
+extern const lv_image_dsc_t spr_grip_bite_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_bite_l;
+extern const lv_image_dsc_t spr_grip_bite_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_bite_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_hide_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_hide_r;
@@ -166,6 +176,8 @@ extern const lv_image_dsc_t spr_acc_sunglasses_peek;
 extern const lv_image_dsc_t spr_acc_sunglasses_eyeroll;
 extern const lv_image_dsc_t spr_beak_neutral;
 extern const lv_image_dsc_t spr_beak_happy;
+extern const lv_image_dsc_t spr_beak_laughing;
+extern const lv_image_dsc_t spr_beak_surprised;
 extern const lv_image_dsc_t spr_beak_curious;
 extern const lv_image_dsc_t spr_beak_shy;
 extern const lv_image_dsc_t spr_beak_sad;
@@ -211,5 +223,6 @@ extern const ui_patch_t ui_pose_sunglasses_patch[UI_POSE_FRAME_COUNT];
 extern const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT];
 extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];
 extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none
+extern const ui_patch_t ui_pose_grip[UI_POSE_FRAME_COUNT];   // the hand's tip, drawn over the held item; img NULL none
 #define UI_NEWS_X 9    // the newspaper's base offset over the pigeon sprite (held in front of the belly)
 #define UI_NEWS_Y 26

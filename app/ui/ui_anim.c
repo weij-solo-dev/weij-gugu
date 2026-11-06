@@ -4,7 +4,7 @@
 // listening ring. Runs on LVGL timers
 // inside the UI task; other modules only poke the small API in ui.h.
 //
-// Everything that moves often is small: the beak (12 Hz while speaking) and the eyelids (a blink) are patches drawn
+// Everything that moves often is small: the beak (flapping with the voice) and the eyelids (a blink) are patches drawn
 // over the pre-scaled base sprite, so one frame repaints a few hundred pixels. The whole pigeon is repainted on an
 // emotion change, a pose frame and the one-shot actions. The body keeps still when idle: the breathing bob (one base
 // pixel every 1.2 s, forever) is gone (2026-11-04, the owner: "一直上下，这样不好"); idle life is the poses instead.
@@ -12,6 +12,7 @@
 #include "ui_internal.h"
 #include "board/board.h"
 #include "foundation/log.h"
+#include "foundation/lipsync.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -67,10 +68,12 @@ static void refresh_sprite(void)
         news_show(s_pose == UI_POSE_READ);
         ui_scene_refresh_accessory_pose(f);
         ui_feed_follow_hand(ui_pose_hand[f][0], ui_pose_hand[f][1]);   // whatever it holds goes with the hand
+        ui_show_grip(&ui_pose_grip[f]);                    // and the hand's tip is over it: held, not stuck on
         return;
     }
     news_show(false);
     ui_feed_follow_hand(-1, -1);
+    ui_show_grip(NULL);
     uint32_t now = lv_tick_get();
     const lv_image_dsc_t *base;
     const ui_patch_t *beak = NULL, *eyes = NULL;
@@ -125,11 +128,12 @@ void ui_anim_emotion_changed(ui_emotion_t e)
     }
 }
 
-// ---- mouth: open when loud, 12 Hz decision so the beak flaps with syllables ----
+// ---- mouth: the beak follows the voice (foundation/lipsync.h), decided every 40 ms ----
+static lipsync_t s_lips;
 static void mouth_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    bool open = s_level > 28 && ((lv_tick_get() / 83) & 1);   // alternate frames while loud
+    bool open = lipsync_step(&s_lips, s_level, lv_tick_get());
     if (open != s_mouth_open) { s_mouth_open = open; refresh_sprite(); }
     if (s_wave_until && lv_tick_get() >= s_wave_until) { s_wave_until = 0; refresh_sprite(); }
     if (s_puff_until && lv_tick_get() >= s_puff_until) { s_puff_until = 0; refresh_sprite(); }
@@ -395,6 +399,7 @@ void ui_anim_init(lv_obj_t *scr)
     lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
 
     s_blink_timer = lv_timer_create(blink_close_cb, 3000, NULL);
+    lipsync_init(&s_lips);
     s_mouth_timer = lv_timer_create(mouth_timer_cb, 40, NULL);
     s_pose_timer = lv_timer_create(pose_cb, 300, NULL);
     lv_timer_pause(s_pose_timer);

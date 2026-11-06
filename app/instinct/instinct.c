@@ -454,14 +454,14 @@ static bool bubble_tap(int64_t now)
 
 void instinct_yellow_tap(void)
 {
-    if (atomic_load(&s_busy) || s_speaking) return;
+    if (atomic_load(&s_busy) || s_speaking) { LOGI("yellow: not now (%s)", s_speaking ? "a line is playing" : "a turn is on"); return; }
     int64_t now = clock_us();
     s_last_interaction = now;
     static bool seeded;
     if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
-    if (s_shake_last) return;                                 // a ball does not eat
+    if (s_shake_last) { LOGI("yellow: not now (a ball)"); return; }   // a ball does not eat
     idle_stop();
-    if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; return; }   // one more is coming
+    if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; LOGI("yellow: queued behind the %s (step %d, %d waiting)", FOOD[s_feed_food].id, s_fs, s_feed_queue); return; }   // one more is coming
     feed_start(now);                                          // a bubble or the trip's props on screen change nothing: they answer touches
 }
 

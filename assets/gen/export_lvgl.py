@@ -63,6 +63,13 @@ def diff_bbox(a, b):
     ys = [y for y in range(a.h) for x in range(a.w) if a.px[y][x] != b.px[y][x]]
     return (min(xs), min(ys), max(xs), max(ys)) if xs else None
 
+def pad(bb, canvas):
+    """One more pixel all round, inside the canvas. LVGL draws a ×4 patch a screen pixel short of where the pre-scaled base
+    puts the same pixels, so a patch that ends where the pixels change left a one-pixel sliver of the base showing (the
+    surprised face's tall O beside its smaller talking mouth, 2026-11-06); the extra pixel is the same in both."""
+    x0, y0, x1, y1 = bb
+    return (max(0, x0 - 1), max(0, y0 - 1), min(canvas.w - 1, x1 + 1), min(canvas.h - 1, y1 + 1))
+
 def covers(base, over, bb):
     """True if every opaque base pixel inside bb is opaque in over: the overlay can stand in for the base there."""
     x0, y0, x1, y1 = bb
@@ -107,10 +114,18 @@ def main():
         images.append((f'spr_pose_{pz}', pg.gugu(pz), True))
     images.append(('spr_news', pg.newspaper(), True))
     images.append(('spr_news_turn', pg.newspaper(turn=True), True))
-    pose_glasses, pose_hat_y, pose_camera_y, pose_hand = [], [], [], []
+    pose_glasses, pose_hat_y, pose_camera_y, pose_hand, pose_grip = [], [], [], [], []
     for pz in POSES:                                              # the trip's accessories follow a pose's head too; the held item its hand
         pg.gugu(pz); g = pg.LAST_GEOM
         pose_hand.append(g['hand'] or (-1, -1))
+        if g.get('grip'):                                         # the hand's tip, drawn over the held item: transparent elsewhere
+            xs, ys = [x for x, _ in g['grip']], [y for _, y in g['grip']]
+            gx0, gy0 = min(xs) - 1, min(ys) - 1                   # a clear pixel all round: see pad()
+            gc = pg.Canvas(max(xs) - gx0 + 2, max(ys) - gy0 + 2)
+            for (x, y), col in g['grip'].items(): gc.put(x - gx0, y - gy0, col)
+            images.append((f'spr_grip_{pz}', gc, True)); pose_grip.append((f'&spr_grip_{pz}', gx0, gy0))
+        else:
+            pose_grip.append(('NULL', 0, 0))
         gc, gx, gy = pg.acc_sunglasses(g['eye_boxes'], g['cx'], g['rx'])
         images.append((f'spr_acc_sunglasses_pose_{pz}', gc, True)); pose_glasses.append((f'&spr_acc_sunglasses_pose_{pz}', gx, gy))
         pose_hat_y.append(int(round(g['head_top'])) - 7); pose_camera_y.append(int(round(g['cy'])) + 1)
@@ -128,6 +143,7 @@ def main():
     for e in EMOTIONS:
         closed, opened = pg.gugu(e), pg.gugu(e, beak_open=True)
         bb = diff_bbox(closed, opened)
+        bb = bb and pad(bb, closed)
         if bb and covers(closed, opened, bb):
             images.append((f'spr_beak_{e}', crop(opened, bb), True))
             beak.append((f'&spr_beak_{e}', bb[0], bb[1]))
@@ -135,6 +151,7 @@ def main():
             beak.append(('NULL', 0, 0))
     neutral, blink = pg.gugu('neutral'), pg.gugu('neutral', eyes_closed=True)
     bb_eyes = diff_bbox(neutral, blink)
+    bb_eyes = bb_eyes and pad(bb_eyes, neutral)
     blink_ok = bb_eyes is not None and covers(neutral, blink, bb_eyes)
     if blink_ok:
         images.append(('spr_eyes_blink', crop(blink, bb_eyes), True))
@@ -206,6 +223,7 @@ def main():
     h_parts.append('extern const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT];')
     h_parts.append('extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];')
     h_parts.append('extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none')
+    h_parts.append('extern const ui_patch_t ui_pose_grip[UI_POSE_FRAME_COUNT];   // the hand\'s tip, drawn over the held item; img NULL none')
     h_parts.append('#define UI_NEWS_X 9    // the newspaper\'s base offset over the pigeon sprite (held in front of the belly)')
     h_parts.append('#define UI_NEWS_Y 26')
     c_parts.append('const lv_image_dsc_t *const ui_pose_sprites[UI_POSE_FRAME_COUNT] = {')
@@ -217,6 +235,9 @@ def main():
     c_parts.append('const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT] = { ' + ', '.join(str(v) for v in pose_hat_y) + ' };')
     c_parts.append('const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT] = { ' + ', '.join(str(v) for v in pose_camera_y) + ' };')
     c_parts.append('const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2] = { ' + ', '.join(f'{{ {x}, {y} }}' for x, y in pose_hand) + ' };')
+    c_parts.append('const ui_patch_t ui_pose_grip[UI_POSE_FRAME_COUNT] = {')
+    c_parts.append('    ' + ', '.join(f'{{ {img}, {x}, {y} }}' for img, x, y in pose_grip) + ',')
+    c_parts.append('};')
     print('beak patches:', ', '.join(f'{e}={"ok" if b[0] != "NULL" else "-"}' for e, b in zip(EMOTIONS, beak)))
     print('blink patch:', 'ok' if blink_ok else 'none', 'bbox', bb_eyes, 'fits:', ', '.join(e for e, f in zip(EMOTIONS, blink_fits) if f))
     os.makedirs(OUT_DIR, exist_ok=True)

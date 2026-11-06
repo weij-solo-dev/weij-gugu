@@ -23,7 +23,7 @@
 static lv_display_t *s_disp;
 static mutex_t s_mutex;
 lv_obj_t *ui_gugu_img;                                   // shared with ui_anim.c
-static lv_obj_t *s_scene_img, *s_case_img, *s_beak_img, *s_eyes_img;
+static lv_obj_t *s_scene_img, *s_case_img, *s_beak_img, *s_eyes_img, *s_grip_img;
 static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
 
 // ---- display glue ----
@@ -192,6 +192,11 @@ static void overlay(lv_obj_t *img, const ui_patch_t *p)
 }
 void ui_show_beak(const ui_patch_t *p) { overlay(s_beak_img, p); }
 void ui_show_eyes(const ui_patch_t *p) { overlay(s_eyes_img, p); }
+void ui_show_grip(const ui_patch_t *p)
+{
+    overlay(s_grip_img, p);
+    if (p && p->img) lv_obj_move_foreground(s_grip_img);   // over the held item, which joins the pigeon's children when taken
+}
 
 // ---- scene ----
 // Small sprites (suitcase, overlays) stay base-resolution descriptors scaled by LVGL.
@@ -288,8 +293,10 @@ esp_err_t ui_init(void)
     lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, GUGU_BASE_Y);
     s_beak_img = make_sprite(ui_gugu_img, NULL, 0, 0);
     s_eyes_img = make_sprite(ui_gugu_img, NULL, 0, 0);
+    s_grip_img = make_sprite(ui_gugu_img, NULL, 0, 0);
     lv_obj_add_flag(s_beak_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_eyes_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_grip_img, LV_OBJ_FLAG_HIDDEN);
     ui_scene_init_accessory();
     ui_scene_show_window(true);
     ui_anim_init(scr);
