@@ -178,10 +178,11 @@
   "prices_cny": {
     "asr_per_hour": 2.5,
     "tts_per_10k_chars": 2.0,
-    "chat_in_per_m": 1.0,
-    "chat_out_per_m": 4.0,
-    "chat_cache_read_per_m": 0.1,
+    "chat_in_per_m": 2.1,
+    "chat_out_per_m": 8.4,
+    "chat_cache_read_per_m": 0.42,
     "image_per_picture": 0.025
   },
+  "_prices_note": "China-site list prices (platform.minimax.cn/docs/pricing/overview), checked 2026-11-06: MiniMax-M3 with up to 512k input tokens ¥2.10 in, ¥8.40 out, ¥0.42 cached per million tokens (listed as a permanent 50% discount; the chat prices here were ¥1.0 / ¥4.0 / ¥0.1 until then); speech-2.8-turbo ¥2.00 per 10,000 characters, a Chinese character counting as two.",
   "_voices_note": "Voice ids checked against MiniMax's own list (POST /v1/get_voice, voice_type all) on 2026-11-04. The pairing page lists these per language and also takes any other id, such as a voice the family cloned or designed in its own MiniMax account."
 }
