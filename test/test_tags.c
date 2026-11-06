@@ -80,6 +80,27 @@ TEST(test_tags_strip_and_english)
     }
 }
 
+// A closing quote (or bracket, or a second mark) after a sentence's end stays with that sentence: stories have dialogue,
+// and "我想回家！”" once left a segment of nothing but ” for the voice. A tag still closes the sentence before it is
+// reported, so a segment keeps the face it was written with.
+static char ev_log[512];
+static void e_text(const char *s, size_t n, void *u) { (void)u; strncat(ev_log, s, n); }
+static void e_tag(mind_tag_t t, void *u) { (void)u; strcat(ev_log, "["); strcat(ev_log, mind_tag_name(t)); strcat(ev_log, "]"); }
+static void e_seg(void *u) { (void)u; strcat(ev_log, "|"); }
+TEST(test_tags_quotes_stay_with_their_sentence)
+{
+    ev_log[0] = 0;
+    tag_sink_t sink = { e_text, e_tag, e_seg }; tag_parser_t p; tag_parser_init(&p, &sink, NULL);
+    feed_bytewise(&p, "[scared] 它小声说：“我想回家！”[happy] 妈妈来了。「好呀！」她笑了……真的吗？！");
+    tag_parser_finish(&p);
+    CHECK_EQ_STR(ev_log, "[scared] 它小声说：“我想回家！”|[happy] 妈妈来了。|「好呀！」|她笑了……|真的吗？！|");
+    ev_log[0] = 0;
+    tag_parser_init(&p, &sink, NULL);
+    tag_parser_feed(&p, "He said, \"Wow!\" Then he ran.", 28);
+    tag_parser_finish(&p);
+    CHECK_EQ_STR(ev_log, "He said, \"Wow!\"| Then he ran.|");
+}
+
 void test_tags(void)
 {
     RUN(test_tags_basic_stream);
@@ -87,4 +108,5 @@ void test_tags(void)
     RUN(test_tags_split_tag_across_chunks);
     RUN(test_tags_soft_boundary_and_newline);
     RUN(test_tags_strip_and_english);
+    RUN(test_tags_quotes_stay_with_their_sentence);
 }

@@ -45,6 +45,7 @@ typedef enum {
     UI_POSE_SNEAK_L, UI_POSE_SNEAK_R,            // held close, glancing left and right
     UI_POSE_BITE_L, UI_POSE_BITE_R,              // up to the open beak
     UI_POSE_HIDE_L, UI_POSE_HIDE_R,              // the hand behind the back: the item out of sight
+    UI_POSE_BOOK,                                // a story: the picture book held like the paper, a page turned now and then
     UI_POSE_COUNT
 } ui_pose_t;
 void ui_pose(ui_pose_t p);                   // UI_POSE_NONE: back to the expression
@@ -52,6 +53,12 @@ ui_pose_t ui_get_pose(void);
 void ui_walk_to(int dx, uint32_t ms);        // stand dx base pixels from home (0 = home), getting there in ms (0: at once)
 int  ui_gugu_dx(void);                       // where Gugu stands now, base pixels from home
 int  ui_pose_hand_x(ui_pose_t p);             // where that pose's hand is, base x within the 48-wide sprite; -1 none
+// ---- the gift key's show (ui_stage.c): a stage over the scene, lights on the beat ----
+typedef enum { UI_STAGE_NONE = 0, UI_STAGE_DISCO, UI_STAGE_NIGHT } ui_stage_t;
+void ui_stage(ui_stage_t s);                 // put the stage up (NONE takes it down: the caller puts its scene back)
+ui_stage_t ui_stage_shown(void);
+void ui_stage_beat(int beat, int per_bar);   // the lights and the sway on a beat (beat 0 is the first)
+void ui_stage_cheer(void);                   // a tap during the show: sparkles round Gugu, a jump
 void ui_set_mouth(uint8_t level);            // 0–255 output loudness → beak open/closed while speaking
 void ui_set_listening(bool on);              // thin pulsing ring while the key is held
 typedef enum { UI_BUBBLE_NONE = 0, UI_BUBBLE_SETUP, UI_BUBBLE_WIFI, UI_BUBBLE_SERVICE, UI_BUBBLE_HELLO, UI_BUBBLE_IDEA } ui_bubble_t;   // gear, Wi-Fi crossed out, ⚠; "Hi!", a light bulb

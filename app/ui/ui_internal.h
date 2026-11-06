@@ -34,3 +34,8 @@ void ui_scene_refresh_accessory_pose(int frame);  // the same for a pose frame (
 void ui_feed_follow_hand(int hx, int hy);         // ui_anim: the pose's hand moved (base px in the sprite; -1: no hand)
 void ui_anim_hand_now(int *hx, int *hy);          // the hand of the pose on screen now (-1, -1: none)
 void ui_home_backdrop_refresh(void);            // lamp on/off: swap the room picture (UI lock held)
+// ui_stage.c ↔ ui.c
+void ui_stage_init_back(lv_obj_t *scr);         // the show's lights: created hidden, between the scene and the pigeon
+void ui_stage_init_front(lv_obj_t *scr);        // its microphone and notes: in front of the pigeon
+void ui_show_stage_scene(const lv_image_dsc_t *bg);   // the stage takes the scene slot: no window, case or props
+const lv_image_dsc_t *ui_prescaled(const lv_image_dsc_t *src);   // a ×UI_SPRITE_SCALE copy in PSRAM, made once (NULL: no room)

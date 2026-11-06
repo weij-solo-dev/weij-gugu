@@ -48,6 +48,11 @@ esp_err_t audio_common_init(const char *sfx_dir)
     if (!s_ring_mem) return ESP_ERR_NO_MEM;
     ringbuf_init(&s_ring, s_ring_mem, AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
     if (sfx_dir) snprintf(s_sfx_dir, sizeof s_sfx_dir, "%s", sfx_dir);
+    if (sfx_dir) {                                                 // the songs sit beside the sound effects: …/sfx → …/songs
+        char songs[140]; snprintf(songs, sizeof songs, "%s", sfx_dir);
+        char *tail = strrchr(songs, '/');
+        if (tail) { snprintf(tail + 1, sizeof songs - (size_t)(tail + 1 - songs), "songs"); audio_song_set_dir(songs); }
+    }
     return ESP_OK;
 }
 
@@ -79,6 +84,8 @@ void audio_play_flush(void)
 }
 
 uint8_t audio_play_level(void) { return (uint8_t)atomic_load(&s_level); }
+uint64_t audio_written_samples(void) { return atomic_load(&s_written); }
+uint64_t audio_played_samples(void) { return atomic_load(&s_played); }
 uint32_t audio_play_queued_ms(void) { return (uint32_t)(ringbuf_used(&s_ring) / 2 * 1000 / AUDIO_SAMPLE_RATE); }
 bool audio_play_idle(void) { return ringbuf_used(&s_ring) == 0; }
 void audio_set_marker_cb(audio_marker_cb cb, void *user) { s_marker_user = user; s_marker_cb = cb; }

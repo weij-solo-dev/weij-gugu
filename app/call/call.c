@@ -17,6 +17,7 @@
 
 #define MARKER_BASE 100
 #define PREROLL_SECONDS 8
+#define STORY_WAIT_MS 8000           // a story's part ended on a question: this long for the child to answer, then on with it
 
 static engine_t *s_engine;
 static call_config_t s_cfg;
@@ -34,6 +35,8 @@ static bool s_seg_marker_pending[32];
 static atomic_uint s_voice_samples;  // PCM the engine delivered for the current turn: proof the answer had sound
 static atomic_int s_turns_done, s_turns_failed, s_turns_empty;   // empty: the key was held but no words were heard
 static char s_heard[128];             // what the recognizer heard, for the event log once the turn is over (see log_heard)
+static atomic_int s_seg_sounding = -1;   // the segment the speaker started last this turn (& 31): where a story pauses
+static atomic_bool s_story_wait;      // a story's part ended on a question: waiting for the child (STORY_WAIT_MS)
 static call_state_cb s_state_cb; static void *s_state_user;
 
 const char *call_state_name(call_state_t s)
@@ -107,6 +110,7 @@ static void start_turn(void)
 {
     atomic_store(&s_turn_active, true);
     atomic_store(&s_voice_samples, 0);
+    atomic_store(&s_seg_sounding, -1);
     engine_on_release(s_engine, NULL);                            // the turn's clock starts here
     audio_capture_stats_t cs; audio_capture_stats(&cs);
     set_state(CALL_THINKING);
@@ -115,6 +119,7 @@ static void start_turn(void)
     if (!atomic_load(&s_turn_active) && call_state() == CALL_THINKING) set_state(CALL_WAITING);
     audio_sfx_play("over");                                        // the walkie-talkie: "over", two soft notes; the answer is on its way
     ui_set_emotion(UI_EMO_CURIOUS);
+    if (engine_story_on(s_engine)) ui_pose(UI_POSE_BOOK);          // in a story: back to the book while it thinks
     LOGI("release: %u ms captured, peak %d, rms %d", (unsigned)cs.ms, cs.peak, cs.rms);
     store_event("released: %u ms of sound, peak %d, rms %d → asking", (unsigned)cs.ms, cs.peak, cs.rms);
 }
@@ -123,9 +128,11 @@ static void start_turn(void)
 static void marker_cb(int id, void *user)
 {
     (void)user;
-    int seg = id - MARKER_BASE;
+    int seg = id - MARKER_BASE;                                    // & 31: a story's part has more segments than that
     if (seg < 0 || seg >= 32) return;
-    if (seg == 0) s_t5_first_play = clock_us();
+    if (seg == 0 && !s_t5_first_play) s_t5_first_play = clock_us();
+    atomic_store(&s_seg_sounding, seg);
+    if (ui_get_pose() == UI_POSE_BOOK) ui_pose(UI_POSE_NONE);      // the story's words begin: the face tells it
     ui_set_emotion(emotion_of(s_seg_emotion[seg]));
     if (call_state() == CALL_THINKING) set_state(CALL_SPEAKING);
 }
@@ -213,13 +220,13 @@ void call_engine_event(const engine_event_t *ev, void *user)
         }
         break;
     case ENGINE_EV_SEGMENT_START:
-        if (ev->u.segment.index < 32) { s_seg_emotion[ev->u.segment.index] = ev->u.segment.emotion; s_seg_marker_pending[ev->u.segment.index] = true; }
+        { int k = ev->u.segment.index & 31; s_seg_emotion[k] = ev->u.segment.emotion; s_seg_marker_pending[k] = true; }
         if (ev->u.segment.text) LOGI("segment %d [%s] %s", ev->u.segment.index, mind_tag_name(ev->u.segment.emotion), ev->u.segment.text);
         break;
     case ENGINE_EV_AUDIO:
-        if (ev->u.audio.segment < 32 && s_seg_marker_pending[ev->u.audio.segment]) {
-            s_seg_marker_pending[ev->u.audio.segment] = false;
-            audio_play_marker(MARKER_BASE + ev->u.audio.segment);   // fires when this audio starts sounding
+        if (s_seg_marker_pending[ev->u.audio.segment & 31]) {
+            s_seg_marker_pending[ev->u.audio.segment & 31] = false;
+            audio_play_marker(MARKER_BASE + (ev->u.audio.segment & 31));   // fires when this audio starts sounding
         }
         audio_play_pcm(ev->u.audio.pcm, ev->u.audio.samples);
         atomic_fetch_add(&s_voice_samples, (unsigned)ev->u.audio.samples);
@@ -267,6 +274,11 @@ void call_engine_event(const engine_event_t *ev, void *user)
         log_heard();
         atomic_store(&s_turn_active, false);
         break;
+    case ENGINE_EV_STORY:                         // a story (engine.h): the book comes out; a part asks the child; it is over
+        if (ev->u.story.phase == ENGINE_STORY_BEGIN) { store_event("story begins"); ui_pose(UI_POSE_BOOK); }
+        else if (ev->u.story.phase == ENGINE_STORY_ASK) { atomic_store(&s_story_wait, true); store_event("story: part %d of %d told, waiting for the child", ev->u.story.part, ev->u.story.parts); }
+        else { atomic_store(&s_story_wait, false); store_event("story over after part %d of %d", ev->u.story.part, ev->u.story.parts); }
+        break;
     }
 }
 
@@ -296,9 +308,13 @@ void call_key(call_key_t key, bool down, int held_ms)
         case CALL_IDLE: case CALL_ENDED: dial(); break;
         case CALL_CONNECTING: audio_capture_start(capture_cb, NULL); break;
         case CALL_SPEAKING: case CALL_THINKING:
-            engine_abort(s_engine); audio_play_flush();
+            if (engine_story_on(s_engine)) engine_story_pause(s_engine, atomic_load(&s_seg_sounding));   // a story waits for the child
+            else engine_abort(s_engine);
+            audio_play_flush();
             /* fall through */
         case CALL_WAITING:
+            atomic_store(&s_story_wait, false);                    // the child answers the story's question
+            if (ui_get_pose() == UI_POSE_BOOK) ui_pose(UI_POSE_NONE);
             audio_play_flush();                                    // a whistle from the yellow key in the open line stops: the child's turn
             s_t5_first_play = 0;
             atomic_store(&s_captured, 0);
@@ -339,6 +355,8 @@ void call_hangup(void)
     store_event("hung up: %s", summary);
     store_logs_flush();                                            // the call's log lines reach flash now, not in 30 s
     atomic_store(&s_turns_done, 0); atomic_store(&s_turns_failed, 0); atomic_store(&s_turns_empty, 0);
+    atomic_store(&s_story_wait, false);
+    if (ui_get_pose() == UI_POSE_BOOK) ui_pose(UI_POSE_NONE);
     ui_set_emotion(UI_EMO_NEUTRAL);
     set_state(CALL_IDLE);
 }
@@ -353,9 +371,20 @@ static void call_task(void *arg)
         if (st == CALL_IDLE || st == CALL_ENDED) continue;
         ui_set_mouth(audio_play_level());
         int64_t now = clock_us();
+        bool story = engine_story_on(s_engine);
         if (st == CALL_SPEAKING && audio_play_idle() && !atomic_load(&s_turn_active)) set_state(CALL_WAITING);
-        if (st == CALL_WAITING && s_cfg.idle_timeout_ms && now - s_waiting_since > (int64_t)s_cfg.idle_timeout_ms * 1000) { LOGI("idle timeout"); call_hangup(); }
-        if (s_cfg.max_call_ms && now - s_call_t0 > (int64_t)s_cfg.max_call_ms * 1000) { LOGI("call time cap"); call_hangup(); }
+        if (st == CALL_WAITING && atomic_load(&s_story_wait) && now - s_waiting_since > STORY_WAIT_MS * 1000LL) {
+            atomic_store(&s_story_wait, false);                    // no answer to the story's question: on with it
+            LOGI("story: no answer in %d ms, on with it", STORY_WAIT_MS);
+            s_t5_first_play = 0; atomic_store(&s_seg_sounding, -1);
+            atomic_store(&s_turn_active, true); atomic_store(&s_voice_samples, 0);
+            set_state(CALL_THINKING);
+            ui_pose(UI_POSE_BOOK);                                 // the next page
+            engine_story_next(s_engine);
+            continue;
+        }
+        if (st == CALL_WAITING && !story && s_cfg.idle_timeout_ms && now - s_waiting_since > (int64_t)s_cfg.idle_timeout_ms * 1000) { LOGI("idle timeout"); call_hangup(); }
+        if (s_cfg.max_call_ms && !story && now - s_call_t0 > (int64_t)s_cfg.max_call_ms * 1000) { LOGI("call time cap"); call_hangup(); }   // a story is not cut off
         if (st == CALL_CONNECTING && now - s_call_t0 > 25 * 1000000LL) { LOGW("connect timeout"); trouble("connect", "the line did not open"); call_hangup(); }
         uint32_t deadline = s_cfg.answer_deadline_ms ? s_cfg.answer_deadline_ms : 15000;
         if (st == CALL_THINKING && atomic_load(&s_turn_active) && now - s_thinking_since > (int64_t)deadline * 1000) {

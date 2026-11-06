@@ -48,13 +48,15 @@ static const struct { int8_t f0, f1; uint16_t ms; } POSE[UI_POSE_COUNT] = {
     [UI_POSE_SNEAK_L] = { UI_PF_SNEAK_L_A, UI_PF_SNEAK_L_B, 420 }, [UI_POSE_SNEAK_R] = { UI_PF_SNEAK_R_A, UI_PF_SNEAK_R_B, 420 },
     [UI_POSE_BITE_L]  = { UI_PF_BITE_L, -1, 0 },          [UI_POSE_BITE_R]  = { UI_PF_BITE_R, -1, 0 },
     [UI_POSE_HIDE_L]  = { UI_PF_HIDE_L, -1, 0 },          [UI_POSE_HIDE_R]  = { UI_PF_HIDE_R, -1, 0 },
+    [UI_POSE_BOOK]    = { UI_PF_READ_L, UI_PF_READ_R, 700 },
 };
 static int pose_frame(void) { return s_pose_phase && POSE[s_pose].f1 >= 0 ? POSE[s_pose].f1 : POSE[s_pose].f0; }
 static void news_show(bool on)
 {
     if (!s_news) return;
     if (!on) { lv_obj_add_flag(s_news, LV_OBJ_FLAG_HIDDEN); return; }
-    const lv_image_dsc_t *src = s_pose_ticks % 6 == 5 ? &spr_news_turn : &spr_news;   // a page turned now and then
+    const lv_image_dsc_t *src = s_pose == UI_POSE_BOOK ? (s_pose_ticks % 4 == 3 ? &spr_book_turn : &spr_book)   // a story's book
+                                                      : (s_pose_ticks % 6 == 5 ? &spr_news_turn : &spr_news);   // a page turned now and then
     if (lv_image_get_src(s_news) != src) lv_image_set_src(s_news, src);
     lv_obj_remove_flag(s_news, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_news);
@@ -65,7 +67,7 @@ static void refresh_sprite(void)
     if (s_pose != UI_POSE_NONE) {                          // a pose: its frame, no patches, the trip's accessory on its head
         int f = pose_frame();
         ui_show_base(ui_pose_sprites[f]); ui_show_beak(NULL); ui_show_eyes(NULL);
-        news_show(s_pose == UI_POSE_READ);
+        news_show(s_pose == UI_POSE_READ || s_pose == UI_POSE_BOOK);
         ui_scene_refresh_accessory_pose(f);
         ui_feed_follow_hand(ui_pose_hand[f][0], ui_pose_hand[f][1]);   // whatever it holds goes with the hand
         ui_show_grip(&ui_pose_grip[f]);                    // and the hand's tip is over it: held, not stuck on

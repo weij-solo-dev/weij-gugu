@@ -1,0 +1,10 @@
+{
+ "title": "Brahms' Lullaby",
+ "origin": "Johannes Brahms, Wiegenlied Op. 49 No. 4 (1868): public domain",
+ "tempo": 66,
+ "meter": 3,
+ "pickup": 1,
+ "style": "lullaby",
+ "chords": "C | C | C | G | G | G | G | C",
+ "melody": "E4:0.5 E4:0.5 | G4:2 E4:0.5 E4:0.5 | G4:2 E4:0.5 G4:0.5 | C5 B4:1.5 A4:0.5 | A4 G4 D4:0.5 E4:0.5 | F4 D4 D4:0.5 E4:0.5 | F4:2 D4:0.5 F4:0.5 | B4:0.5 A4:0.5 G4 B4 | C5:3"
+}

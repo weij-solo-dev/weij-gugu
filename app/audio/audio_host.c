@@ -7,6 +7,7 @@
 #include <SDL.h>
 #include <string.h>
 #include <stdlib.h>
+const uint32_t audio_out_latency_ms = 40;   // pulled → heard: SDL's buffer, about two frames
 
 static SDL_AudioDeviceID s_out, s_in;
 

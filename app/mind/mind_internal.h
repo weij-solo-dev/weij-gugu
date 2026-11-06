@@ -13,5 +13,6 @@ extern char *mind_trip_tpl;               // content/prompts/trip_card.md
 void mind_trip_block(char *dst, size_t cap);        // the trip part of block B; empty without a card
 void mind_where_sentence(char *dst, size_t cap);    // block C's "where", from the world
 extern char *mind_recap_tpl;              // content/prompts/trip_recap.md
+extern char *mind_story_tpl;              // content/prompts/story.md (mind_story.c)
 // mind_memory.c
 esp_err_t mind_memory_init(const char *data_dir);

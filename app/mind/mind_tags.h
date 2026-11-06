@@ -35,6 +35,7 @@ typedef struct {
     bool in_tag;
     size_t seg_bytes;      // clean bytes emitted since the last boundary
     size_t seg_chars;      // UTF-8 characters since the last boundary
+    bool cut_pending;      // a sentence just ended: the boundary waits for a closing quote or a second mark
     unsigned char utf8_hold[4];   // partial multi-byte sequence split across feeds
     size_t utf8_hold_len, utf8_need;
 } tag_parser_t;

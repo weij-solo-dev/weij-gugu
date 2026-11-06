@@ -33,5 +33,12 @@ write('beep', tone([1046], 0.16, 9500))
 # radio static (2026-11-06, the owner: "按压对话键，松开时，扬声器会有短暂的沙沙声"), which sounded like a fault in the speaker.
 write('over', tone([1046], 0.065, 6000, a=0.004, r=0.03) + sil(0.025) + tone([784], 0.09, 6000, a=0.004, r=0.05))
 write('crunch', [5200 * env(i % int(SR * 0.07), int(SR * 0.07), 0.003, 0.05) * rnd.uniform(-1, 1) * (1 if (i // int(SR * 0.07)) % 2 == 0 else 0) for i in range(int(SR * 0.28))])   # two bites: nom nom
+# Applause for the gift key's show (2026-11-06): a small crowd, claps scattered over a second, fading.
+claps = [0.0] * int(SR * 1.3)
+for k in range(46):
+    start = int(rnd.uniform(0, 1.05) * SR); amp = 3600 * rnd.uniform(0.5, 1.0) * (1.0 - start / (SR * 1.3)) ** 0.7
+    for i in range(int(SR * 0.018)):
+        if start + i < len(claps): claps[start + i] += amp * math.exp(-i / (SR * 0.004)) * rnd.uniform(-1, 1)
+write('clap', claps)
 write('pop', [5500 * env(i, int(SR * 0.08), 0.003, 0.05) * math.sin(2 * math.pi * (600 - 400 * i / (SR * 0.08)) * i / SR) for i in range(int(SR * 0.08))])
 print('sfx written to', OUT)

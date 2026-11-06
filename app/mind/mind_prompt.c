@@ -41,6 +41,7 @@ esp_err_t mind_prompt_load(const char *content_dir)
     s_today_tpl = load(content_dir, "today.md");
     mind_trip_tpl = load(content_dir, "trip_card.md");
     mind_recap_tpl = load(content_dir, "trip_recap.md");
+    mind_story_tpl = load(content_dir, "story.md");
     s_examples[LANG_ZH] = load(content_dir, "examples/zh.md");
     s_examples[LANG_YUE] = load(content_dir, "examples/yue.md");
     s_examples[LANG_EN] = load(content_dir, "examples/en.md");

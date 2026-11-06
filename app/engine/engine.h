@@ -30,7 +30,12 @@ typedef enum {
     ENGINE_EV_NOTHING_HEARD,   // the key was held but the ASR heard no words; nothing was sent to the model
     ENGINE_EV_ERROR,           // u.error — the turn (or the pre-warm) failed; the call decides what to say
     ENGINE_EV_ABORTED,         // the turn was cancelled
+    ENGINE_EV_STORY,           // u.story — a story began, a part ended on a question for the child, or the story is over
 } engine_event_kind_t;
+
+// A story is told in parts, each its own request to the model. Every part but the last ends on a question; the call
+// then waits for the child: an answer is the next turn (it goes into the next part), no answer is engine_story_next().
+typedef enum { ENGINE_STORY_BEGIN, ENGINE_STORY_ASK, ENGINE_STORY_END } engine_story_phase_t;
 
 typedef struct {
     engine_event_kind_t kind;
@@ -41,6 +46,7 @@ typedef struct {
         struct { const int16_t *pcm; size_t samples; int segment; } audio;
         struct { engine_timing_t timing; provider_usage_t asr, chat, tts; const char *reply; const char *transcript; lang_t lang; int segments; int tags; } done;
         struct { provider_error_t err; const char *stage; } error;   // stage: "prewarm" | "asr" | "chat" | "tts"
+        struct { engine_story_phase_t phase; int part, parts; } story;
     } u;
 } engine_event_t;
 
@@ -62,3 +68,15 @@ esp_err_t engine_on_release(engine_t *e, const char *events);
 void      engine_abort(engine_t *e);
 void      engine_end_call(engine_t *e);
 bool      engine_busy(engine_t *e);
+
+// Stories. A turn whose words ask for one starts it (mind_story_intent); so does engine_story_start (the shelf, the
+// bedtime bubble: `request` stands in for the child's words). No answer came after a part: engine_story_next. The child
+// broke in while it was told: engine_story_pause instead of engine_abort, with the segment that was sounding (the index
+// of ENGINE_EV_SEGMENT_START, -1 none yet); the next turn answers the child and then goes on from that sentence.
+esp_err_t engine_story_start(engine_t *e, const char *request, bool bedtime);
+esp_err_t engine_story_next(engine_t *e);
+void      engine_story_pause(engine_t *e, int sounding_segment);
+bool      engine_story_on(engine_t *e);
+// A part is longer than the playback buffer: the voice is fed only while less than this much audio waits to be heard.
+// app.c hands in the speaker's queue (audio_play_queued_ms); without it the voice is fed as fast as it can speak.
+void      engine_set_backlog_probe(engine_t *e, uint32_t (*queued_ms)(void));

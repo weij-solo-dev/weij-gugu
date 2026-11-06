@@ -10,6 +10,11 @@ typedef struct engine_ops {
     void      (*end_call)(engine_t *e);
     bool      (*busy)(engine_t *e);
     void      (*destroy)(engine_t *e);
+    esp_err_t (*story_start)(engine_t *e, const char *request, bool bedtime);
+    esp_err_t (*story_next)(engine_t *e);
+    void      (*story_pause)(engine_t *e, int sounding_segment);
+    bool      (*story_on)(engine_t *e);
+    void      (*set_backlog_probe)(engine_t *e, uint32_t (*queued_ms)(void));
 } engine_ops_t;
 
 struct engine {

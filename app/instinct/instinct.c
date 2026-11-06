@@ -3,6 +3,7 @@
 // idle presentation. Behaviour only; it never talks to vendors.
 #define LOG_TAG "instinct"
 #include "instinct/instinct.h"
+#include "instinct_internal.h"
 #include "foundation/log.h"
 #include "foundation/clock.h"
 #include "foundation/task.h"
@@ -460,6 +461,7 @@ void instinct_yellow_tap(void)
     static bool seeded;
     if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
     if (s_shake_last) { LOGI("yellow: not now (a ball)"); return; }   // a ball does not eat
+    if (show_press(now)) return;                              // five quick presses: the show (instinct_show.c)
     idle_stop();
     if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; LOGI("yellow: queued behind the %s (step %d, %d waiting)", FOOD[s_feed_food].id, s_fs, s_feed_queue); return; }   // one more is coming
     feed_start(now);                                          // a bubble or the trip's props on screen change nothing: they answer touches
@@ -467,6 +469,7 @@ void instinct_yellow_tap(void)
 
 void instinct_shaken(int intensity)
 {
+    show_stop("shaken");
     s_last_interaction = clock_us();
     if (atomic_load(&s_busy)) return;
     idle_stop();
@@ -616,6 +619,7 @@ static void instinct_task(void *arg)
         int64_t now = clock_us();
         speak_tick();
         feed_tick(now);
+        show_tick(now);
         if (now < next250) continue;
         next250 = now + 250000;
         shake_tick();
@@ -660,16 +664,25 @@ void instinct_set_busy(bool in_turn)
     if (in_turn) idle_stop();
     if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
     if (in_turn) feed_abort();                                // and whatever was falling goes
+    if (in_turn) show_stop("a call");                         // the show ends: the child wants to talk
     if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
 }
 
 void instinct_set_line_open(bool open) { atomic_store(&s_line_open, open); s_last_interaction = clock_us(); }
+
+// ---- lent to the show (instinct_internal.h) ----
+void instinct_feed_stop(void) { feed_abort(); idle_stop(); }
+void instinct_scene_back(void) { world_state_t st; world_state(&st); show(&st); }
+void instinct_face(ui_emotion_t e, int ms) { mood(e, ms); }
+bool instinct_night(void) { world_state_t st; world_state(&st); return tod_of(&st) == WORLD_TOD_NIGHT; }
+bool instinct_can_play(void) { return !atomic_load(&s_busy) && !s_shake_last && !s_speaking; }
 
 // A touch: an object reacts in its own way (and the finger feels it), Gugu reacts when touched itself,
 // empty wall and sky do nothing.
 void instinct_touched(int x, int y)
 {
     if (atomic_load(&s_busy)) return;
+    if (show_tap()) return;                                   // the show: a tap is applause
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;
     s_last_interaction = now;

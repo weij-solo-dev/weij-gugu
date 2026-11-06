@@ -149,8 +149,79 @@ TEST(test_mind_lines_and_language)
     CHECK(mind_init(&cfg) == ESP_OK);                            // back to the three family languages for the other tests
 }
 
+// Stories (2026-11-06, the owner: "小朋友喜欢听长故事"). Asking for one starts it in any of the three languages, and so
+// does saying yes (or naming a topic) when Gugu just offered one; telling Gugu that mum told a story does not. Each part
+// has its own prompt: the one-or-two-sentence rule is lifted, every part but the last ends with a question for the child,
+// the child's answer (or the lack of one) goes into the next part, bedtime ends with goodnight. The shelf keeps what was
+// told, newest first, the last 30.
+TEST(test_mind_story)
+{
+    mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
+    CHECK(mind_init(&cfg) == ESP_OK);
+    CHECK_EQ_INT(mind_story_intent("给我讲个恐龙的故事", NULL), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("咕咕，讲故事！", NULL), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("我想听小兔子的故事", NULL), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("再讲一个", "故事讲完啦！"), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("講個故仔俾我聽", NULL), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("Can you tell me a story about a whale?", NULL), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("妈妈昨天给我讲了一个故事", NULL), STORY_INTENT_NONE);      // telling, not asking
+    CHECK_EQ_INT(mind_story_intent("这个故事好好听", NULL), STORY_INTENT_NONE);
+    CHECK_EQ_INT(mind_story_intent("我今天去公园看到鸭子了", NULL), STORY_INTENT_NONE);
+    CHECK_EQ_INT(mind_story_intent("恐龙", "你想听什么故事呀？"), STORY_INTENT_START);         // the topic, after Gugu offered
+    CHECK_EQ_INT(mind_story_intent("好呀", "我给你讲个故事好不好？"), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("不要", "要不要听一个故事？"), STORY_INTENT_NONE);
+    CHECK_EQ_INT(mind_story_intent("yes please", "Shall I tell you a story?"), STORY_INTENT_START);
+    CHECK_EQ_INT(mind_story_intent("不听了", NULL), STORY_INTENT_STOP);
+    CHECK_EQ_INT(mind_story_intent("我不要听了", NULL), STORY_INTENT_STOP);
+    CHECK_EQ_INT(mind_story_intent("stop please", NULL), STORY_INTENT_STOP);
+    CHECK_EQ_INT(mind_story_intent("然后呢？", NULL), STORY_INTENT_MORE);
+    CHECK_EQ_INT(mind_story_intent("繼續講", NULL), STORY_INTENT_MORE);
+
+    mind_prompt_t p; memset(&p, 0, sizeof p);
+    CHECK(mind_story_prompt_build(&p, LANG_ZH, 1, 3, NULL, false, false) == ESP_OK);
+    if (!p.blocks[3].text) return;
+    CHECK_EQ_INT(p.count, 4);
+    CHECK(strstr(p.blocks[3].text, "今天是") != NULL);                       // today's facts stay, the story's rules follow
+    CHECK(strstr(p.blocks[3].text, "【现在：讲故事】") != NULL);
+    CHECK(strstr(p.blocks[3].text, "第 1 段（共 3 段）") != NULL);
+    CHECK(strstr(p.blocks[3].text, "从前") != NULL && strstr(p.blocks[3].text, "问小满") != NULL);   // opens, ends on a question
+    CHECK(strstr(p.blocks[3].text, "350") != NULL);                         // a Mandarin part is about 350 characters
+    CHECK(strstr(p.blocks[3].text, "晚安") == NULL);
+    CHECK(mind_story_prompt_build(&p, LANG_ZH, 2, 3, "大象来帮忙", false, false) == ESP_OK);
+    CHECK(strstr(p.blocks[3].text, "大象来帮忙") != NULL);                    // the child's answer goes into the next part
+    CHECK(strstr(p.blocks[3].text, "问小满") != NULL);
+    CHECK(mind_story_prompt_build(&p, LANG_EN, 3, 3, NULL, true, false) == ESP_OK);
+    CHECK(strstr(p.blocks[3].text, "没有回答") != NULL);                      // no answer came: the model is told so
+    CHECK(strstr(p.blocks[3].text, "晚安") != NULL);                          // bedtime: a goodnight ending
+    CHECK(strstr(p.blocks[3].text, "220") != NULL);                         // an English part is about 220 words
+    CHECK(strstr(p.blocks[3].text, "故事讲完啦") != NULL);
+    CHECK(mind_story_prompt_build(&p, LANG_ZH, 1, 3, NULL, false, true) == ESP_OK);   // cut off while written: finish it
+    CHECK(strstr(p.blocks[3].text, "不要从头再讲") != NULL && strstr(p.blocks[3].text, "用\"从前\"开头") == NULL);
+    CHECK(strstr(p.blocks[3].text, "问小满") != NULL);                       // and still end on the question
+    for (int part = 1; part <= 3; part++) {
+        mind_story_prompt_build(&p, LANG_YUE, part, 3, part > 1 ? "佢哋去咗海邊" : NULL, part == 3, false);
+        CHECK(strchr(p.blocks[3].text, '{') == NULL);                       // every placeholder filled
+    }
+
+    char path[200], names[40][40];
+    CHECK(mind_story_save(LANG_ZH, "[happy] 从前有一只小恐龙，叫嘟嘟。[curious] 它想去看海。", path, sizeof path) == ESP_OK);
+    char *saved = file_read_all(path, NULL);
+    CHECK(saved != NULL);
+    CHECK(saved && strstr(saved, "\"title\":\"从前有一只小恐龙，叫嘟嘟。\"") != NULL);   // the first sentence names it
+    CHECK(saved && strstr(saved, "它想去看海") != NULL && strstr(saved, "[happy]") == NULL);   // the text, tags gone
+    mem_release(saved);
+    for (int i = 0; i < 33; i++) { char t[64]; snprintf(t, sizeof t, "[happy] 第 %d 个故事。", i); mind_story_save(LANG_ZH, t, NULL, 0); }
+    int n = mind_story_shelf(names, 40);
+    CHECK_EQ_INT(n, 30);                                                      // the newest 30 stay
+    char *newest = NULL;
+    if (n > 0) { char pth[200]; snprintf(pth, sizeof pth, "%s/stories/%s", store_data_dir(), names[0]); newest = file_read_all(pth, NULL); }
+    CHECK(newest && strstr(newest, "第 32 个故事") != NULL);                  // newest first
+    mem_release(newest);
+}
+
 void test_mind(void)
 {
+    RUN(test_mind_story);
     RUN(test_mind_lines_and_language);
     RUN(test_mind_prompt_blocks);
     RUN(test_mind_dialog_ring);

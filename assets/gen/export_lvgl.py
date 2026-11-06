@@ -100,6 +100,12 @@ def main():
     images.append(('scn_away_day', pg.room('away', night=False, moons=2), False))
     images.append(('scn_away_night', pg.room('away', night=True, moons=2), False))
     images.append(('scn_home_off', pg.room('home', night=False, moons=0, lamp_on=False), False))   # the lamp switched off
+    images.append(('scn_stage_disco', pg.stage_disco(), False))   # the gift key's show (app/ui/ui_stage.c)
+    images.append(('scn_stage_night', pg.stage_night(), False))
+    for f in (0, 1): images.append((f'spr_stage_ball_{f}', pg.stage_ball(f), True))
+    for col, lean in (('pink', -1), ('cyan', 1), ('yel', -1), ('purp', 1)): images.append((f'spr_stage_beam_{col}', pg.stage_beam(col, lean), True))
+    images.append(('spr_stage_mic', pg.stage_mic(), True))
+    for col in ('yel', 'pink', 'cyan'): images.append((f'spr_stage_note_{col}', pg.stage_note(col), True))
     # v1.1: built-in props (fallbacks behind generated ones), the window pane at four times of day, accessories
     for pid, fn in pg.PROPS.items():
         images.append((f'spr_prop_{pid}', fn(), True))
@@ -114,6 +120,8 @@ def main():
         images.append((f'spr_pose_{pz}', pg.gugu(pz), True))
     images.append(('spr_news', pg.newspaper(), True))
     images.append(('spr_news_turn', pg.newspaper(turn=True), True))
+    images.append(('spr_book', pg.storybook(), True))
+    images.append(('spr_book_turn', pg.storybook(turn=True), True))
     pose_glasses, pose_hat_y, pose_camera_y, pose_hand, pose_grip = [], [], [], [], []
     for pz in POSES:                                              # the trip's accessories follow a pose's head too; the held item its hand
         pg.gugu(pz); g = pg.LAST_GEOM
@@ -224,6 +232,7 @@ def main():
     h_parts.append('extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];')
     h_parts.append('extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none')
     h_parts.append('extern const ui_patch_t ui_pose_grip[UI_POSE_FRAME_COUNT];   // the hand\'s tip, drawn over the held item; img NULL none')
+    h_parts.append(f'#define UI_STAGE_FLOOR {pg.STAGE_FLOOR}   // the show\'s floor: its first base row (the tiles cover it)')
     h_parts.append('#define UI_NEWS_X 9    // the newspaper\'s base offset over the pigeon sprite (held in front of the belly)')
     h_parts.append('#define UI_NEWS_Y 26')
     c_parts.append('const lv_image_dsc_t *const ui_pose_sprites[UI_POSE_FRAME_COUNT] = {')

@@ -50,6 +50,12 @@ const char *mind_dialog_last_user(void)
     return NULL;
 }
 
+const char *mind_dialog_last_assistant(void)
+{
+    for (size_t i = s_dialog_n; i > 0; i--) if (!strcmp(s_dialog[i - 1].role, "assistant")) return s_dialog[i - 1].text;
+    return NULL;
+}
+
 size_t mind_dialog_messages(chat_message_t *out, size_t cap)
 {
     size_t n = s_dialog_n < cap ? s_dialog_n : cap;

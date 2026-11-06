@@ -46,3 +46,10 @@ esp_err_t audio_selftest(audio_selftest_t *out);           // ESP_ERR_INVALID_ST
 // ---- local sound effects (16 kHz mono PCM / WAV files under content/sfx) ----
 esp_err_t audio_sfx_play(const char *name);                        // "beep", "over", "coo", "whistle", "nosignal" …
 esp_err_t audio_play_file(const char *path);                       // a 16 kHz mono WAV anywhere (data/voice/…): queued like an sfx
+// The gift key's show (audio_song.c): a song from content/songs/<name>.json, or "improvise" for one made up on the spot.
+// on_beat runs on the song's task as each beat is heard (beat 0 is the first; per_bar beats make a bar).
+typedef void (*audio_beat_cb)(int beat, int per_bar, void *user);
+esp_err_t   audio_song_play(const char *name, audio_beat_cb on_beat, void *user);
+void        audio_song_stop(void);                                 // at once, the queued notes dropped
+bool        audio_song_playing(void);
+const char *audio_song_title(void);

@@ -155,6 +155,24 @@ static void upscale(const lv_image_dsc_t *src, bigimg_t *b)
     bigimg_header(b, W, H, alpha);
 }
 
+// A sprite drawn ×UI_SPRITE_SCALE by LVGL is scaled again on every repaint of every area it touches; the show's beams,
+// ball and microphone overlap the pigeon, so each sway re-scaled them too (PLAN.md 踩坑 55). These keep a pre-scaled
+// copy in PSRAM, made once, drawn like the scene: a copy, no transform.
+#define PRESCALED_MAX 16
+static struct { const lv_image_dsc_t *src; bigimg_t big; } s_pre[PRESCALED_MAX];
+const lv_image_dsc_t *ui_prescaled(const lv_image_dsc_t *src)
+{
+    for (int i = 0; i < PRESCALED_MAX; i++) if (s_pre[i].src == src) return &s_pre[i].big.dsc;
+    for (int i = 0; i < PRESCALED_MAX; i++)
+        if (!s_pre[i].src) {
+            if (!bigimg_alloc(&s_pre[i].big, src)) return NULL;
+            upscale(src, &s_pre[i].big);
+            s_pre[i].src = src;
+            return &s_pre[i].big.dsc;
+        }
+    return NULL;
+}
+
 void ui_show_backdrop(const art_image_t *img, const art_rgb_t pal[ART_MAX_COLORS])
 {
     if (!img || img->w != ART_GRID || img->h != ART_GRID || img->alpha) return;
@@ -222,6 +240,18 @@ static void show_scene_src(const lv_image_dsc_t *bg)
     lv_obj_invalidate(s_scene_img);
 }
 
+void ui_show_stage_scene(const lv_image_dsc_t *bg)   // the show's stage in the scene slot (ui_stage.c)
+{
+    ui_lock();
+    ui_scene_is_home = false;
+    show_scene_src(bg);
+    ui_scene_show_window(false);
+    lv_obj_add_flag(s_case_img, LV_OBJ_FLAG_HIDDEN);
+    ui_scene_set_objects(NULL, 0, ART_TOD_DAY);
+    lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_HIDDEN);
+    ui_unlock();
+}
+
 void ui_home_backdrop_refresh(void)
 {
     if (ui_scene_is_home) show_scene_src(ui_home_lamp_is_on() ? &scn_home_day : &scn_home_off);
@@ -287,6 +317,7 @@ esp_err_t ui_init(void)
     lv_obj_set_pos(s_scene_img, 1, 1);
     show_scene_src(&scn_home_day);
     ui_scene_init(scr);                                     // window pane and props: above the backdrop, below the pigeon
+    ui_stage_init_back(scr);                                // the show's lights, behind the pigeon (ui_stage.c)
     s_case_img = make_sprite(scr, &spr_case_down, 93 * UI_SPRITE_SCALE + 1, 56 * UI_SPRITE_SCALE + 1);   // by the chalkboard, lifted with the room
     ui_gugu_img = lv_image_create(scr);
     lv_obj_remove_flag(ui_gugu_img, LV_OBJ_FLAG_CLICKABLE);
@@ -298,6 +329,7 @@ esp_err_t ui_init(void)
     lv_obj_add_flag(s_eyes_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_grip_img, LV_OBJ_FLAG_HIDDEN);
     ui_scene_init_accessory();
+    ui_stage_init_front(scr);                               // the show's microphone and notes, in front of it
     ui_scene_show_window(true);
     ui_anim_init(scr);
 

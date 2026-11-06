@@ -51,6 +51,18 @@ extern const lv_image_dsc_t scn_home_night;
 extern const lv_image_dsc_t scn_away_day;
 extern const lv_image_dsc_t scn_away_night;
 extern const lv_image_dsc_t scn_home_off;
+extern const lv_image_dsc_t scn_stage_disco;
+extern const lv_image_dsc_t scn_stage_night;
+extern const lv_image_dsc_t spr_stage_ball_0;
+extern const lv_image_dsc_t spr_stage_ball_1;
+extern const lv_image_dsc_t spr_stage_beam_pink;
+extern const lv_image_dsc_t spr_stage_beam_cyan;
+extern const lv_image_dsc_t spr_stage_beam_yel;
+extern const lv_image_dsc_t spr_stage_beam_purp;
+extern const lv_image_dsc_t spr_stage_mic;
+extern const lv_image_dsc_t spr_stage_note_yel;
+extern const lv_image_dsc_t spr_stage_note_pink;
+extern const lv_image_dsc_t spr_stage_note_cyan;
 extern const lv_image_dsc_t spr_prop_lamp;
 extern const lv_image_dsc_t spr_prop_bench;
 extern const lv_image_dsc_t spr_prop_mailbox;
@@ -115,6 +127,8 @@ extern const lv_image_dsc_t spr_pose_hide_l;
 extern const lv_image_dsc_t spr_pose_hide_r;
 extern const lv_image_dsc_t spr_news;
 extern const lv_image_dsc_t spr_news_turn;
+extern const lv_image_dsc_t spr_book;
+extern const lv_image_dsc_t spr_book_turn;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_look_l;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_look_r;
 extern const lv_image_dsc_t spr_acc_sunglasses_pose_read_l;
@@ -224,5 +238,6 @@ extern const int16_t ui_pose_hat_y[UI_POSE_FRAME_COUNT];
 extern const int16_t ui_pose_camera_y[UI_POSE_FRAME_COUNT];
 extern const int8_t ui_pose_hand[UI_POSE_FRAME_COUNT][2];   // the wing-hand (base x, y in the sprite) that holds the item; -1 none
 extern const ui_patch_t ui_pose_grip[UI_POSE_FRAME_COUNT];   // the hand's tip, drawn over the held item; img NULL none
+#define UI_STAGE_FLOOR 90   // the show's floor: its first base row (the tiles cover it)
 #define UI_NEWS_X 9    // the newspaper's base offset over the pigeon sprite (held in front of the belly)
 #define UI_NEWS_Y 26

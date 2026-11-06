@@ -25,6 +25,7 @@
 
 static esp_codec_dev_handle_t s_dev;
 static atomic_bool s_capture_on;
+const uint32_t audio_out_latency_ms = 90;   // pulled → heard: the I2S DMA queue: 6 × 240 frames
 static int16_t s_out_buf[AUDIO_FRAME_SAMPLES];
 static int16_t s_in_buf[AUDIO_FRAME_SAMPLES];
 

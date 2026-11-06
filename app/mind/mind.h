@@ -33,6 +33,7 @@ void   mind_dialog_reset(void);
 void   mind_dialog_add(const char *role, const char *text);
 size_t mind_dialog_messages(chat_message_t *out, size_t cap);   // oldest first
 const char *mind_dialog_last_user(void);                       // what the child just said, or NULL
+const char *mind_dialog_last_assistant(void);                  // what Gugu said last, or NULL
 
 // ---- language policy ----
 lang_t mind_reply_lang(lang_t asr_lang, const char *transcript);
@@ -51,6 +52,18 @@ esp_err_t mind_share_request_build(lang_t lang, const char *where_phrase, const 
 void      mind_strip_tags(char *text);                                              // drop [tags] the model added anyway, trim
 // Gugu just asked the child `question` from the bubble: block C says so for the next ttl_ms, so the answer makes sense.
 void      mind_set_asked(const char *question, uint32_t ttl_ms);
+
+// ---- stories (mind_story.c; content/prompts/story.md): told in parts, kept on a shelf under data/stories/ ----
+typedef enum { STORY_INTENT_NONE = 0, STORY_INTENT_START, STORY_INTENT_STOP, STORY_INTENT_MORE } story_intent_t;
+// What the child's words mean for a story: asking for one (or saying yes to the one Gugu just offered in last_reply),
+// asking to stop, asking for more. The caller decides what applies (stop and more only while a story is on).
+story_intent_t mind_story_intent(const char *said, const char *last_reply);
+// The prompt for one part of `parts`: block C carries today and the story's rules; child_said is the answer to the
+// last part's question (NULL: none came); bedtime ends the story with goodnight; go_on: the part was cut off while the
+// model wrote it (the child broke in), so it is finished from where the dialogue's last part stops.
+esp_err_t mind_story_prompt_build(mind_prompt_t *out, lang_t lang, int part, int parts, const char *child_said, bool bedtime, bool go_on);
+esp_err_t mind_story_save(lang_t lang, const char *text, char *path_out, size_t cap);   // tags stripped; keeps the newest 30
+int       mind_story_shelf(char (*names)[40], int cap);                                 // file names, newest first
 
 // ---- mood baseline (v1.0: a fixed sentence per time of day) ----
 const char *mind_mood_sentence(void);

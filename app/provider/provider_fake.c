@@ -60,6 +60,7 @@ static esp_err_t f_chat_open(const chat_events_t *ev, void *user, chat_session_t
 }
 static esp_err_t f_chat_send(chat_session_t *s, const chat_request_t *req)
 {
+    s->cancelled = false;                                    // a cancel ends the request in flight, not the session (as with the real vendors)
     const char *env = getenv("GUGU_FAKE_REPLY");
     const char *r = s_qi < s_qn ? s_queue[s_qi++] : env ? env : s_chat_reply;
     if (!strncmp(r, "!error ", 7)) {                         // tests: the vendor answers with this HTTP error

@@ -368,6 +368,7 @@ void app_main(void)
     mind_init(&mc);
 
     s_engine = engine_cascade_create(call_engine_event, NULL);
+    engine_set_backlog_probe(s_engine, audio_play_queued_ms);   // a story's sentences go to the voice at the speaker's pace
     call_config_t cc = { .idle_timeout_ms = (uint32_t)store_setting_int("idle_timeout_ms", 12000),
                          .max_call_ms = (uint32_t)store_setting_int("max_call_ms", 10 * 60 * 1000),
                          .lang_hint = s_lang, .where = NULL,           // NULL: the mind takes "where" from the world

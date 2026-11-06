@@ -164,6 +164,38 @@ static int cmd_ls(int argc, char **argv)
     return 0;
 }
 
+// rm <path>…: a file, or a folder's files and the folder, under the data partition only (the bench's recordings
+// filled all of it once, 2026-11-06, PLAN.md 踩坑 54).
+static int rm_one(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) { printf("no such file: %s\n", path); return 1; }
+    if (S_ISDIR(st.st_mode)) {
+        DIR *d = opendir(path); int n = 0;
+        if (d) {
+            char sub[300]; struct dirent *e;
+            while ((e = readdir(d)) != NULL) { if (e->d_name[0] == '.') continue; snprintf(sub, sizeof sub, "%s/%s", path, e->d_name); if (remove(sub) == 0) n++; }
+            closedir(d);
+        }
+        int r = rmdir(path);
+        printf("removed %d file(s) and %s%s\n", n, path, r == 0 ? "" : " (folder kept: not empty)");
+        return r == 0 ? 0 : 1;
+    }
+    int r = remove(path);
+    printf("%s %s\n", r == 0 ? "removed" : "cannot remove", path);
+    return r == 0 ? 0 : 1;
+}
+static int cmd_rm(int argc, char **argv)
+{
+    if (argc < 2) { printf("usage: rm <path under %s>…\n", store_data_dir()); return 1; }
+    size_t dl = strlen(store_data_dir()); int bad = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], store_data_dir(), dl) || argv[i][dl] != '/' || strstr(argv[i], "..")) { printf("only under %s: %s\n", store_data_dir(), argv[i]); bad = 1; continue; }
+        bad |= rm_one(argv[i]);
+    }
+    return bad;
+}
+
 static int cmd_cat(int argc, char **argv)
 {
     if (argc < 2) { printf("usage: cat <path>\n"); return 1; }
@@ -464,6 +496,7 @@ static const cmd_t CMDS[] = {
     { "stat", "memory, battery, network, call state", cmd_stat },
     { "mem", "heap regions (free, largest block, low-water mark) and every task's stack headroom", cmd_mem },
     { "ls", "ls [dir]", cmd_ls },
+    { "rm", "rm <path>… — a file, or a folder and its files, under the data partition", cmd_rm },
     { "cat", "cat <path>", cmd_cat },
     { "put", "put <path> <bytes> — receive a file over this port (the sender waits for \"put: ready\", then for \"put: ok\" after each 2 KB)", cmd_put },
     { "parent", "parent [off] — pairing mode: the hotspot and the page (yellow key held 3 s does the same)", cmd_parent },

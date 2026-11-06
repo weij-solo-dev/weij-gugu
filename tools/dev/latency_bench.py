@@ -272,6 +272,7 @@ def main():
                       f'tts {ms.get("first_tts", -1):5d} | {t.get("transcript", "")[:24]} -> {(t.get("seg0") or {}).get("text", "")[:30]}', flush=True)
                 k += 1
             dev.cmd('hang'); dev.read(1.0)
+    dev.cmd('rm /data/bench')                     # the recordings filled the data partition once (6 MB of 6.25): never leave them
     if current != (original if original != '(unset)' else 'zh'):
         dev.cmd(f'set lang {original if original != "(unset)" else "zh"}'); dev.reset(); dev.settle(quiet=3, cap=30)
     summary = summarize(all_turns, a.label)

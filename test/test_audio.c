@@ -5,6 +5,7 @@
 #include "minitest.h"
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
+#include "foundation/clock.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -125,10 +126,61 @@ TEST(test_audio_capture_stop_waits_for_a_frame)
     pthread_join(th, NULL);
 }
 
+// The gift key's show sings (audio_song.c): a song from content/songs is synthesised as the speaker drains, sung twice
+// when under 24 s, every beat reported in order once it has been pulled, and loud but never
+// clipped; Twinkle (28 s) is long enough to sing once, a made-up song (8 bars) is sung twice; an unknown song is
+// refused; stop is at once.
+static int beats_seen, beat_last = -1, beat_order_bad; static int beat_per_bar;
+static void on_beat(int beat, int per_bar, void *u) { (void)u; if (beat != beat_last + 1) beat_order_bad++; beat_last = beat; beats_seen++; beat_per_bar = per_bar; }
+static int pull_song(int *peak, double *rms)   // the speaker, as fast as the song renders: returns ms of audio pulled
+{
+    int16_t out[320]; long long n = 0; double sq = 0; *peak = 0;
+    for (int idle = 0; idle < 400;) {
+        size_t got = audio_pull(out, 320);
+        if (!got) { if (!audio_song_playing()) idle += 40; usleep(1000); idle++; continue; }
+        idle = 0;
+        for (size_t i = 0; i < got; i++) { int a = abs(out[i]); if (a > *peak) *peak = a; sq += (double)out[i] * out[i]; }
+        n += (long long)got;
+    }
+    *rms = n ? sqrt(sq / (double)n) : 0;
+    return (int)(n * 1000 / 16000);
+}
+TEST(test_audio_song)
+{
+    audio_once(); audio_set_volume(100); audio_play_flush();
+    beats_seen = 0; beat_last = -1; beat_order_bad = 0;
+    CHECK(audio_song_play("twinkle", on_beat, NULL) == ESP_OK);
+    CHECK(audio_song_play("twinkle", on_beat, NULL) == ESP_ERR_INVALID_STATE);   // one at a time
+    int peak; double rms;
+    int ms = pull_song(&peak, &rms);
+    CHECK(!audio_song_playing());
+    CHECK_EQ_INT(beats_seen, 48); CHECK_EQ_INT(beat_order_bad, 0); CHECK_EQ_INT(beat_per_bar, 4);
+    CHECK(ms > 27500 && ms < 29000);                          // 48 beats at 104 a minute, and a little ring-out
+    CHECK(peak < 32000 && peak > 8000);                       // loud, never clipped
+    CHECK(rms > 1500 && rms < 9000);
+    beats_seen = 0; beat_last = -1;
+    CHECK(audio_song_play("improvise", on_beat, NULL) == ESP_OK);
+    pull_song(&peak, &rms);
+    CHECK_EQ_INT(beats_seen, 64);
+    beats_seen = 0; beat_last = -1;
+    CHECK(audio_song_play("lullaby", on_beat, NULL) == ESP_OK); // 3/4, sung twice in its own key
+    pull_song(&peak, &rms);
+    CHECK_EQ_INT(beats_seen, 50); CHECK_EQ_INT(beat_per_bar, 3);
+    CHECK(audio_song_play("no_such_song", on_beat, NULL) == ESP_ERR_NOT_FOUND);
+    CHECK(audio_song_play("jingle_bells", on_beat, NULL) == ESP_OK);
+    int16_t out[320]; for (int i = 0; i < 20; i++) { audio_pull(out, 320); usleep(2000); }
+    int64_t t0 = clock_us();
+    audio_song_stop();
+    CHECK(!audio_song_playing() && clock_us() - t0 < 300000);  // stopped at once
+    CHECK_EQ_INT(audio_play_queued_ms(), 0);                   // its notes dropped
+    audio_set_volume(AUDIO_VOLUME_DEFAULT);
+}
+
 void test_audio(void)
 {
     RUN(test_audio_volume_steps);
     RUN(test_audio_selftest_keeps_its_own_level);
     RUN(test_audio_level_is_the_voice_not_the_volume);
+    RUN(test_audio_song);
     RUN(test_audio_capture_stop_waits_for_a_frame);
 }

@@ -1162,6 +1162,101 @@ def newspaper(turn=False):
     c.outline_of({P['paper'], P['hi'], P['line'], P['ink'], P['skyd'], P['sun']}, P['line'])
     return c
 
+def storybook(turn=False):
+    """The picture book Gugu tells stories from (2026-11-06, the owner: "小朋友喜欢听长故事"): held like the newspaper and
+    just as big, a red cloth cover round two pages, a big picture on the left (a moon over a hill and a little house),
+    a few lines and a small picture on the right; turn: the right page's corner lifted."""
+    c = Canvas(30, 17); P = PAL
+    c.rect(0, 1, 30, 16, P['red2']); c.rect(1, 0, 28, 16, P['paper'])          # the cover shows below and at the sides
+    c.vline(15, 0, 15, P['hi'])                                                # the spine
+    c.rect(2, 2, 12, 11, P['skyd2'])                                           # left page: a picture
+    c.ellipse(5.5, 5, 1.8, 1.8, P['sun'])
+    c.rect(2, 10, 12, 3, P['green'])
+    c.rect(8, 7, 4, 3, P['stamp']); c.put(9, 6, P['stamp']); c.put(10, 6, P['stamp']); c.put(10, 8, P['glow'])
+    for y in (3, 5): c.hline(17, 27, y, P['ink'])                               # right page: lines and a small picture
+    c.rect(17, 8, 6, 5, P['skyd2']); c.put(19, 10, P['glow']); c.put(20, 10, P['glow']); c.hline(17, 22, 12, P['green'])
+    for y in (8, 10, 12): c.hline(24, 27, y, P['ink'])
+    if turn:
+        c.rect(24, 0, 5, 5, P['hi']); c.put(28, 0, None); c.put(27, 0, None); c.put(28, 1, None)
+    c.outline_of({P['paper'], P['hi'], P['ink'], P['skyd2'], P['sun'], P['green'], P['stamp'], P['glow'], P['red2']}, P['line'])
+    return c
+
+# ---------- the gift key's show (2026-11-06, the owner: "gugu 将变成歌手表演一段歌曲，对应场景也可以临时变化（比如 disco 等）") ----------
+# The stage takes the scene slot; what moves on the beat (the floor's tiles, the mirror ball, the beams, sparkles, notes)
+# is a light layer over it in app/ui/ui_stage.c, so a beat repaints small parts, never the whole screen.
+STAGE = {'night': (0x16, 0x14, 0x2E), 'night2': (0x1E, 0x1B, 0x3D), 'box': (0x0C, 0x0B, 0x18), 'box2': (0x2A, 0x26, 0x40),
+         'cone': (0x50, 0x4A, 0x70), 'floor': (0x24, 0x1E, 0x40), 'grout': (0x10, 0x0E, 0x22),
+         'sky': (0x10, 0x18, 0x3A), 'sky2': (0x18, 0x24, 0x50), 'hill': (0x1E, 0x3A, 0x34), 'hill2': (0x16, 0x2C, 0x28),
+         'moon': (0xF4, 0xE8, 0xB0), 'star': (0xFF, 0xF4, 0xC8), 'pink': (0xFF, 0x5C, 0xA8), 'cyan': (0x4C, 0xD8, 0xF0),
+         'yel': (0xFF, 0xD8, 0x4A), 'purp': (0x9A, 0x5C, 0xF0), 'ball': (0xE8, 0xEC, 0xF4), 'ball2': (0x8C, 0x92, 0xA8), 'pole': (0x30, 0x30, 0x38)}
+STAGE_FLOOR = 90                         # the floor's first row: Gugu's feet end on the row above (UI_GUGU_FEET_ROW)
+
+def stage_disco():
+    """The disco: a dark wall in soft panels, a speaker stack each side, the string the ball hangs on, a dark floor the
+    light layer's tiles cover."""
+    c = Canvas(116, 116, STAGE['night']); S = STAGE
+    for y in range(STAGE_FLOOR):
+        for x in range(116):
+            if (x // 8) % 2 == 0: c.put(x, y, S['night2'])
+    for sx in (6, 98):
+        c.rect(sx, 52, 12, 38, S['box']); c.rect(sx + 1, 53, 10, 36, S['box2'])
+        for cy in (61, 78):
+            c.ellipse(sx + 6, cy, 4.2, 4.2, S['box']); c.ellipse(sx + 6, cy, 2.2, 2.2, S['cone'])
+    c.vline(58, 0, 7, S['pole'])
+    c.rect(0, STAGE_FLOOR, 116, 116 - STAGE_FLOOR, S['floor'])
+    c.hline(0, 115, STAGE_FLOOR, S['grout'])
+    c.circle_mask(58, 58, 58)
+    return c
+
+def stage_night():
+    """The lullaby: a deep blue sky with stars and a big moon, a soft hill to stand on."""
+    c = Canvas(116, 116, STAGE['sky']); S = STAGE
+    for y in range(116):
+        if y > 40:
+            for x in range(116):
+                if (x + y) % 2 == 0 and y < 70: c.put(x, y, S['sky2'])
+    for y in range(70, STAGE_FLOOR):
+        for x in range(116): c.put(x, y, S['sky2'])
+    c.ellipse(84, 26, 9, 9, S['moon']); c.ellipse(88, 23, 8, 8, S['sky'])   # a crescent
+    import random as _r
+    rnd = _r.Random(11)
+    for _ in range(24):
+        x, y = rnd.randrange(8, 108), rnd.randrange(8, 66)
+        if (x - 84) ** 2 + (y - 26) ** 2 > 160: c.put(x, y, S['star'])
+    c.ellipse(58, STAGE_FLOOR + 40, 90, 42, S['hill'])
+    c.ellipse(20, STAGE_FLOOR + 30, 40, 26, S['hill2'], pred=lambda x, y: y >= STAGE_FLOOR + 6)
+    c.circle_mask(58, 58, 58)
+    return c
+
+def stage_ball(frame=0):
+    c = Canvas(17, 17); S = STAGE
+    for y in range(17):
+        for x in range(17):
+            if (x + 0.5 - 8.5) ** 2 + (y + 0.5 - 8.5) ** 2 <= 8.0 ** 2: c.put(x, y, S['ball'] if ((x // 2 + y // 2 + frame) % 2) else S['ball2'])
+    c.put(5, 4, (0xFF, 0xFF, 0xFF)); c.put(6, 4, (0xFF, 0xFF, 0xFF))
+    return outline(c)
+
+def stage_beam(color, lean):
+    """A beam from the ball down to the floor, dithered (every other pixel), leaning -1 left or +1 right."""
+    W, H = 34, 66; c = Canvas(W, H); col = STAGE[color]
+    x0 = W // 2 if lean else W // 2
+    for y in range(H):
+        t = y / (H - 1); xm = (W // 2) + lean * (W // 2 - 4) * t; half = 1 + 6 * t
+        for x in range(int(xm - half), int(xm + half) + 1):
+            if 0 <= x < W and (x + y) % 2 == 0: c.put(x, y, col)
+    return c
+
+def stage_mic():
+    c = Canvas(9, 26); S = STAGE
+    c.vline(4, 6, 23, S['pole']); c.hline(1, 7, 24, S['pole']); c.hline(0, 8, 25, S['pole'])
+    c.ellipse(4.5, 3, 2.6, 3.0, (0x40, 0x40, 0x48)); c.put(3, 1, (0xA0, 0xA0, 0xB0)); c.put(3, 2, (0xA0, 0xA0, 0xB0))
+    return c
+
+def stage_note(color='yel'):
+    c = Canvas(6, 8); col = STAGE[color]
+    c.rect(0, 5, 3, 2, col); c.vline(2, 0, 5, col); c.hline(2, 4, 0, col); c.put(5, 1, col); c.put(4, 1, col)
+    return c
+
 def acc_sun_hat():
     c = Canvas(24, 9); P = PAL
     c.rect(1, 6, 22, 2, P['straw2']); c.rect(6, 1, 12, 5, P['straw']); c.rect(7, 0, 10, 1, P['straw']); c.rect(6, 4, 12, 1, P['red2'])

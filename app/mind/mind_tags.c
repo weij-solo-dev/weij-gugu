@@ -34,12 +34,23 @@ static void emit_text(tag_parser_t *p, const char *s, size_t n)
 
 static void boundary(tag_parser_t *p)
 {
+    p->cut_pending = false;
     if (p->seg_bytes == 0) return;
     if (p->sink.on_segment_end) p->sink.on_segment_end(p->user);
     p->seg_bytes = 0; p->seg_chars = 0;
 }
 
-// One complete UTF-8 character (1–4 bytes) outside a tag.
+// A closing quote or bracket: ” ’ 」 』 ） " ' )
+static bool closes(const unsigned char *c, size_t n)
+{
+    if (n == 1) return c[0] == '"' || c[0] == '\'' || c[0] == ')';
+    return n == 3 && ((c[0] == 0xE2 && c[1] == 0x80 && (c[2] == 0x9D || c[2] == 0x99)) || (c[0] == 0xE3 && c[1] == 0x80 && (c[2] == 0x8D || c[2] == 0x8F))
+                      || (c[0] == 0xEF && c[1] == 0xBC && c[2] == 0x89));
+}
+
+// One complete UTF-8 character (1–4 bytes) outside a tag. A sentence's end cuts the segment at the next character
+// unless that one belongs to it: a closing quote or bracket, or another end mark ("！？", "……") (2026-11-06: a story's
+// "我想回家！”" left a segment of nothing but ” for the voice).
 static void put_char(tag_parser_t *p, const unsigned char *c, size_t n)
 {
     bool hard = false, soft = false;
@@ -56,9 +67,18 @@ static void put_char(tag_parser_t *p, const unsigned char *c, size_t n)
         boundary(p);
         return;
     }
+    if (p->cut_pending) {
+        if (hard || closes(c, n)) {           // still the same sentence
+            emit_text(p, (const char *)c, n); p->seg_chars++;
+            if (!hard) boundary(p);
+            return;
+        }
+        boundary(p);
+    }
     emit_text(p, (const char *)c, n);
     p->seg_chars++;
-    if (hard || (soft && p->seg_chars >= SEG_SOFT_CHARS)) boundary(p);
+    if (hard) p->cut_pending = true;
+    else if (soft && p->seg_chars >= SEG_SOFT_CHARS) boundary(p);
 }
 
 static void feed_impl(tag_parser_t *p, const char *utf8, size_t n, bool allow_tags);
@@ -107,6 +127,7 @@ static void feed_impl(tag_parser_t *p, const char *utf8, size_t n, bool allow_ta
             continue;
         }
         if (b == '[' && allow_tags) {
+            if (p->cut_pending) boundary(p);  // the sentence closes before a tag: the tag belongs to the next one
             p->in_tag = true; p->pending[0] = '['; p->pending_len = 1;
             continue;
         }
