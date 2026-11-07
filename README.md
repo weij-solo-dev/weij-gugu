@@ -38,7 +38,7 @@ warm, slightly husky voice.
 - **It remembers the child.** Names, friends, fears, new skills, brought up naturally days later.
 - **Parents see everything, without an account.** Every call transcript, postcard and memory is on
   the device; holding the yellow gift key for three seconds enters pairing mode: a hotspot whose name and password
-  show on the screen, and a web page where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
+  show on the screen, and a web page, opening by itself once the phone has joined, where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
 
 ## How it is built
 

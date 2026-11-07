@@ -120,6 +120,10 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         cJSON_AddNumberToObject(j, "battery_mv", board_battery_mv());
         cJSON_AddBoolToObject(j, "charging", board_is_charging());
         cJSON_AddBoolToObject(j, "online", net_is_online());
+        char ssid[33] = "";                               // boot.json has it as of the boot; the page may have just connected
+        store_secret_get("wifi_ssid", ssid, sizeof ssid);
+        cJSON_DeleteItemFromObject(j, "wifi_configured");
+        cJSON_AddBoolToObject(j, "wifi_configured", ssid[0] != '\0');
         cJSON_AddNumberToObject(j, "internal_free", (double)mem_avail_internal());
         cJSON_AddNumberToObject(j, "big_free", (double)mem_avail_big());
         char *txt = cJSON_PrintUnformatted(j); cJSON_Delete(j);
@@ -150,11 +154,8 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         if (s_hooks.test_audio) s_hooks.test_audio(json, sizeof json, s_hooks.user);
         return reply(out, out_len, json);
     }
-    if (post && !strcmp(path, "/api/apply")) {           // {"wifi":true} after saving secrets: use them now
-        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
-        bool wifi = cJSON_IsTrue(cJSON_GetObjectItem(j, "wifi"));
-        cJSON_Delete(j);
-        if (s_hooks.apply) s_hooks.apply(wifi, s_hooks.user);
+    if (post && !strcmp(path, "/api/apply")) {           // after saving settings or keys: use them now
+        if (s_hooks.apply) s_hooks.apply(s_hooks.user);
         return reply(out, out_len, "{\"ok\":true}");
     }
     if (post && !strcmp(path, "/api/volume")) {          // the speaker section's slider: kept, and in use at once
@@ -238,6 +239,19 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         for (int i = 0; i < n; i++) { strbuf_printf(&b, "%s{\"ssid\":\"", i ? "," : ""); strbuf_append_json_escaped(&b, aps[i].ssid); strbuf_printf(&b, "\",\"rssi\":%d,\"secure\":%s}", aps[i].rssi, aps[i].secure ? "true" : "false"); }
         strbuf_puts(&b, "]}");
         *out = strdup(b.s ? b.s : "{}"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+    }
+    if (post && !strcmp(path, "/api/wifi/join")) {         // {"ssid":"…","pass":"…"}: tried now, kept only if it works; GET says how it went
+        cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
+        const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(j, "ssid")), *pass = cJSON_GetStringValue(cJSON_GetObjectItem(j, "pass"));
+        size_t sl = ssid ? strlen(ssid) : 0, pl = pass ? strlen(pass) : 0;
+        if (sl < 1 || sl > 32 || (pl && (pl < 8 || pl > 63))) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"a name of 1 to 32 bytes; no password, or 8 to 63\"}"), 400; }
+        bool started = parent_join_start(ssid, pass ? pass : "", s_hooks.wifi_result, s_hooks.user);
+        cJSON_Delete(j);
+        return reply(out, out_len, started ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"busy\"}");
+    }
+    if (get && !strcmp(path, "/api/wifi/join")) {
+        char json[48]; snprintf(json, sizeof json, "{\"state\":\"%s\"}", parent_join_state());
+        return reply(out, out_len, json);
     }
     if (get && !strcmp(path, "/api/secrets")) {            // the owner's own Wi-Fi and keys, shown on the owner's own page (the hotspot is the lock)
         strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '{');

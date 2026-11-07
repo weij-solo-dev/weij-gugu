@@ -1,6 +1,5 @@
-// parent.h — parent mode: a hotspot (or the home LAN) and a small web page served by the device:
-// status, settings, Wi-Fi and vendor keys (write-only), the call log, export. v1.0 scope: read logs
-// and export; the captive portal and the device-screen password page follow in stage 1.
+// parent.h — pairing mode: a hotspot whose page opens by itself on the phone (a captive portal, parent_portal.c) and a small
+// web page served by the device: Wi-Fi, status, settings, vendor keys, the call log, export.
 #pragma once
 #include <stdbool.h>
 #include "esp_err.h"
@@ -19,7 +18,8 @@ typedef struct {
     void (*test_sound)(void *user);                                        // the page's "test the speaker" button
     void (*volume)(int percent, void *user);                               // the page moved the volume (0–100, already saved): use it now
     int  (*test_audio)(char *json, size_t cap, void *user);                 // "test speaker and microphone": a beep listened to; the levels as JSON
-    void (*apply)(bool wifi_changed, void *user);                          // secrets were saved: take them into use now (keys at once, Wi-Fi joins)
+    void (*apply)(void *user);                                             // settings or keys were saved: take them into use now
+    void (*wifi_result)(const char *state, void *user);                    // "connect" on the page: trying | ok | bad_password | not_found | failed, on a worker's task
     int  (*check)(char *json, size_t cap, void *user);                     // "test": do the vendors now assigned answer? Waits for the answer
     int  (*voice_test)(const char *lang, const char *voice, char *json, size_t cap, void *user);   // speak the preview line with this voice
     void *user;

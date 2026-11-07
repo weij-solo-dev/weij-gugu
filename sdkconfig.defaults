@@ -70,3 +70,7 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_USE_TJPGD=y
 CONFIG_LV_USE_FS_STDIO=y
 CONFIG_LV_FS_STDIO_LETTER=65
+
+# Pairing mode's captive portal answers a phone's every name, so its apps all come to the web server (3 sockets of its own
+# and up to 7 connections), and the portal's DNS needs one more: the default 10 left none for a vendor test from the page.
+CONFIG_LWIP_MAX_SOCKETS=16

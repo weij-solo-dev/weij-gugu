@@ -193,4 +193,17 @@ int net_wifi_nearby(net_wifi_ap_t *out, int cap, bool *sweeping)   // the simula
 }
 int net_wifi_scan(net_wifi_ap_t *out, int cap) { return net_wifi_nearby(out, cap, NULL); }
 
-esp_err_t net_wifi_join(const char *ssid, const char *pass) { (void)ssid; (void)pass; return ESP_OK; }   // the simulator is always online
+// The simulator is always online, and a join goes as GUGU_WIFI_JOIN says (ok | bad_password | not_found | failed; ok by
+// default), after GUGU_WIFI_JOIN_MS when the page's "connecting" is to be seen.
+static char s_last_join[33];
+static int64_t s_join_at;
+const char *net_host_last_join(void) { return s_last_join; }
+esp_err_t net_wifi_join(const char *ssid, const char *pass) { (void)pass; snprintf(s_last_join, sizeof s_last_join, "%s", ssid ? ssid : ""); s_join_at = clock_us(); return ESP_OK; }
+void net_wifi_leave(void) { s_last_join[0] = '\0'; }
+net_join_t net_wifi_join_result(void)
+{
+    const char *ms = getenv("GUGU_WIFI_JOIN_MS"), *r = getenv("GUGU_WIFI_JOIN");
+    if (ms && clock_us() - s_join_at < atoll(ms) * 1000) return NET_JOIN_TRYING;
+    if (!r || !strcmp(r, "ok")) return NET_JOIN_OK;
+    return !strcmp(r, "bad_password") ? NET_JOIN_BAD_PASSWORD : !strcmp(r, "not_found") ? NET_JOIN_NOT_FOUND : NET_JOIN_FAILED;
+}

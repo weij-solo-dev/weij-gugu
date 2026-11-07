@@ -18,7 +18,10 @@ typedef struct { char ssid[33]; int rssi; bool secure; } net_wifi_ap_t;
 bool net_wifi_sweep(void);                                            // starts one unless one runs; returns whether it started
 int net_wifi_nearby(net_wifi_ap_t *out, int cap, bool *sweeping);     // the list so far, strongest first, no duplicates; host: a made-up list
 int net_wifi_scan(net_wifi_ap_t *out, int cap);                       // a sweep and the list after it, blocking (~4 s, the console)
-esp_err_t net_wifi_join(const char *ssid, const char *pass);   // join now without stopping the radio (the hotspot stays up); net_is_online() tells the result
+esp_err_t net_wifi_join(const char *ssid, const char *pass);   // join now without stopping the radio; net_wifi_join_result() tells how it goes
+typedef enum { NET_JOIN_TRYING, NET_JOIN_OK, NET_JOIN_BAD_PASSWORD, NET_JOIN_NOT_FOUND, NET_JOIN_FAILED } net_join_t;
+net_join_t net_wifi_join_result(void);                         // of the last join; stays once decided (the radio goes on retrying until net_wifi_leave or the next join)
+void net_wifi_leave(void);                                     // no network and no retries until the next join: they would disturb the hotspot for nothing
 
 // ---- HTTP ----
 typedef struct net_http net_http_t;

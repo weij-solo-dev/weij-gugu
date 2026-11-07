@@ -1,12 +1,16 @@
-// parent_esp.c — esp_http_server on the station interface (and the hotspot when entered).
+// parent_esp.c — esp_http_server on the station interface (and the hotspot when entered), and while the hotspot is up the
+// sockets of its captive portal (parent_portal.c says what they answer).
 #define LOG_TAG "parent"
 #include "parent_internal.h"
 #include "foundation/log.h"
+#include "foundation/task.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
 #include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_check.h"
+#include "lwip/sockets.h"
+#include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -15,9 +19,43 @@ static httpd_handle_t s_httpd;
 static bool s_active;
 static char s_ssid[32], s_pass[12], s_url[40];
 static esp_netif_t *s_ap_netif;             // created once; enter/exit only switch the Wi-Fi mode
+static uint8_t s_ap_ip[4];
+static atomic_bool s_dns_on, s_dns_alive;
+
+static void dns_task(void *arg)             // UDP 53 on the hotspot; ends within a second of pairing mode
+{
+    (void)arg;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in me = { .sin_family = AF_INET, .sin_port = htons(53) };
+    memcpy(&me.sin_addr.s_addr, s_ap_ip, 4);
+    struct timeval tick = { .tv_sec = 1 };
+    if (fd < 0 || bind(fd, (struct sockaddr *)&me, sizeof me) != 0) LOGW("portal: no DNS socket");
+    else {
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tick, sizeof tick);
+        uint8_t q[300], a[300 + 16];
+        while (atomic_load(&s_dns_on)) {
+            struct sockaddr_in from; socklen_t fl = sizeof from;
+            int n = recvfrom(fd, q, sizeof q, 0, (struct sockaddr *)&from, &fl);
+            int m = n > 0 ? parent_dns_answer(q, (size_t)n, s_ap_ip, a, sizeof a) : 0;
+            if (m > 0) sendto(fd, a, (size_t)m, 0, (struct sockaddr *)&from, fl);
+        }
+    }
+    if (fd >= 0) close(fd);
+    atomic_store(&s_dns_alive, false);
+}
 
 static esp_err_t any_handler(httpd_req_t *req)
 {
+    if (s_active) {                         // asked for by name: a phone testing the hotspot. To the page, which it then shows
+        char host[64] = "";
+        esp_err_t h = httpd_req_get_hdr_value_str(req, "Host", host, sizeof host);
+        if ((h == ESP_OK || h == ESP_ERR_HTTPD_RESULT_TRUNC) && parent_host_is_name(host)) {
+            httpd_resp_set_status(req, "302 Found");
+            httpd_resp_set_hdr(req, "Location", s_url);
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            return httpd_resp_send(req, "", 0);
+        }
+    }
     char *body = NULL; size_t blen = req->content_len;
     if (blen > 0 && blen < 16384) {
         body = malloc(blen + 1);
@@ -73,8 +111,19 @@ esp_err_t parent_enter(void)
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), LOG_TAG, "ap cfg");
     esp_wifi_start();
     esp_netif_ip_info_t ip;
-    if (s_ap_netif && esp_netif_get_ip_info(s_ap_netif, &ip) == ESP_OK) snprintf(s_url, sizeof s_url, "http://" IPSTR, IP2STR(&ip.ip));
-    else snprintf(s_url, sizeof s_url, "http://192.168.4.1");
+    if (esp_netif_get_ip_info(s_ap_netif, &ip) != ESP_OK) return ESP_FAIL;
+    snprintf(s_url, sizeof s_url, "http://" IPSTR, IP2STR(&ip.ip));
+    memcpy(s_ap_ip, &ip.ip.addr, 4);
+    // RFC 8910: newer phones are told the page outright, older ones find it by probing. The server keeps the pointer, and s_url lives on.
+    esp_netif_dhcps_stop(s_ap_netif);
+    esp_err_t opt = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, s_url, strlen(s_url));
+    if (opt != ESP_OK) LOGW("portal: dhcp option: %s", esp_err_to_name(opt));
+    esp_netif_dhcps_start(s_ap_netif);
+    atomic_store(&s_dns_on, true);
+    if (!atomic_exchange(&s_dns_alive, true) && !task_spawn("gugu_parent_dns", dns_task, NULL, 4096, 1, 0)) {
+        atomic_store(&s_dns_alive, false);
+        LOGW("portal: no DNS task");
+    }
     s_active = true;
     LOGI("pairing mode: hotspot %s up (password shown on the device only)", s_ssid);
     return ESP_OK;
@@ -83,6 +132,7 @@ esp_err_t parent_enter(void)
 void parent_exit(void)
 {
     if (!s_active) return;
+    atomic_store(&s_dns_on, false);
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;
     s_pass[0] = '\0';

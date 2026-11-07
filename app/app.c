@@ -51,14 +51,30 @@ static instinct_ready_t readiness(char *why, size_t cap);
 static void on_story_wanted(const char *request, bool bedtime, void *user) { (void)user; call_story(request, bedtime); }
 static void on_story_over(bool bedtime, void *user) { (void)user; if (bedtime) instinct_goodnight(); }
 
+static void pairing_card(const char *line)    // line: how the Wi-Fi the page asked for went, "" before it has
+{
+    char body[200];
+    snprintf(body, sizeof body, "Wi-Fi  %s\nPassword  %s\n%s\n%s\nhold yellow 3 s to leave", parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url(), line);
+    ui_show_notice("PAIRING MODE", body);
+}
+
 static void toggle_pairing_mode(void)
 {
     if (parent_is_active()) { parent_exit(); ui_hide_notice(); LOGI("pairing mode off"); store_event("pairing off"); return; }
     if (parent_enter() != ESP_OK) { store_event("pairing failed"); return; }
     store_event("pairing on: %s", parent_hotspot_ssid());
-    char body[160];
-    snprintf(body, sizeof body, "Wi-Fi  %s\nPassword  %s\n%s\n\nhold yellow 3 s to leave", parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url());
-    ui_show_notice("PAIRING MODE", body);
+    pairing_card("");
+}
+
+// "Connect" on the page. Joining can move the hotspot to the router's channel and the phone off it for a moment: the screen tells too.
+static void on_wifi_result(const char *state, void *user)
+{
+    (void)user;
+    bool ok = !strcmp(state, "ok");
+    store_event("wifi join from the page: %s", state);
+    if (parent_is_active()) pairing_card(!strcmp(state, "trying") ? "Connecting..." : ok ? "Connected!" : !strcmp(state, "bad_password") ? "Wrong password?"
+                                         : !strcmp(state, "not_found") ? "Network not found" : "Could not connect");
+    if (ok) { audio_sfx_play("coo"); atomic_store(&s_check_due, true); }
 }
 
 static void on_board_event(const board_event_t *ev, void *user)
@@ -203,16 +219,11 @@ static int on_voice_test(const char *lang, const char *voice, char *json, size_t
     return page_answer(json, cap, s_page.ok, s_page.why);
 }
 
-static void on_apply(bool wifi_changed, void *user)   // the page saved secrets: keys take effect now, Wi-Fi joins without a reboot
+static void on_apply(void *user)   // the page saved settings or keys: they take effect now
 {
     (void)user;
     configure_providers();                         // vendors per role, regions, voices, keys: in use from the next request
-    char ssid[64], pass[64];
-    if (wifi_changed && store_secret_get("wifi_ssid", ssid, sizeof ssid) == ESP_OK && ssid[0]) {
-        if (store_secret_get("wifi_pass", pass, sizeof pass) != ESP_OK) pass[0] = '\0';
-        net_wifi_join(ssid, pass);
-    }
-    store_event("settings applied from the page (wifi %s)", wifi_changed ? "rejoined" : "unchanged");
+    store_event("settings applied from the page");
     atomic_store(&s_check_due, true);              // new keys: is the service answering now?
     lang_t l = lang_from_code(store_setting_str("lang", "zh"));
     if (l == LANG_UNKNOWN) l = LANG_ZH;
@@ -381,7 +392,7 @@ void app_main(void)
                          .on_story_over = on_story_over };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply,
+    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply, .wifi_result = on_wifi_result,
                           .check = on_page_check, .voice_test = on_voice_test, .user = NULL };
     parent_set_hooks(&ph);
     life_init();

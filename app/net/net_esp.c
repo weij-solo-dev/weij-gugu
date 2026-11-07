@@ -3,6 +3,7 @@
 #define LOG_TAG "net"
 #include "net/net.h"
 #include "net/net_wifi_seen.h"
+#include "net/net_wifi_join.h"
 #include "foundation/log.h"
 #include "foundation/clock.h"
 #include "foundation/mem.h"
@@ -62,6 +63,12 @@ esp_err_t net_time_sync(const char *ntp_host)
 #define JOIN_QUIET_US        (15 * 1000000LL)  // after net_wifi_join: the radio is the join's
 static atomic_bool s_sweeping, s_connect_after;
 static int64_t s_join_us;
+_Static_assert(WIFI_REASON_ASSOC_LEAVE == NET_WIFI_REASON_ASSOC_LEAVE && WIFI_REASON_MIC_FAILURE == NET_WIFI_REASON_MIC_FAILURE &&
+               WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT == NET_WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT && WIFI_REASON_NO_AP_FOUND == NET_WIFI_REASON_NO_AP_FOUND &&
+               WIFI_REASON_AUTH_FAIL == NET_WIFI_REASON_AUTH_FAIL && WIFI_REASON_HANDSHAKE_TIMEOUT == NET_WIFI_REASON_HANDSHAKE_TIMEOUT, "net_wifi_join.h");
+static atomic_int s_join = NET_JOIN_OK;
+static net_join_tally_t s_tally;               // the event task's, reset by a join before it connects
+static atomic_bool s_left;                     // net_wifi_leave: nothing connects until the next join
 static esp_timer_handle_t s_sweep_timer;
 static SemaphoreHandle_t s_seen_lock;
 static MEM_BIG_BSS net_wifi_seen_t s_seen;
@@ -72,7 +79,7 @@ static void sweep_over(void)
 {
     if (s_sweep_timer) esp_timer_stop(s_sweep_timer);
     if (!atomic_exchange(&s_sweeping, false)) return;
-    if (atomic_exchange(&s_connect_after, false)) esp_wifi_connect();
+    if (atomic_exchange(&s_connect_after, false) && !atomic_load(&s_left)) esp_wifi_connect();
 }
 
 static void sweep_deadline(void *arg) { (void)arg; LOGW("wifi sweep: no end reported"); esp_wifi_scan_stop(); sweep_over(); }
@@ -99,15 +106,21 @@ static esp_timer_handle_t s_retry_timer;
 static void retry_cb(void *arg)
 {
     (void)arg;
+    if (atomic_load(&s_left)) return;
     if (atomic_load(&s_sweeping)) atomic_store(&s_connect_after, true); else esp_wifi_connect();
 }
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) { if (atomic_load(&s_sweeping)) atomic_store(&s_connect_after, true); else esp_wifi_connect(); }
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) { if (atomic_load(&s_left)) return; if (atomic_load(&s_sweeping)) atomic_store(&s_connect_after, true); else esp_wifi_connect(); }
     else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) sweep_done(data);
     else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         atomic_store(&s_online, false);
+        if (atomic_load(&s_join) == NET_JOIN_TRYING) {
+            net_join_t v = net_wifi_join_note(&s_tally, ((wifi_event_sta_disconnected_t *)data)->reason);
+            if (v != NET_JOIN_TRYING) atomic_store(&s_join, v);
+        }
+        if (atomic_load(&s_left)) return;
         if (atomic_load(&s_sweeping)) { atomic_store(&s_connect_after, true); return; }
         if (s_retries++ < 5) { esp_wifi_connect(); LOGW("wifi retry %d", s_retries); }
         else {                                   // five quick tries failed: tell the waiter, then keep trying every 30 s (a router that reboots comes back)
@@ -121,6 +134,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         LOGI("wifi got ip " IPSTR, IP2STR(&e->ip_info.ip));
         s_retries = 0;
         atomic_store(&s_online, true);
+        if (atomic_load(&s_join) == NET_JOIN_TRYING) atomic_store(&s_join, NET_JOIN_OK);
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
         start_sntp();
     }
@@ -174,6 +188,9 @@ esp_err_t net_wifi_join(const char *ssid, const char *pass)
     wc.sta.pmf_cfg.capable = true;
     s_retries = 0;
     s_join_us = clock_us();
+    s_tally = (net_join_tally_t){ 0 };
+    atomic_store(&s_join, NET_JOIN_TRYING);
+    atomic_store(&s_left, false);
     atomic_store(&s_connect_after, false);
     if (atomic_load(&s_sweeping)) esp_wifi_scan_stop();  // the join comes first; its end is reported like any other
     esp_wifi_start();                                    // a no-op when running (pairing mode keeps it running)
@@ -181,7 +198,18 @@ esp_err_t net_wifi_join(const char *ssid, const char *pass)
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wc);
     if (err == ESP_OK) err = esp_wifi_connect();
     LOGI("wifi join %s: %s", ssid, esp_err_to_name(err));
+    if (err != ESP_OK) atomic_store(&s_join, NET_JOIN_FAILED);
     return err;
+}
+
+net_join_t net_wifi_join_result(void) { return (net_join_t)atomic_load(&s_join); }
+
+void net_wifi_leave(void)
+{
+    atomic_store(&s_left, true);
+    atomic_store(&s_connect_after, false);
+    if (s_retry_timer) esp_timer_stop(s_retry_timer);
+    esp_wifi_disconnect();
 }
 
 bool net_wifi_sweep(void)
