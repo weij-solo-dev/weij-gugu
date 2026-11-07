@@ -65,4 +65,4 @@ esp_err_t board_display_init(void);
 esp_err_t board_touch_init(void);
 // input
 esp_err_t board_input_init(void);
-esp_err_t board_imu_init(void);          // BMI270: shake and pick-up events (board_imu_esp.c); never fatal
+esp_err_t board_imu_init(void);          // BMI270: pick-up events (board_imu_esp.c); never fatal

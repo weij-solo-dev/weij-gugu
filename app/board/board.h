@@ -30,7 +30,6 @@ typedef enum {
     BOARD_EV_TOUCH_DOWN,    // a = x, b = y
     BOARD_EV_TOUCH_UP,      // a = x, b = y
     BOARD_EV_PICKUP,        // IMU: the device left the table (a lasting tilt after calm)
-    BOARD_EV_SHAKE,         // IMU: a = intensity 0..255; repeated every ~300 ms while the shaking goes on
     BOARD_EV_CHARGER,       // a = 1 plugged / 0 unplugged (later)
 } board_event_kind_t;
 

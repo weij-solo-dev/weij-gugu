@@ -116,10 +116,10 @@ TEST(test_mind_lines_and_language)
     mind_config_t cfg = { .content_dir = GUGU_REPO_ROOT "/content", .child_name = "小满", .child_age_months = 42, .family_langs = { LANG_ZH, LANG_YUE, LANG_EN } };
     CHECK(mind_init(&cfg) == ESP_OK);
     char s[400];
-    // the self-introduction teaches the keys as they work: hold blue to talk, press the yellow gift key for a present, press
-    // it many times for a song (the show), ask for a story (it once promised a whistle)
+    // the self-introduction teaches the keys as they work: hold blue to talk, press the yellow gift key for a present, every
+    // fifth press a song (the show), ask for a story (it once promised a whistle)
     CHECK(mind_line_hello(LANG_ZH, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我是咕咕") != NULL);
-    CHECK(strstr(s, "按住蓝色的按键") != NULL); CHECK(strstr(s, "黄色的礼物键") != NULL && strstr(s, "唱歌") != NULL && strstr(s, "讲个故事") != NULL); CHECK(strstr(s, "吹哨") == NULL);
+    CHECK(strstr(s, "按住蓝色的按键") != NULL); CHECK(strstr(s, "黄色的礼物键") != NULL && strstr(s, "每按五下") != NULL && strstr(s, "唱歌") != NULL && strstr(s, "讲个故事") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_YUE, s, sizeof s) == ESP_OK); CHECK(strstr(s, "你好呀，小满！我係咕咕") != NULL);
     CHECK(strstr(s, "撳住藍色個掣") != NULL); CHECK(strstr(s, "黃色嘅禮物掣") != NULL && strstr(s, "唱歌") != NULL && strstr(s, "講個故仔") != NULL); CHECK(strstr(s, "吹哨") == NULL);
     CHECK(mind_line_hello(LANG_EN, s, sizeof s) == ESP_OK); CHECK(strstr(s, "Hi, 小满! I'm Gugu") != NULL);

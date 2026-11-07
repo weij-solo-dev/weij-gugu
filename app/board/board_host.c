@@ -109,8 +109,6 @@ void board_host_sdl_event(const SDL_Event *e)
         emit(BOARD_EV_TOUCH_UP, e->button.x / s_scale, e->button.y / s_scale);
         break;
     case SDL_KEYDOWN: {
-        if (e->key.keysym.sym == SDLK_s && !e->key.repeat) emit(BOARD_EV_SHAKE, 160, 0);   // hold S: a shake every repeat
-        else if (e->key.keysym.sym == SDLK_s) emit(BOARD_EV_SHAKE, 160, 0);
         if (e->key.keysym.sym == SDLK_p && !e->key.repeat) emit(BOARD_EV_PICKUP, 0, 0);
         int k = key_of(e->key.keysym.sym);
         if (k >= 0 && !e->key.repeat && !s_key_down[k]) { s_key_down[k] = true; s_key_held[k] = false; s_key_t[k] = clock_us(); emit(BOARD_EV_KEY_DOWN, k, 0); }

@@ -89,7 +89,6 @@ static void on_board_event(const board_event_t *ev, void *user)
         store_event("key %s up after %d ms", ev->a == BOARD_KEY_BLUE ? "blue" : "yellow", ev->b);
         break;
     case BOARD_EV_TOUCH_DOWN: instinct_touched(ev->a, ev->b); break;
-    case BOARD_EV_SHAKE: instinct_shaken(ev->a); break;
     case BOARD_EV_PICKUP: instinct_picked_up(); break;
     default: break;
     }
@@ -304,8 +303,8 @@ static void scripted_taps(void *arg)   // GUGU_TAP="x,y,ms;x,y,ms": touches at t
     char *list = strdup(getenv("GUGU_TAP")); int64_t t0 = clock_us();
     for (char *tok = strtok(list, ";"); tok; tok = strtok(NULL, ";")) {
         int x = 0, y = 0, ms = 0;
-        bool yellow = tok[0] == 'Y' && tok[1] == '@', shake = tok[0] == 'S' && tok[1] == '@', pickup = tok[0] == 'P' && tok[1] == '@', blue = tok[0] == 'B' && tok[1] == '@';
-        if (yellow || shake || pickup || blue) ms = atoi(tok + 2); else if (sscanf(tok, "%d,%d,%d", &x, &y, &ms) != 3) continue;
+        bool yellow = tok[0] == 'Y' && tok[1] == '@', pickup = tok[0] == 'P' && tok[1] == '@', blue = tok[0] == 'B' && tok[1] == '@';
+        if (yellow || pickup || blue) ms = atoi(tok + 2); else if (sscanf(tok, "%d,%d,%d", &x, &y, &ms) != 3) continue;
         while (clock_us() - t0 < (int64_t)ms * 1000) clock_sleep_ms(10);
         if (blue) {   // a one-second press of the phone key
             board_event_t d = { .kind = BOARD_EV_KEY_DOWN, .a = BOARD_KEY_BLUE }; on_board_event(&d, NULL);
@@ -313,7 +312,7 @@ static void scripted_taps(void *arg)   // GUGU_TAP="x,y,ms;x,y,ms": touches at t
             board_event_t u = { .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_BLUE, .b = 1000 }; on_board_event(&u, NULL);
             continue;
         }
-        board_event_t ev = yellow ? (board_event_t){ .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_YELLOW, .b = 120 } : shake ? (board_event_t){ .kind = BOARD_EV_SHAKE, .a = 160 }
+        board_event_t ev = yellow ? (board_event_t){ .kind = BOARD_EV_KEY_UP, .a = BOARD_KEY_YELLOW, .b = 120 }
                         : pickup ? (board_event_t){ .kind = BOARD_EV_PICKUP } : (board_event_t){ .kind = BOARD_EV_TOUCH_DOWN, .a = x, .b = y };
         on_board_event(&ev, NULL);
     }

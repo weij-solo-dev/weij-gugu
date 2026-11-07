@@ -15,8 +15,11 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;b
 .muted{color:#888;font-size:12px}.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
 .call{cursor:pointer}.call:hover{background:#fdf6ea}
 input[type=range]{padding:0;border:0;accent-color:#d9413b}
+.aps{max-height:230px;overflow-y:auto;border:1px solid #ddd;border-radius:8px}
+.ap{display:flex;width:100%;gap:8px;align-items:center;background:none;color:inherit;border:0;border-bottom:1px solid #eee;border-radius:0;margin:0;padding:9px 10px;text-align:left}
+.ap:last-child{border-bottom:0}.ap.on{background:#fdf6ea}.ap b{flex:1;min-width:0;font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
-<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-05</span></header>
+<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-07</span></header>
 <main>
 <section><h2>设备状态</h2><div id="devstatus" class="muted">加载中…</div>
 <div style="margin-top:6px"><button onclick="location.href='/api/logs'">导出日志</button> <button class="secondary" onclick="copyLogs()">复制日志</button> <span id="logMsg" class="muted"></span></div>
@@ -46,8 +49,9 @@ input[type=range]{padding:0;border:0;accent-color:#d9413b}
 <button class="secondary" onclick="tryVoice()">试听</button> <button onclick="saveVoice()">用这个音色</button> <span id="voiceMsg" class="muted"></span>
 <p class="muted">每种交互语种各记一个音色（跟着上面的"交互语种"走）。试听：咕咕当场用这个声音说一句话。</p></section>
 <section><h2>网络</h2>
-<label>附近的 Wi-Fi <a href="#" class="muted" onclick="scanWifi();return false" id="scanLink">（扫描中…）</a></label>
-<select id="wifi_pick" onchange="if(this.value)$('wifi_ssid').value=this.value"><option value="">— 选一个，或在下面手输 —</option></select>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><label style="margin:0">附近的 Wi-Fi <span id="scanState" class="muted">（正在找…）</span></label><button class="secondary" style="margin:0;padding:5px 12px" onclick="wifiPoll(true)">刷新</button></div>
+<div id="wifi_list" class="aps" style="margin-top:6px" onclick="wifiPick(event)"></div>
+<p class="muted" style="margin:6px 0 0">列表自己会更新，点一个就填到下面。咕咕的无线只有 2.4 GHz：只开 5 GHz 的网络这里看不到，也连不上；隐藏的网络可以手动输入名称。</p>
 <div class="row"><div><label>Wi-Fi 名称</label><input id="wifi_ssid"></div><div><label>Wi-Fi 密码</label><input id="wifi_pass" type="password"></div></div>
 <label><input type="checkbox" id="showSecrets" onchange="toggleSecrets()" style="width:auto"> 显示密码</label>
 <button onclick="saveSecrets()">保存并重连</button> <span id="secretMsg" class="muted"></span>
@@ -72,7 +76,7 @@ async function load(){
   try{presets=await j('/api/providers')}catch(e){presets=[]}
   try{secrets=await j('/api/secrets');loadedSecrets=secrets;for(const k of ['wifi_ssid','wifi_pass'])if(secrets[k]!==undefined)$(k).value=secrets[k]}catch(e){}
   try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
-  scanWifi();
+  wifiPoll(true);
   try{settings=await j('/api/settings');for(const k of ['child_name','child_age_months','lang'])if(settings[k]!==undefined)$(k).value=settings[k];if(settings.max_call_ms)$('max_call_min').value=Math.round(settings.max_call_ms/60000)}catch(e){}
   $('volume').value=Math.max(1,Math.min(10,Math.round((settings.volume??devStatus.volume??90)/10)));volumeShow();
   {const bm=settings.bedtime_min??1200;$('bedtime').value=bm<0?'':String(Math.floor(bm/60)).padStart(2,'0')+':'+String(bm%60).padStart(2,'0')}
@@ -167,6 +171,23 @@ async function saveVoice(){const p=chosen('tts'),lang=$('lang').value,voice=voic
   const b={};b[`voice_${p.id}_${lang}`]=voice;
   await j('/api/settings',{method:'POST',body:JSON.stringify(b)});Object.assign(settings,b);
   await j('/api/apply',{method:'POST',body:JSON.stringify({wifi:false})});$('voiceMsg').textContent=`已保存：咕咕说${LANG_NAME[lang]||lang}时用这个声音`}
-async function scanWifi(){$('scanLink').textContent='（扫描中…）';try{const aps=await j('/api/wifi/scan');const sel=$('wifi_pick');sel.innerHTML='<option value="">— 选一个，或在下面手输 —</option>'+aps.map(a=>`<option value="${a.ssid}">${a.ssid}　${a.rssi} dBm${a.secure?' 🔒':''}</option>`).join('');$('scanLink').textContent=`（重新扫描，找到 ${aps.length} 个）`}catch(e){$('scanLink').textContent='（扫描失败，点此重试）'}}
+// Nearby networks: the device sweeps in the background and keeps what it finds. A sweep every 12 s while this section is
+// on screen, read every 1.5 s while one runs. Ordered by signal level, then name, so a row does not jump under the finger.
+let wifiTimer=0,wifiShown=null,wifiOnScreen=true,wifiGoing=false;
+const wifiBars=r=>r>=-55?4:r>=-67?3:r>=-78?2:1;
+function wifiRender(aps){const cur=$('wifi_ssid').value;
+  const h=[...aps].sort((a,b)=>wifiBars(b.rssi)-wifiBars(a.rssi)||a.ssid.localeCompare(b.ssid)).map(a=>`<button type="button" class="ap${a.ssid===cur?' on':''}" data-ssid="${esc(a.ssid)}" data-secure="${a.secure?1:''}"><b>${esc(a.ssid)}</b><span class="muted">${a.secure?'🔒 ':''}${'▂▄▆█'.slice(0,wifiBars(a.rssi))}</span></button>`).join('');
+  if(h!==wifiShown){wifiShown=h;$('wifi_list').innerHTML=h||'<div class="muted" style="padding:9px 10px">还没找到，等一下…</div>'}}
+function wifiPick(e){const b=e.target.closest('.ap');if(!b)return;const s=b.dataset.ssid;
+  $('wifi_ssid').value=s;$('wifi_pass').value=s===loadedSecrets.wifi_ssid?(loadedSecrets.wifi_pass||''):'';   // another network: another password
+  for(const x of document.querySelectorAll('.ap'))x.classList.toggle('on',x===b);wifiShown=null;
+  if(b.dataset.secure&&!$('wifi_pass').value)$('wifi_pass').focus()}
+async function wifiPoll(sweep){clearTimeout(wifiTimer);wifiGoing=false;
+  if(sweep)$('scanState').textContent='（正在找…）';
+  try{const r=await j('/api/wifi/scan'+(sweep?'?sweep=1':''));wifiGoing=r.sweeping;wifiRender(r.aps);
+    $('scanState').textContent=wifiGoing?`（正在找…已找到 ${r.aps.length} 个）`:`（找到 ${r.aps.length} 个）`}
+  catch(e){$('scanState').textContent='（没读到，一会儿再试）'}
+  wifiTimer=setTimeout(()=>wifiPoll(!wifiGoing&&wifiOnScreen&&document.visibilityState==='visible'),wifiGoing?1500:12000)}
+if(window.IntersectionObserver)new IntersectionObserver(es=>{wifiOnScreen=es[es.length-1].isIntersecting;if(wifiOnScreen&&!wifiGoing)wifiPoll(true)}).observe($('wifi_list'));   // scrolled to it: fresh now
 load();
 </script></body></html>

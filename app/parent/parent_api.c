@@ -229,12 +229,15 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         const char *tail = n > 6000 ? s + n - 6000 : s;
         *out = strdup(tail); *out_len = strlen(tail); mem_release(s); *ctype = CT_TEXT; return 200;
     }
-    if (get && !strcmp(path, "/api/wifi/scan")) {          // nearby networks for the pairing page's picker
-        net_wifi_ap_t aps[16]; int n = net_wifi_scan(aps, 16);
-        strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '[');
+    if (get && !strcmp(path, "/api/wifi/scan")) {          // nearby networks for the pairing page's picker: the list so far; sweep=1 starts another sweep in the background
+        static MEM_BIG_BSS net_wifi_ap_t aps[48];          // the server handles one request at a time
+        char sweep[4]; query_get(query, "sweep", sweep, sizeof sweep);
+        if (sweep[0] == '1') net_wifi_sweep();
+        bool sweeping = false; int n = net_wifi_nearby(aps, 48, &sweeping);
+        strbuf_t b; strbuf_init(&b); strbuf_printf(&b, "{\"sweeping\":%s,\"aps\":[", sweeping ? "true" : "false");
         for (int i = 0; i < n; i++) { strbuf_printf(&b, "%s{\"ssid\":\"", i ? "," : ""); strbuf_append_json_escaped(&b, aps[i].ssid); strbuf_printf(&b, "\",\"rssi\":%d,\"secure\":%s}", aps[i].rssi, aps[i].secure ? "true" : "false"); }
-        strbuf_putc(&b, ']');
-        *out = strdup(b.s ? b.s : "[]"); *out_len = strlen(*out); strbuf_free(&b); return 200;
+        strbuf_puts(&b, "]}");
+        *out = strdup(b.s ? b.s : "{}"); *out_len = strlen(*out); strbuf_free(&b); return 200;
     }
     if (get && !strcmp(path, "/api/secrets")) {            // the owner's own Wi-Fi and keys, shown on the owner's own page (the hotspot is the lock)
         strbuf_t b; strbuf_init(&b); strbuf_putc(&b, '{');

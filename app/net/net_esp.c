@@ -2,6 +2,7 @@
 // esp_websocket_client with message reassembly. Same net.h surface as the host.
 #define LOG_TAG "net"
 #include "net/net.h"
+#include "net/net_wifi_seen.h"
 #include "foundation/log.h"
 #include "foundation/clock.h"
 #include "foundation/mem.h"
@@ -17,6 +18,7 @@
 #include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -48,14 +50,65 @@ esp_err_t net_time_sync(const char *ntp_host)
     return ESP_OK;
 }
 
+// A sweep: the pairing page's list of nearby networks. The page used to get one blocking scan, cut to 16 names, when it
+// loaded (2026-11-07, the owner: "搜出来的 wifi 只有一小部分，并且不会刷新"). With the saved network out of reach the
+// retries made it worse: IDF aborts a scan when a connect comes, and refuses one while connecting (ESP_ERR_WIFI_STATE),
+// which the page showed as an empty list. So a sweep runs in the background, reconnects wait for it, and it has a deadline
+// of its own in case its end is never reported.
+#define SWEEP_ACTIVE_MIN_MS  80
+#define SWEEP_ACTIVE_MAX_MS  240               // per channel; the default 120 misses slow answers
+#define SWEEP_DEADLINE_US    (12 * 1000000ULL)
+#define SWEEP_RECORDS        64
+#define JOIN_QUIET_US        (15 * 1000000LL)  // after net_wifi_join: the radio is the join's
+static atomic_bool s_sweeping, s_connect_after;
+static int64_t s_join_us;
+static esp_timer_handle_t s_sweep_timer;
+static SemaphoreHandle_t s_seen_lock;
+static MEM_BIG_BSS net_wifi_seen_t s_seen;
+static MEM_BIG_BSS wifi_ap_record_t s_records[SWEEP_RECORDS];
+static MEM_BIG_BSS net_wifi_ap_t s_found[SWEEP_RECORDS];
+
+static void sweep_over(void)
+{
+    if (s_sweep_timer) esp_timer_stop(s_sweep_timer);
+    if (!atomic_exchange(&s_sweeping, false)) return;
+    if (atomic_exchange(&s_connect_after, false)) esp_wifi_connect();
+}
+
+static void sweep_deadline(void *arg) { (void)arg; LOGW("wifi sweep: no end reported"); esp_wifi_scan_stop(); sweep_over(); }
+
+static void sweep_done(const wifi_event_sta_scan_done_t *e)    // the event task; reading the records frees the driver's copy
+{
+    uint16_t n = SWEEP_RECORDS;
+    esp_err_t err = esp_wifi_scan_get_ap_records(&n, s_records);
+    if (err == ESP_OK && e->status == 0) {
+        for (int i = 0; i < n; i++) {
+            snprintf(s_found[i].ssid, sizeof s_found[i].ssid, "%s", (const char *)s_records[i].ssid);
+            s_found[i].rssi = s_records[i].rssi; s_found[i].secure = s_records[i].authmode != WIFI_AUTH_OPEN;
+        }
+        xSemaphoreTake(s_seen_lock, portMAX_DELAY);
+        net_wifi_seen_merge(&s_seen, s_found, n);
+        int kept = s_seen.n;
+        xSemaphoreGive(s_seen_lock);
+        LOGI("wifi sweep: %d found, %d on the list", (int)n, kept);
+    } else LOGW("wifi sweep: stopped (%d, %s)", (int)e->status, esp_err_to_name(err));
+    sweep_over();
+}
+
 static esp_timer_handle_t s_retry_timer;
-static void retry_cb(void *arg) { (void)arg; esp_wifi_connect(); }
+static void retry_cb(void *arg)
+{
+    (void)arg;
+    if (atomic_load(&s_sweeping)) atomic_store(&s_connect_after, true); else esp_wifi_connect();
+}
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) { if (atomic_load(&s_sweeping)) atomic_store(&s_connect_after, true); else esp_wifi_connect(); }
+    else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) sweep_done(data);
     else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         atomic_store(&s_online, false);
+        if (atomic_load(&s_sweeping)) { atomic_store(&s_connect_after, true); return; }
         if (s_retries++ < 5) { esp_wifi_connect(); LOGW("wifi retry %d", s_retries); }
         else {                                   // five quick tries failed: tell the waiter, then keep trying every 30 s (a router that reboots comes back)
             xEventGroupSetBits(s_wifi_events, WIFI_FAIL_BIT);
@@ -76,6 +129,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 esp_err_t net_init(void)
 {
     s_wifi_events = xEventGroupCreate();
+    s_seen_lock = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(esp_netif_init());
     esp_err_t err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
@@ -119,6 +173,9 @@ esp_err_t net_wifi_join(const char *ssid, const char *pass)
     wc.sta.threshold.authmode = pass && *pass ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
     s_retries = 0;
+    s_join_us = clock_us();
+    atomic_store(&s_connect_after, false);
+    if (atomic_load(&s_sweeping)) esp_wifi_scan_stop();  // the join comes first; its end is reported like any other
     esp_wifi_start();                                    // a no-op when running (pairing mode keeps it running)
     esp_wifi_disconnect();
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wc);
@@ -127,33 +184,44 @@ esp_err_t net_wifi_join(const char *ssid, const char *pass)
     return err;
 }
 
-int net_wifi_scan(net_wifi_ap_t *out, int cap)
+bool net_wifi_sweep(void)
 {
     wifi_mode_t mode = WIFI_MODE_NULL;
     esp_wifi_get_mode(&mode);
-    if (mode == WIFI_MODE_NULL) return 0;
+    if (mode == WIFI_MODE_NULL) return false;
+    if (s_join_us && clock_us() - s_join_us < JOIN_QUIET_US && !net_is_online()) return false;
+    bool idle = false;
+    if (!atomic_compare_exchange_strong(&s_sweeping, &idle, true)) return false;
     esp_wifi_start();                                   // harmless when already started; needed when STA never connected
-    wifi_scan_config_t sc = { .show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE };
-    esp_err_t err = esp_wifi_scan_start(&sc, true);
-    if (err != ESP_OK) { LOGW("wifi scan: %s", esp_err_to_name(err)); return 0; }
-    uint16_t n = 0; esp_wifi_scan_get_ap_num(&n);
-    if (n > 32) n = 32;
-    wifi_ap_record_t *recs = calloc(n ? n : 1, sizeof *recs);
-    if (!recs) return 0;
-    esp_wifi_scan_get_ap_records(&n, recs);
-    int count = 0;
-    for (int i = 0; i < n && count < cap; i++) {        // the records come strongest first; keep one entry per name
-        if (!recs[i].ssid[0]) continue;
-        bool dup = false;
-        for (int k = 0; k < count; k++) if (!strcmp(out[k].ssid, (const char *)recs[i].ssid)) dup = true;
-        if (dup) continue;
-        snprintf(out[count].ssid, sizeof out[count].ssid, "%s", (const char *)recs[i].ssid);
-        out[count].rssi = recs[i].rssi; out[count].secure = recs[i].authmode != WIFI_AUTH_OPEN;
-        count++;
+    wifi_scan_config_t sc = { .show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE, .scan_time.active = { .min = SWEEP_ACTIVE_MIN_MS, .max = SWEEP_ACTIVE_MAX_MS } };
+    esp_err_t err = esp_wifi_scan_start(&sc, false);
+    for (int i = 0; err == ESP_ERR_WIFI_STATE && i < 5; i++) {   // connecting, perhaps to a network no longer there: the list first, the retry after it
+        atomic_store(&s_connect_after, true);
+        esp_wifi_disconnect();
+        clock_sleep_ms(100);
+        err = esp_wifi_scan_start(&sc, false);
     }
-    free(recs);
-    LOGI("wifi scan: %d networks", count);
-    return count;
+    if (err != ESP_OK) { LOGW("wifi sweep: %s", esp_err_to_name(err)); sweep_over(); return false; }
+    if (!s_sweep_timer) { const esp_timer_create_args_t a = { .callback = sweep_deadline, .name = "gugu_net_sweep" }; esp_timer_create(&a, &s_sweep_timer); }
+    if (s_sweep_timer) { esp_timer_stop(s_sweep_timer); esp_timer_start_once(s_sweep_timer, SWEEP_DEADLINE_US); }
+    return true;
+}
+
+int net_wifi_nearby(net_wifi_ap_t *out, int cap, bool *sweeping)
+{
+    if (sweeping) *sweeping = atomic_load(&s_sweeping);
+    xSemaphoreTake(s_seen_lock, portMAX_DELAY);
+    int n = net_wifi_seen_list(&s_seen, out, cap);
+    xSemaphoreGive(s_seen_lock);
+    return n;
+}
+
+int net_wifi_scan(net_wifi_ap_t *out, int cap)
+{
+    net_wifi_sweep();
+    int64_t t0 = clock_us();
+    while (atomic_load(&s_sweeping) && clock_us() - t0 < (int64_t)SWEEP_DEADLINE_US) clock_sleep_ms(100);
+    return net_wifi_nearby(out, cap, NULL);
 }
 
 // ----------------------------------------------------------------- HTTP ----

@@ -1,9 +1,10 @@
 // instinct_show.c — the gift key's show (2026-11-06, the owner: "如果连续多次按压，gugu 将变成歌手表演一段歌曲，对应场景
-// 也可以临时变化（比如 disco 等）"). Five presses within 2.5 s: what was falling or in hand is dropped with a "ding" and a
-// microphone stands there; the stage comes up (the disco by day, a starry lullaby after dark), a song plays (audio_song:
+// 也可以临时变化（比如 disco 等）"). Every fifth press, however slow (2026-11-07, the owner: "有点难触发，改为每5次礼物键后
+// 触发"; five within 2.5 s was hard for small hands, and a rest after each show looked like the key not working): what was
+// falling or in hand is dropped with a "ding" and a microphone stands there; the stage comes up (the disco by day, a starry lullaby after dark), a song plays (audio_song:
 // a public-domain tune or one made up on the spot), the lights and Gugu move on its beats and the face changes every bar;
-// a tap is applause, another press a cheer. Then a bow, applause, the scene comes back, and Gugu rests its voice for three
-// minutes (presses then just feed it, like the canon's "嗓子哑了"). A call or a shake ends the show at once.
+// a tap is applause, another press a cheer (not counted). Then a bow, applause, and the scene comes back. A call ends the
+// show at once.
 #define LOG_TAG "instinct"
 #include "instinct_internal.h"
 #include "audio/audio.h"
@@ -13,15 +14,13 @@
 #include <stdatomic.h>
 #include <string.h>
 
-#define BURST_N        5
-#define BURST_US       (2500 * 1000LL)
-#define REST_US        (3 * 60 * 1000000LL)
+#define SHOW_EVERY     5
 #define INTRO_US       (1200 * 1000LL)
 #define BOW_US         (2600 * 1000LL)
 typedef enum { SHOW_OFF = 0, SHOW_ASKED, SHOW_INTRO, SHOW_SING, SHOW_BOW } show_phase_t;
 static atomic_int s_phase = SHOW_OFF;
-static int64_t s_presses[BURST_N]; static int s_press_i;
-static int64_t s_phase_until, s_rest_until;
+static int s_presses;                                              // since the last show
+static int64_t s_phase_until;
 static bool s_night;
 static char s_last_song[24];
 static const char *const DAY_SONGS[] = { "twinkle", "frere_jacques", "london_bridge", "mary_lamb", "old_macdonald", "ode_to_joy", "jingle_bells" };
@@ -32,15 +31,11 @@ static uint32_t rnd(void) { uint32_t x = s_rng; x ^= x << 13; x ^= x >> 17; x ^=
 
 bool show_on(void) { return atomic_load(&s_phase) != SHOW_OFF; }
 
-bool show_press(int64_t now)
+bool show_press(void)
 {
     if (show_on()) { if (atomic_load(&s_phase) == SHOW_SING) { audio_sfx_play("clap"); ui_stage_cheer(); } return true; }   // a cheer from the front row
-    s_presses[s_press_i++ % BURST_N] = now;
-    int64_t first = s_presses[s_press_i % BURST_N];
-    if (s_press_i < BURST_N || now - first > BURST_US) return false;
-    if (now < s_rest_until) { LOGI("show: the voice is still resting (%lld s more)", (long long)((s_rest_until - now) / 1000000)); return false; }
-    if (!instinct_can_play()) return false;
-    memset(s_presses, 0, sizeof s_presses); s_press_i = 0;
+    if (++s_presses < SHOW_EVERY) return false;
+    s_presses = 0;
     atomic_store(&s_phase, SHOW_ASKED);                            // the instinct task puts it on (show_tick)
     return true;
 }
@@ -72,7 +67,6 @@ void show_stop(const char *why)
     LOGI("show stopped: %s", why);
     store_event("show stopped: %s", why);
     stage_down();
-    s_rest_until = clock_us() + REST_US / 3;                       // cut short: a shorter rest
 }
 
 bool show_tap(void)
@@ -122,10 +116,9 @@ void show_tick(int64_t now)
         break;
     case SHOW_BOW:
         if (now < s_phase_until) return;
-        atomic_store(&s_phase, SHOW_OFF);                          // 5. the scene back; the voice rests
+        atomic_store(&s_phase, SHOW_OFF);                          // 5. the scene back
         stage_down();
         instinct_face(s_night ? UI_EMO_SLEEPY : UI_EMO_PROUD, 1800);
-        s_rest_until = now + REST_US;
         LOGI("show over");
         break;
     }

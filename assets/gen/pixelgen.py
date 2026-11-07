@@ -473,7 +473,7 @@ def gesture_arms(emotion, cx, cy, rx, ry, ey):
     both = lambda f: [(s, f(s)) for s in (-1, 1)]
     G = {
         'happy':     both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 4), cy - 9)]),                    # yay: wings up and out
-        'laughing':  both(lambda s: [(cx + s * (rx - 3), cy - 3), (cx + s * (rx - 0.5), cy + 5), (cx + s * 8, cy + 10)]),   # holding the belly
+        'laughing':  both(lambda s: [(cx + s * (rx - 2), cy + 2), (cx + s * 6, cy + 9)]),                           # holding the belly: the hands that hold food
         'surprised': both(lambda s: [(cx + s * (rx - 3), cy - 1), (cx + s * (rx + 7), cy - 4)]),                    # wings flung open
         'curious':   [(1, [(cx + rx - 3, cy), (cx + 7, ey + 9)])],                                                 # a tip to the chin: hmm?
         'shy':       both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * 8, ey + 7)]),                               # tips over the blushing cheeks
@@ -489,7 +489,10 @@ def gesture_arms(emotion, cx, cy, rx, ry, ey):
         'eyeroll':   both(lambda s: [(cx + s * (rx - 3), cy), (cx + s * (rx + 4), cy + 4), (cx + s * (rx + 6), cy - 3)]),   # a shrug: whatever
     }
     FRONT = {'laughing', 'curious', 'shy', 'sad', 'sleepy'}   # across the body; the others reach out from behind it
-    return [(side, pts, emotion in FRONT, WING_W) for side, pts in G.get(emotion, [])]
+    # Holding the belly (2026-11-07, the owner: "双手捧腹大笑……诡异，是指双手"): the broad wings ran down outside the body
+    # from above the shoulder and back across it, an elbow past the edge: a wrestler's arms ending in two fists. The face
+    # was left out when the food's hands were redrawn; now it has those hands.
+    return [(side, pts, emotion in FRONT, HAND_W if emotion == 'laughing' else WING_W) for side, pts in G.get(emotion, [])]
 
 # Every frame stands on one row: the feet fill rows 47–48 and their outline row 49 sits on the ground line (the away
 # scenes' strip, art.h ART_GROUND_TOP; ui checks the two agree when it compiles, check_faces.py checks every frame).

@@ -274,12 +274,11 @@ static int cmd_art(int argc, char **argv)
     return 0;
 }
 
-static int cmd_press(int argc, char **argv)   // press yellow [n] | press shake [n] | press pickup: what the child's hands do
+static int cmd_press(int argc, char **argv)   // press yellow [n] | press pickup: what the child's hands do
 {
     int n = argc > 2 ? atoi(argv[2]) : 1;
-    if (argc > 1 && !strcmp(argv[1], "shake")) { for (int i = 0; i < n; i++) { instinct_shaken(160); clock_sleep_ms(300); } printf("shaken x%d\n", n); return 0; }
     if (argc > 1 && !strcmp(argv[1], "pickup")) { instinct_picked_up(); printf("picked up\n"); return 0; }
-    if (argc < 2 || strcmp(argv[1], "yellow")) { printf("usage: press yellow [n] [item[:plan]] | shake [n] | pickup\n"); return 1; }
+    if (argc < 2 || strcmp(argv[1], "yellow")) { printf("usage: press yellow [n] [item[:plan]] | pickup\n"); return 1; }
     if (argc > 3) {                                            // e.g. chili:0 (kicked), coin, nut:1 (tucked away)
         char item[24]; snprintf(item, sizeof item, "%s", argv[3]);
         char *colon = strchr(item, ':'); int plan = colon ? atoi(colon + 1) : -1; if (colon) *colon = '\0';
@@ -293,7 +292,7 @@ static int cmd_press(int argc, char **argv)   // press yellow [n] | press shake 
 static int cmd_scan(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    net_wifi_ap_t aps[16]; int n = net_wifi_scan(aps, 16);
+    static MEM_BIG_BSS net_wifi_ap_t aps[48]; int n = net_wifi_scan(aps, 48);
     for (int i = 0; i < n; i++) printf("  %-32s %4d dBm %s\n", aps[i].ssid, aps[i].rssi, aps[i].secure ? "locked" : "open");
     printf("%d networks\n", n);
     return 0;
@@ -508,7 +507,7 @@ static const cmd_t CMDS[] = {
     { "journey", "journey [ask <words> | forget <trip id>] — the three memory books", cmd_journey },
     { "art", "art [gen|retry] — the generated pictures of the current trip (backdrop, props, friend)", cmd_art },
     { "tod", "tod night|sunrise|day|dusk|auto — force the time of day the scene shows", cmd_tod },
-    { "press", "press yellow [n] [item[:plan]] | shake [n] | pickup — the child's hands, from the console (item: corn nut burger cake broccoli chili coin sock)", cmd_press },
+    { "press", "press yellow [n] [item[:plan]] | pickup — the child's hands, from the console (item: corn nut burger cake broccoli chili coin sock)", cmd_press },
     { "idle", "idle look|preen|read|stretch — start that bit of idle life now (it also comes by itself when nobody is about)", cmd_idle },
     { "voice", "voice [en|zh|yue] [voice_id] — Gugu says the preview line with that voice (the page's 试听)", cmd_voice },
     { "vendors", "vendors [test] — who plays each role, whether its key is set; test: ask them all (the page's 测试)", cmd_vendors },

@@ -21,7 +21,6 @@ void instinct_feed_override(const char *food, int plan);
 // Idle life (looking around, preening, reading the paper, a stretch) comes by itself when nobody is about; this starts one
 // in a second, whatever the hour (look, preen, read, stretch; console `idle`, screenshots). False for an unknown name.
 bool instinct_idle_now(const char *kind);
-void instinct_shaken(int intensity);        // IMU: rolls into a ball and bounces off the rim; when it stops, dizzy, then cross, then fine
 void instinct_picked_up(void);              // IMU: looks up at you
 void instinct_refuse(const char *why);      // a call that cannot start or a turn that failed: a buzz, a head shake, then the bubble says why (a sad face only if nothing known is wrong)
 // Can Gugu make a call right now? The app answers (only it sees the network and the keys); NULL = always yes.

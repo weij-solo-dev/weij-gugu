@@ -182,12 +182,15 @@ void net_http_close(net_http_t *c)
 // ------------------------------------------------------------ WebSocket ----
 // (implemented in net_host_ws.c; declared here so the file set stays flat)
 
-int net_wifi_scan(net_wifi_ap_t *out, int cap)   // the simulator has no radio: a believable list for the page
+bool net_wifi_sweep(void) { return true; }
+int net_wifi_nearby(net_wifi_ap_t *out, int cap, bool *sweeping)   // the simulator has no radio: a believable list for the page
 {
+    if (sweeping) *sweeping = false;
     const char *names[] = { "Home-WiFi", "Home-WiFi-5G", "Neighbour", "CoffeeShop" }; int rssi[] = { -42, -48, -70, -82 };
     int n = 0;
     for (int i = 0; i < 4 && n < cap; i++) { snprintf(out[n].ssid, sizeof out[n].ssid, "%s", names[i]); out[n].rssi = rssi[i]; out[n].secure = i != 3; n++; }
     return n;
 }
+int net_wifi_scan(net_wifi_ap_t *out, int cap) { return net_wifi_nearby(out, cap, NULL); }
 
 esp_err_t net_wifi_join(const char *ssid, const char *pass) { (void)ssid; (void)pass; return ESP_OK; }   // the simulator is always online

@@ -26,7 +26,6 @@ static int64_t s_last_touch;
 static atomic_int s_tod_override = -1;
 // timed moods: the face set by play goes back to neutral by itself (checked by the instinct task every 250 ms)
 static int64_t s_mood_until; static ui_emotion_t s_mood_next = UI_EMO_COUNT; static int64_t s_mood_next_until;
-static int64_t s_shake_last;                 // the ball keeps bouncing while shakes keep coming
 
 // Not ready to call (no Wi-Fi, offline, no key): a gear in a thought bubble at Gugu's upper right; Gugu, in a hurry,
 // looks at you, then hard at the bubble, and back (2026-11-03, owner: "云泡泡，里面有个配置 icon … 很着急"; then "不需要
@@ -97,7 +96,7 @@ static int s_force_food = -1, s_force_plan = -1;   // instinct_feed_override
 static int64_t s_eaten[FEED_FULL_N]; static int s_eaten_i;
 // Idle life (2026-11-04, the owner: "眨眼可以，可以加入其他 idle 动作（可以更拟人，比如打理自己羽毛，比如看报纸等），但不要上下
 // 动来动去"): now and then, when nobody is about, Gugu looks around, preens, reads the paper or stretches with a yawn; a touch,
-// a key, a shake, a bubble or a call ends it at once.
+// a key, a bubble or a call ends it at once.
 typedef enum { IDLE_NONE = 0, IDLE_LOOK, IDLE_PREEN, IDLE_READ, IDLE_STRETCH } idle_kind_t;
 static idle_kind_t s_idle_kind;
 static int64_t s_idle_next, s_idle_end, s_idle_mark;
@@ -227,7 +226,7 @@ static ui_bubble_t bubble_of(instinct_ready_t r)
 }
 static const char *reason_name(instinct_ready_t r) { return r == INSTINCT_WIFI_DOWN ? "wifi" : r == INSTINCT_SERVICE_DOWN ? "service" : "setup"; }
 
-static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && !s_shake_last && s_feed_food < 0; }   // no call, no timed mood, not a ball, not eating
+static bool resting(void) { return !atomic_load(&s_busy) && !s_mood_until && s_feed_food < 0; }   // no call, no timed mood, not eating
 
 // Once a second: enter the puzzled rest after PUZZLED_AFTER of "not ready", leave it the moment it is ready.
 static void readiness_tick(void)
@@ -254,10 +253,10 @@ static void readiness_tick(void)
     ui_show_bubble(UI_BUBBLE_NONE);
     store_event("ready again");
     LOGI("ready again");
-    if (!atomic_load(&s_busy) && !s_shake_last) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
+    if (!atomic_load(&s_busy)) mood(UI_EMO_HAPPY, 1500);   // a hop: whoever just fixed it sees it worked
 }
 
-// Feeding, the yellow key's one job: see FOOD above. feed_tick moves the item through its steps; a call or a shake
+// Feeding: see FOOD above. feed_tick moves the item through its steps; a call
 // ends it on the spot (feed_abort), Gugu back home at once.
 static void feed_abort(void)
 {
@@ -480,31 +479,16 @@ void instinct_yellow_tap(void)
     s_last_interaction = now;
     static bool seeded;
     if (!seeded) { s_rng ^= (uint32_t)now * 2654435761u; rng(); seeded = true; }   // the first press is a human moment: a different feast after every boot
-    if (s_shake_last) { LOGI("yellow: not now (a ball)"); return; }   // a ball does not eat
-    if (show_press(now)) return;                              // five quick presses: the show (instinct_show.c)
+    if (show_press()) return;                              // every fifth press: the show (instinct_show.c)
     idle_stop();
     if (s_feed_food >= 0) { if (s_feed_queue < 3) s_feed_queue++; LOGI("yellow: queued behind the %s (step %d, %d waiting)", FOOD[s_feed_food].id, s_fs, s_feed_queue); return; }   // one more is coming
     feed_start(now);                                          // a bubble or the trip's props on screen change nothing: they answer touches
 }
 
-void instinct_shaken(int intensity)
-{
-    wake_up();
-    show_stop("shaken");
-    s_last_interaction = clock_us();
-    if (atomic_load(&s_busy)) return;
-    idle_stop();
-    int64_t now = clock_us();
-    if (!s_shake_last || now - s_shake_last > 1200000) { feed_abort(); ui_bounce_start(); LOGI("shaken: into a ball"); }
-    else ui_bounce_kick(intensity);
-    s_shake_last = now;
-    s_mood_until = 0;
-}
-
 void instinct_picked_up(void)
 {
     s_last_interaction = clock_us();
-    if (atomic_load(&s_busy) || s_shake_last || s_feed_food >= 0) return;
+    if (atomic_load(&s_busy) || s_feed_food >= 0) return;
     idle_stop();                                               // no sound: a face and a wave (2026-11-04, the owner: "没必要有嘀")
     ui_play_action(UI_ACT_WAVE);
     mood(UI_EMO_CURIOUS, 2000);
@@ -525,17 +509,6 @@ void instinct_refuse(const char *why)
         return;
     }
     mood(UI_EMO_SAD, 2500);
-}
-
-static void shake_tick(void)
-{
-    if (!s_shake_last || clock_us() - s_shake_last < 1200000) return;
-    s_shake_last = 0;
-    if (ui_bounce_stop()) {
-        audio_sfx_play("pop");
-        mood(UI_EMO_DIZZY, 1800); s_mood_next = UI_EMO_ANGRY; s_mood_next_until = 2000;
-        LOGI("shaking stopped: dizzy, then cross");
-    }
 }
 
 static void moods_tick(void)
@@ -590,7 +563,7 @@ static void offer_tick(int64_t now)   // every 250 ms, when no problem bubble is
     if (s_offer.kind == INSTINCT_OFFER_STORY && now - s_offer.since > STORY_OFFER_EXPIRE_US) { s_offer.kind = INSTINCT_OFFER_NONE; LOGI("bedtime bubble faded"); }
     instinct_offer_t kind = s_offer.kind;
     mutex_unlock(s_offer_lock);
-    bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_shake_last && !s_speaking;
+    bool show = kind != INSTINCT_OFFER_NONE && !atomic_load(&s_busy) && !atomic_load(&s_line_open) && !s_speaking;
     ui_show_bubble(show ? (kind == INSTINCT_OFFER_HELLO ? UI_BUBBLE_HELLO : kind == INSTINCT_OFFER_STORY ? UI_BUBBLE_STORY : UI_BUBBLE_IDEA) : UI_BUBBLE_NONE);
     if (show && resting() && now >= s_peek_next) {       // a glance up at the bubble now and then
         s_peek_next = now + PEEK_EVERY_US;
@@ -617,7 +590,7 @@ static void idea_schedule(int64_t now)   // every second: time to ask for a ligh
 static void urge_tick(void)
 {
     if (!s_puzzled) return;
-    bool show = !atomic_load(&s_busy) && !s_shake_last;        // an open line does not hide a problem: a turn that just failed shows it here
+    bool show = !atomic_load(&s_busy);                         // an open line does not hide a problem: a turn that just failed shows it here
     ui_show_bubble(show ? bubble_of(s_reason) : UI_BUBBLE_NONE);
     int64_t now = clock_us();
     if (!resting()) { s_gaze_next = now + 800000; return; }        // a timed mood is on: pick the gaze up after it
@@ -644,7 +617,6 @@ static void instinct_task(void *arg)
         show_tick(now);
         if (now < next250) continue;
         next250 = now + 250000;
-        shake_tick();
         moods_tick();
         urge_tick();
         offer_tick(now);
@@ -682,12 +654,11 @@ void instinct_set_tod_override(int tod) { atomic_store(&s_tod_override, tod); }
 
 void instinct_set_busy(bool in_turn)
 {
-    bool was = atomic_exchange(&s_busy, in_turn);
+    atomic_store(&s_busy, in_turn);
     s_last_interaction = clock_us();
     ui_set_idle(!in_turn);
     if (in_turn) idle_stop();
-    if (in_turn && !was && ui_bounce_stop()) { s_shake_last = 0; s_mood_until = 0; }   // the child talks while Gugu is a ball: it lands at once
-    if (in_turn) feed_abort();                                // and whatever was falling goes
+    if (in_turn) feed_abort();                                // whatever was falling goes
     if (in_turn) show_stop("a call");                         // the show ends: the child wants to talk
     if (in_turn) wake_up();
     if (!in_turn && !s_mood_until && atomic_load(&s_rest) != UI_EMO_NEUTRAL) ui_set_emotion((ui_emotion_t)atomic_load(&s_rest));   // the call put its own face on
@@ -745,7 +716,6 @@ void instinct_feed_stop(void) { feed_abort(); idle_stop(); }
 void instinct_scene_back(void) { world_state_t st; world_state(&st); show(&st); }
 void instinct_face(ui_emotion_t e, int ms) { mood(e, ms); }
 bool instinct_night(void) { world_state_t st; world_state(&st); return tod_of(&st) == WORLD_TOD_NIGHT; }
-bool instinct_can_play(void) { return !atomic_load(&s_busy) && !s_shake_last && !s_speaking; }
 
 // A touch: an object reacts in its own way (and the finger feels it), Gugu reacts when touched itself,
 // empty wall and sky do nothing.

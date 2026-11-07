@@ -1,6 +1,6 @@
 {
   "_note": "Gugu introduces itself the first time it is fully set up, and again after the interaction language changes (pairing page). {name_comma} is the child's name with the comma in front, or nothing when no name is set. Spoken, each runs about 15 seconds. The yellow key is the gift key (礼物键, the owner's name for it, 2026-11-06): named with its colour, which a small child can find.",
-  "zh": "你好呀{name_comma}！我是咕咕，一只会送信的小鸽子。我常常飞去很远的地方，回来就讲给你听。想和我说话，就按住蓝色的按键，说完再松开。按一下黄色的礼物键，就能送我礼物；连着按好多下，我就给你唱歌！想听故事，就跟我说「讲个故事」。",
-  "yue": "你好呀{name_comma}！我係咕咕，一隻識送信嘅鴿仔。我成日飛去好遠嘅地方，返嚟就講俾你聽。想同我傾偈，就撳住藍色個掣，講完先放手。撳一下黃色嘅禮物掣，就可以送禮物俾我；連住撳好多下，我就唱歌俾你聽！想聽故仔，就同我講「講個故仔」。",
-  "en": "Hi{name_comma}! I'm Gugu, a little pigeon who delivers letters. I fly to faraway places, and when I come back, I tell you all about them. To talk to me, hold the blue button, speak, then let go. Press the yellow gift button to give me a present; press it lots of times and I'll sing you a song! And if you'd like a story, just say \"tell me a story\"."
+  "zh": "你好呀{name_comma}！我是咕咕，一只会送信的小鸽子。我常常飞去很远的地方，回来就讲给你听。想和我说话，就按住蓝色的按键，说完再松开。按一下黄色的礼物键，就能送我礼物；每按五下，我就给你唱歌！想听故事，就跟我说「讲个故事」。",
+  "yue": "你好呀{name_comma}！我係咕咕，一隻識送信嘅鴿仔。我成日飛去好遠嘅地方，返嚟就講俾你聽。想同我傾偈，就撳住藍色個掣，講完先放手。撳一下黃色嘅禮物掣，就可以送禮物俾我；每撳五下，我就唱歌俾你聽！想聽故仔，就同我講「講個故仔」。",
+  "en": "Hi{name_comma}! I'm Gugu, a little pigeon who delivers letters. I fly to faraway places, and when I come back, I tell you all about them. To talk to me, hold the blue button, speak, then let go. Press the yellow gift button to give me a present; every five presses, I'll sing you a song! And if you'd like a story, just say \"tell me a story\"."
 }

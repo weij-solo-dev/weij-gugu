@@ -74,8 +74,6 @@ def main():
     names.append(shot(a.out, 'feed_peck', 1450, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))         # pecked at 650 ms, gone at 900
     names.append(shot(a.out, 'feed_reaction', 2100, {'GUGU_TOD': '2', 'GUGU_TAP': 'Y@700'}))     # Gugu's reaction to it
     names.append(shot(a.out, 'feed_night', 2100, {'GUGU_TOD': '0', 'GUGU_TAP': 'Y@700'}))        # at night too
-    names.append(shot(a.out, 'shake_ball', 1500, {'GUGU_TOD': '2', 'GUGU_TAP': 'S@600;S@900;S@1200'}))
-    names.append(shot(a.out, 'shake_dizzy', 3000, {'GUGU_TOD': '2', 'GUGU_TAP': 'S@600;S@900;S@1200'}))
     names.append(shot(a.out, 'pickup', 1100, {'GUGU_TOD': '2', 'GUGU_TAP': 'P@700'}))
     names.append(shot(a.out, 'parent_card', 1500, {'GUGU_YELLOW_HOLD': '1'}))
     if art and os.path.exists(os.path.join(art, 'backdrop.art')):

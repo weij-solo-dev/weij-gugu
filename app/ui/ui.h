@@ -73,10 +73,6 @@ void ui_feed_kick(int dir);                  // off the ground in an arc, out of
 void ui_feed_clear(void);                    // eaten, or otherwise gone
 int  ui_feed_width(int food);                // the item's width in base pixels
 void ui_set_idle(bool on);                   // blink when nobody is talking to Gugu (the body keeps still: no breathing bob)
-// Shaken: Gugu rolls into a ball and bounces off the round window's rim (a vibration per hit) until stopped.
-void ui_bounce_start(void);
-void ui_bounce_kick(int intensity);          // another shake while bouncing: more speed
-bool ui_bounce_stop(void);                   // back on its feet; returns whether it was bouncing
 
 // ---- the object layer (ui_scene.c): props and the friend on the ground line, the home's fittings, accessories ----
 typedef enum { UI_OBJ_STATIC = 0, UI_OBJ_LIVING, UI_OBJ_LIGHT } ui_obj_kind_t;

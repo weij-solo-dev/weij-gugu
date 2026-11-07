@@ -14,7 +14,6 @@
 #include "foundation/log.h"
 #include "foundation/lipsync.h"
 #include <stdlib.h>
-#include <math.h>
 
 static lv_obj_t *s_ring, *s_dot;
 static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
@@ -111,13 +110,11 @@ static void wobble(lv_anim_exec_xcb_t exec, uint32_t ms)
 }
 static void bob(int32_t depth, uint32_t ms, uint32_t repeat);
 static void hop(int32_t height, uint32_t ms);
-static bool s_ball;
 
 // A change of mood is felt as well as seen: a small movement goes with the new face.
 void ui_anim_emotion_changed(ui_emotion_t e)
 {
     s_emotion = e; refresh_sprite();
-    if (s_ball) return;
     switch (e) {
     case UI_EMO_LAUGHING: bob(2 * UI_SPRITE_SCALE, 110, 3); break;
     case UI_EMO_HAPPY: case UI_EMO_PROUD: hop(5 * UI_SPRITE_SCALE, 260); break;
@@ -296,81 +293,6 @@ void ui_set_listening(bool on)
         lv_obj_add_flag(s_ring, LV_OBJ_FLAG_HIDDEN);
     }
     ui_unlock();
-}
-
-// ---- the ball: a timer moves the puffed-up pigeon inside the circle, reflecting it off the rim ----
-// Tuned on the owner's word (2026-11-03): the earlier version's *later* phase felt right — about 20 px per
-// 25 ms tick, a short buzz at every wall — but it began slowly; a faster, spinning version felt worse (the
-// rotation is a software transform on the device and stutters). So: that speed from the very first frame,
-// no rotation, kicks keep it in the same band.
-static lv_timer_t *s_ball_timer; static float s_bx, s_by, s_bvx, s_bvy;
-#define BALL_R      (24 * UI_SPRITE_SCALE)       // half the puffed sprite, roughly
-#define WIN_R       (BOARD_DISPLAY_W / 2)
-#define BALL_TICK   25                           // ms per step
-#define BALL_SPEED  20.0f                        // px per step at the start and after each kick (~800 px/s)
-#define BALL_MAX    23.0f
-
-static void ball_cb(lv_timer_t *t)
-{
-    (void)t;
-    s_bx += s_bvx; s_by += s_bvy;
-    float dx = s_bx - WIN_R, dy = s_by - WIN_R, d = sqrtf(dx * dx + dy * dy), lim = (float)(WIN_R - BALL_R);
-    if (d > lim) {                               // reflect the velocity about the rim's normal, nudge back inside
-        float nx = dx / d, ny = dy / d, dot = s_bvx * nx + s_bvy * ny;
-        s_bvx -= 2 * dot * nx; s_bvy -= 2 * dot * ny;
-        s_bx = WIN_R + nx * (lim - 1); s_by = WIN_R + ny * (lim - 1);
-        s_bvx *= 0.96f; s_bvy *= 0.96f;
-        board_vibrate(20);
-    }
-    lv_obj_set_pos(ui_gugu_img, (int)s_bx - BALL_R, (int)s_by - BALL_R);
-}
-
-static void ball_aim(float speed)               // keep the direction, set the speed, add a little randomness
-{
-    float sp = sqrtf(s_bvx * s_bvx + s_bvy * s_bvy);
-    if (sp < 1) { s_bvx = 0.65f; s_bvy = -0.76f; sp = 1; }
-    s_bvx = s_bvx / sp * speed + (float)(lv_rand(0, 6) - 3);
-    s_bvy = s_bvy / sp * speed + (float)(lv_rand(0, 6) - 3);
-}
-
-void ui_bounce_start(void)
-{
-    ui_lock();
-    if (!s_ball) {
-        s_ball = true;
-        s_puff_until = 0xFFFFFFFFu; refresh_sprite();
-        s_bx = GUGU_BASE_X + BALL_R; s_by = GUGU_BASE_Y + BALL_R;
-        s_bvx = lv_rand(0, 1) ? 0.65f : -0.65f; s_bvy = -0.76f;   // up and to one side
-        ball_aim(BALL_SPEED);                    // full speed from the first frame
-        if (!s_ball_timer) s_ball_timer = lv_timer_create(ball_cb, BALL_TICK, NULL);
-        lv_timer_resume(s_ball_timer);
-    }
-    ui_unlock();
-}
-
-void ui_bounce_kick(int intensity)
-{
-    ui_lock();
-    if (s_ball) {
-        float target = BALL_SPEED + 3.0f * (float)intensity / 255.0f;   // a harder shake, a touch faster
-        ball_aim(target > BALL_MAX ? BALL_MAX : target);
-    }
-    ui_unlock();
-}
-
-bool ui_bounce_stop(void)
-{
-    ui_lock();
-    bool was = s_ball;
-    if (s_ball) {
-        s_ball = false;
-        lv_timer_pause(s_ball_timer);
-        s_puff_until = 0;
-        lv_obj_set_pos(ui_gugu_img, GUGU_BASE_X, rest_y());
-        refresh_sprite();
-    }
-    ui_unlock();
-    return was;
 }
 
 void ui_anim_init(lv_obj_t *scr)
