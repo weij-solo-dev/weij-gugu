@@ -82,7 +82,7 @@ static const feed_plan_t FULL_PLAN = { ACT_KICK, UI_EMO_EYEROLL, UI_EMO_EYEROLL,
 static const char *const ACT_NAME[] = { "eaten", "hidden away", "kicked off" };
 #define FOOD_N ((int)(sizeof FOOD / sizeof FOOD[0]))
 #define FEED_LAND_MS   450              // ui_feed.c's fall
-#define FEED_FULL_N    5                // this many eaten within FEED_FULL_US and it kicks the next one away
+#define FEED_FULL_N    3                // this many eaten within FEED_FULL_US and it kicks the next one away (five until the show came every fifth press: never reached then)
 #define FEED_FULL_US   (60 * 1000000LL)
 enum { FS_FALL, FS_FACE, FS_WALK, FS_REACH, FS_HOLD, FS_BITE, FS_CHEW, FS_LIFT, FS_SNEAK, FS_HIDE, FS_KICK, FS_AFTER, FS_BACK };
 static int s_feed_food = -1;            // the item being dealt with, -1 none
@@ -271,7 +271,7 @@ static void feed_start(int64_t now)
 {
     int roll = (int)(rng() % 100), food = 0;
     for (int acc = 0; food < FOOD_N - 1; food++) { acc += FOOD[food].weight; if (roll < acc) break; }
-    int64_t oldest = s_eaten[s_eaten_i % FEED_FULL_N];       // the fifth-last bite: within a minute means full
+    int64_t oldest = s_eaten[s_eaten_i % FEED_FULL_N];       // the third-last bite: within a minute means full
     bool full = oldest && now - oldest < FEED_FULL_US;
     if (s_force_food >= 0) food = s_force_food;
     s_plan = full ? &FULL_PLAN : (int)(rng() % 100) < FOOD[food].plan[0].pct ? &FOOD[food].plan[0] : &FOOD[food].plan[1];
