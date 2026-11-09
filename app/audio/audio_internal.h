@@ -10,3 +10,4 @@ uint64_t  audio_written_samples(void);                            // samples han
 uint64_t  audio_played_samples(void);                             // … and pulled by the output since boot
 extern const uint32_t audio_out_latency_ms;                       // pulled → heard (the output's DMA queue)
 void      audio_song_set_dir(const char *dir);                    // where the songs are (audio_common_init sets it)
+bool      audio_loudness(bool on);                                // the leveller and limiter on the way out (on from boot); returns what it was

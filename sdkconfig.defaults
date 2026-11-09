@@ -74,3 +74,9 @@ CONFIG_LV_FS_STDIO_LETTER=65
 # Pairing mode's captive portal answers a phone's every name, so its apps all come to the web server (3 sockets of its own
 # and up to 7 connections), and the portal's DNS needs one more: the default 10 left none for a vendor test from the page.
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# The speaker through a flash write (2026-11-09, the owner: the song sometimes stuck on a hiss). Writing flash turns
+# the cache off, and an interrupt not in IRAM waits it out; the I2S one is what clears each played DMA buffer, so the
+# DMA went round its ring replaying the last 90 ms until the write was done. IRAM-safe, the queued 90 ms play out and
+# then silence, never a loop.
+CONFIG_I2S_ISR_IRAM_SAFE=y

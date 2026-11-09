@@ -467,12 +467,16 @@ void app_main(void)
         exit(ok == total ? 0 : 2);
     }
 #endif
+    unsigned flush_due = 0;
     for (unsigned sec = 1;; sec++) {
         clock_sleep_ms(1000);
         service_tick();
         hello_tick();
+        // The captured log reaches flash every 30 s, but not while Gugu talks or sings (2026-11-09): a flash write stops
+        // both cores, and one longer than the speaker's 90 ms of queued sound is heard. Two minutes late at the most.
+        if (sec % 30 == 0 && !flush_due) flush_due = sec;
+        if (flush_due && ((audio_play_idle() && !audio_song_playing()) || sec - flush_due >= 120)) { store_logs_flush(); flush_due = 0; }
         if (sec % 10) continue;
-        if (sec % 30 == 0) store_logs_flush();   // the captured log reaches flash every 30 s
         LOGI("heartbeat: internal free %u B (min %u B), big free %u B, vbat %d mV%s, call %s",
              (unsigned)mem_avail_internal(), (unsigned)mem_min_avail_internal(), (unsigned)mem_avail_big(),
              board_battery_mv(), board_is_charging() ? " charging" : "", call_state_name(call_state()));

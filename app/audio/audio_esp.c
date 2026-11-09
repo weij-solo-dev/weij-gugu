@@ -79,7 +79,7 @@ esp_err_t audio_init(void)
         .gpio_if = gpio_if,
         .pa_pin = -1,                                 // the amplifier is enabled by the IO expander in board_init
         .use_mclk = true,
-        .hw_gain = { .pa_voltage = 5.0, .codec_dac_voltage = 3.3 },
+        .hw_gain = { .pa_voltage = 3.3, .codec_dac_voltage = 3.3 },   // no compensation: volume 100 below is the DAC at 0 dB exactly
     };
     const audio_codec_if_t *codec_if = es8311_codec_new(&es);
     if (!data_if || !ctrl_if || !codec_if) { LOGE("codec interfaces failed"); return ESP_FAIL; }
@@ -88,7 +88,11 @@ esp_err_t audio_init(void)
     if (!s_dev) { LOGE("codec dev failed"); return ESP_FAIL; }
     esp_codec_dev_sample_info_t fs = { .sample_rate = AUDIO_SAMPLE_RATE, .channel = 1, .bits_per_sample = 16 };
     if (esp_codec_dev_open(s_dev, &fs) != ESP_CODEC_DEV_OK) { LOGE("codec open failed"); return ESP_FAIL; }
-    esp_codec_dev_set_out_vol(s_dev, 75);
+    // The DAC at unity (0xBF), 2026-11-09. It was at 75, which esp_codec_dev's curve makes −12.5 dB (−8.9 dB on the
+    // register after its PA compensation): Gugu at the page's loudest was barely heard. The loudness is now set in
+    // software (audio_loud.c: a leveller, a limiter at −1 dBFS), which never drives the DAC into its digital clip.
+    // M5Stack's own driver for this board sets +6 dB (0xCB); left as the next step if the speaker wants more.
+    esp_codec_dev_set_out_vol(s_dev, 100);
     esp_codec_dev_set_in_gain(s_dev, 30.0f);
 
     if (!task_spawn("gugu_audio_out", out_task, NULL, 6144, 6, 1)) return ESP_FAIL;   // 4 KB left 644 B free

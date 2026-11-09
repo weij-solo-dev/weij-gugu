@@ -1,11 +1,16 @@
 // test_audio.c — the volume the owner sets is heard in even steps: 100 is the loudest and every 10 below it is 3 dB
 // quieter, down to 10, the page's quietest (27 dB below); 0 is silence. The self-test's beep keeps its own level, so
 // "does the speaker work" never depends on how far the volume was turned down. A frame still on its way into a call
-// when the key comes up is through before audio_capture_stop() returns.
+// when the key comes up is through before audio_capture_stop() returns. The speaker's loudness (audio_loud.c) lifts a
+// quiet voice to one level, brings a loud one down to it, leaves silence alone and never lets a sample past −1 dBFS.
 #include "minitest.h"
 #include "audio/audio.h"
 #include "audio/audio_internal.h"
+#include "audio/audio_loud.h"
 #include "foundation/clock.h"
+#include "foundation/wav.h"
+#include "foundation/atomic_file.h"
+#include "foundation/mem.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -14,14 +19,17 @@
 
 static void audio_once(void) { static bool done; if (!done) { audio_common_init(GUGU_REPO_ROOT "/content/sfx"); done = true; } }
 
-static int level_at(int volume, int16_t sample)   // a steady sample played and pulled back at this volume
+static int level_at(int volume, int16_t sample)   // a steady sample played and pulled back at this volume (the volume alone)
 {
     audio_set_volume((uint8_t)volume);
+    bool loud = audio_loudness(false);
     int16_t in[160], out[160];
     for (int i = 0; i < 160; i++) in[i] = sample;
     audio_play_flush();
     audio_play_pcm(in, 160);
-    return audio_pull(out, 160) == 160 ? out[80] : -99999;
+    int got = audio_pull(out, 160) == 160 ? out[80] : -99999;
+    audio_loudness(loud);
+    return got;
 }
 
 TEST(test_audio_volume_steps)
@@ -176,8 +184,129 @@ TEST(test_audio_song)
     audio_set_volume(AUDIO_VOLUME_DEFAULT);
 }
 
+// ---- the speaker's loudness (2026-11-09, the owner: "现在 gugu 说话太小声了，即使10格也很小声") ----
+static int16_t *voice_fixture(size_t *n)   // MiniMax's voice as it arrives: about −25 dBFS while it sounds, peaks at −9 dBFS
+{
+    size_t len; char *buf = file_read_all(GUGU_REPO_ROOT "/test/fixtures/live_tts_zh.wav", &len);
+    uint32_t sr, bytes; uint16_t ch; size_t off;
+    if (!buf || !wav_parse_header((uint8_t *)buf, len, &sr, &ch, &bytes, &off) || sr != 16000 || ch != 1) { mem_release(buf); return NULL; }
+    *n = (len - off) / 2 < bytes / 2 ? (len - off) / 2 : bytes / 2;
+    int16_t *pcm = malloc(*n * 2); memcpy(pcm, buf + off, *n * 2); mem_release(buf);
+    return pcm;
+}
+typedef struct { double active_db; int peak; int frames_over_ceiling; } loud_stats_t;
+static loud_stats_t loudness_of(const int16_t *pcm, size_t n)   // RMS of the 20 ms frames that sound (−45 dBFS up), and the peak
+{
+    loud_stats_t r = { -120, 0, 0 }; double sq = 0; long cnt = 0;
+    for (size_t i = 0; i + 320 <= n; i += 320) {
+        double f = 0; for (int k = 0; k < 320; k++) { f += (double)pcm[i + k] * pcm[i + k]; if (abs(pcm[i + k]) > r.peak) r.peak = abs(pcm[i + k]); }
+        if (f / 320 > 32768.0 * 32768.0 * 3.1623e-5) { sq += f; cnt += 320; }
+    }
+    for (size_t i = 0; i < n; i++) if (abs(pcm[i]) > AUDIO_LOUD_CEILING) { r.frames_over_ceiling++; break; }
+    if (cnt) r.active_db = 10 * log10(sq / (double)cnt / (32768.0 * 32768.0));
+    return r;
+}
+static void run_frames(audio_loud_t *l, int16_t *pcm, size_t n) { for (size_t i = 0; i < n; i += 320) audio_loud_run(l, pcm + i, n - i < 320 ? n - i : 320); }
+
+TEST(test_audio_loud_lifts_a_quiet_voice)
+{
+    size_t n; int16_t *voice = voice_fixture(&n);
+    CHECK(voice != NULL); if (!voice) return;
+    loud_stats_t in = loudness_of(voice, n);
+    CHECK(in.active_db < -23 && in.active_db > -28);              // the fixture is the quiet voice the owner heard
+    audio_loud_t l; audio_loud_init(&l);
+    int16_t *out = malloc(n * 2);
+    memcpy(out, voice, n * 2); run_frames(&l, out, n);           // the first sentence after boot
+    loud_stats_t first = loudness_of(out, n);
+    CHECK(fabs(first.active_db - AUDIO_LOUD_TARGET_DB) < 2.5);   // already about right: the gain starts where MiniMax wants it
+    memcpy(out, voice, n * 2); run_frames(&l, out, n);           // and once the leveller has listened
+    loud_stats_t settled = loudness_of(out, n);
+    CHECK(fabs(settled.active_db - AUDIO_LOUD_TARGET_DB) < 1.5);
+    CHECK(settled.active_db - in.active_db > 7);                 // 7 dB and more louder than it came
+    CHECK(settled.peak <= AUDIO_LOUD_CEILING && settled.peak > AUDIO_LOUD_CEILING * 3 / 4);   // up to the ceiling, never past it
+    printf("    voice %.1f dBFS → %.1f (first) → %.1f dBFS, peak %d, gain %.1f dB\n", in.active_db, first.active_db, settled.active_db, settled.peak, (double)l.gain_db);
+    free(out); free(voice);
+}
+
+TEST(test_audio_loud_brings_a_loud_voice_down)
+{
+    size_t n; int16_t *voice = voice_fixture(&n);
+    CHECK(voice != NULL); if (!voice) return;
+    for (size_t i = 0; i < n; i++) { int v = voice[i] * 4; voice[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }   // a vendor 12 dB hotter, clipping
+    loud_stats_t in = loudness_of(voice, n);
+    audio_loud_t l; audio_loud_init(&l);
+    int16_t *out = malloc(n * 2);
+    for (int pass = 0; pass < 2; pass++) { memcpy(out, voice, n * 2); run_frames(&l, out, n); }
+    loud_stats_t settled = loudness_of(out, n);
+    CHECK(fabs(settled.active_db - AUDIO_LOUD_TARGET_DB) < 1.5);
+    CHECK(settled.peak <= AUDIO_LOUD_CEILING);
+    CHECK(l.gain_db < 0);
+    printf("    loud voice %.1f dBFS → %.1f dBFS, gain %.1f dB\n", in.active_db, settled.active_db, (double)l.gain_db);
+    free(out); free(voice);
+}
+
+TEST(test_audio_loud_leaves_silence_alone)
+{
+    size_t n; int16_t *voice = voice_fixture(&n);
+    CHECK(voice != NULL); if (!voice) return;
+    audio_loud_t l; audio_loud_init(&l);
+    run_frames(&l, voice, n);
+    float g = l.gain_db;
+    int16_t quiet[320]; int loud_after = 0;
+    for (int f = 0; f < 500; f++) {                               // 10 s between sentences
+        memset(quiet, 0, sizeof quiet);
+        if (f % 7 == 0) for (int i = 0; i < 320; i++) quiet[i] = (int16_t)((i * 37 % 11) - 5);   // a breath of noise, −76 dBFS
+        audio_loud_run(&l, quiet, 320);
+        if (f > 0) for (int i = 0; i < 320; i++) if (abs(quiet[i]) > 30) loud_after++;
+    }
+    CHECK(l.gain_db == g);                                       // the gain waited where it was
+    CHECK_EQ_INT(loud_after, 0);                                 // and the quiet stayed quiet
+    free(voice);
+}
+
+TEST(test_audio_loud_catches_a_sudden_peak)
+{
+    audio_loud_t l; audio_loud_init(&l);
+    int16_t f[320]; int peak = 0, over = 0;
+    for (int k = 0; k < 100; k++) {                              // 2 s of a soft tone: the leveller climbs to its top
+        for (int i = 0; i < 320; i++) f[i] = (int16_t)(300 * sin(2 * M_PI * 440 * (k * 320 + i) / 16000.0));
+        audio_loud_run(&l, f, 320);
+    }
+    CHECK(l.gain_db > AUDIO_LOUD_GAIN_MAX_DB - 0.5f);
+    for (int k = 0; k < 10; k++) {                               // then a full-scale square, at that gain
+        for (int i = 0; i < 320; i++) f[i] = (i / 20) % 2 ? 32767 : -32768;
+        audio_loud_run(&l, f, 320);
+        for (int i = 0; i < 320; i++) { if (abs(f[i]) > peak) peak = abs(f[i]); if (abs(f[i]) > AUDIO_LOUD_CEILING) over++; }
+    }
+    CHECK_EQ_INT(over, 0);
+    CHECK(peak > AUDIO_LOUD_CEILING * 9 / 10);                   // held at the ceiling, not shut off
+}
+
+TEST(test_audio_loud_on_the_way_out)
+{
+    audio_once(); audio_set_volume(100); audio_play_flush();
+    size_t n; int16_t *voice = voice_fixture(&n);
+    CHECK(voice != NULL); if (!voice) return;
+    int16_t *out = malloc(n * 2);
+    for (int pass = 0; pass < 2; pass++) {
+        audio_play_pcm(voice, n);
+        size_t got = 0; while (got < n) got += audio_pull(out + got, n - got < 320 ? n - got : 320);
+    }
+    loud_stats_t in = loudness_of(voice, n), heard = loudness_of(out, n);
+    CHECK(heard.active_db - in.active_db > 7);                   // the speaker gets the lifted voice
+    CHECK(heard.peak <= AUDIO_LOUD_CEILING);
+    CHECK_EQ_INT(voice_level(100, 1024), 32);                    // the beak still reads the voice as it came
+    audio_set_volume(AUDIO_VOLUME_DEFAULT);
+    free(out); free(voice);
+}
+
 void test_audio(void)
 {
+    RUN(test_audio_loud_lifts_a_quiet_voice);
+    RUN(test_audio_loud_brings_a_loud_voice_down);
+    RUN(test_audio_loud_leaves_silence_alone);
+    RUN(test_audio_loud_catches_a_sudden_peak);
+    RUN(test_audio_loud_on_the_way_out);
     RUN(test_audio_volume_steps);
     RUN(test_audio_selftest_keeps_its_own_level);
     RUN(test_audio_level_is_the_voice_not_the_volume);

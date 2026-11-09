@@ -4,6 +4,7 @@
 #define LOG_TAG "audio"
 #include "audio/audio.h"
 #include "audio_internal.h"
+#include "audio_loud.h"
 #include "foundation/log.h"
 #include "foundation/mem.h"
 #include "foundation/ringbuf.h"
@@ -36,6 +37,8 @@ static atomic_int s_volume = AUDIO_VOLUME_DEFAULT;
 static atomic_int s_gain = 32768;                    // Q15, from s_volume; 32768 leaves the sound as it is
 static int volume_gain(int v) { return v <= 0 ? 0 : v >= 100 ? 32768 : (int)lroundf(32768.0f * powf(10.0f, (float)(v - 100) * VOLUME_DB_PER_UNIT / 20.0f)); }
 static atomic_int s_level;
+static audio_loud_t s_loud;                          // the leveller and limiter (audio_loud.h), the output task's alone
+static atomic_bool s_loud_on = true;
 static audio_capture_cb s_cap_cb; static void *s_cap_user;
 static atomic_bool s_cap_active;
 static char s_sfx_dir[128] = "content/sfx";
@@ -44,6 +47,7 @@ esp_err_t audio_common_init(const char *sfx_dir)
 {
     s_lock = mutex_create();
     atomic_store(&s_gain, volume_gain(atomic_load(&s_volume)));
+    audio_loud_init(&s_loud);
     s_ring_mem = mem_alloc_big(AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
     if (!s_ring_mem) return ESP_ERR_NO_MEM;
     ringbuf_init(&s_ring, s_ring_mem, AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
@@ -90,9 +94,11 @@ uint32_t audio_play_queued_ms(void) { return (uint32_t)(ringbuf_used(&s_ring) / 
 bool audio_play_idle(void) { return ringbuf_used(&s_ring) == 0; }
 void audio_set_marker_cb(audio_marker_cb cb, void *user) { s_marker_user = user; s_marker_cb = cb; }
 void audio_set_volume(uint8_t percent) { int v = percent > 100 ? 100 : percent; atomic_store(&s_volume, v); atomic_store(&s_gain, volume_gain(v)); }
+bool audio_loudness(bool on) { return atomic_exchange(&s_loud_on, on); }
 
-// Called by the platform output path: fills `out` with up to `samples`, zero-padded, scaled by volume.
-// Fires markers whose position has been reached.
+// Called by the platform output path: fills `out` with up to `samples`, zero-padded, levelled and limited (audio_loud.h),
+// then scaled by the volume, so every step of the volume is 3 dB whatever the leveller does. Fires markers whose position
+// has been reached.
 size_t audio_pull(int16_t *out, size_t samples)
 {
     mutex_lock(s_lock);
@@ -110,9 +116,10 @@ size_t audio_pull(int16_t *out, size_t samples)
     for (size_t i = 0; i < got; i++) acc += (uint64_t)((int32_t)out[i] * out[i]);   // Gugu down does not still it
     int rms = got ? (int)(__builtin_sqrt((double)(acc / got)) / 32.0) : 0;    // RMS / 32: Gugu's voice reads about 30, 8160 and up 255
     atomic_store(&s_level, rms > 255 ? 255 : rms);
-    int g = atomic_load(&s_gain);
-    if (g < 32768) for (size_t i = 0; i < got; i++) out[i] = (int16_t)((int32_t)out[i] * g / 32768);
     if (got < samples) memset(out + got, 0, (samples - got) * 2);
+    if (atomic_load(&s_loud_on)) audio_loud_run(&s_loud, out, samples);   // the padding too: the look-ahead drains through it
+    int g = atomic_load(&s_gain);
+    if (g < 32768) for (size_t i = 0; i < samples; i++) out[i] = (int16_t)((int32_t)out[i] * g / 32768);
     for (size_t i = 0; i < nf; i++) if (s_marker_cb) s_marker_cb(fire[i], s_marker_user);
     return got;
 }
@@ -233,8 +240,10 @@ esp_err_t audio_selftest(audio_selftest_t *out)
     out->ambient_ms = a.ms; out->ambient_peak = a.peak; out->ambient_rms = a.rms;
     audio_capture_start(selftest_cb, NULL);
     atomic_store(&s_gain, volume_gain(SELFTEST_VOLUME));   // the beep at its own level, however far the volume is turned down
+    bool loud = audio_loudness(false);                     // and as it is on file, not as the leveller last left things
     out->sfx = audio_sfx_play("beep");
     clock_sleep_ms(450);
+    audio_loudness(loud);
     atomic_store(&s_gain, volume_gain(atomic_load(&s_volume)));
     audio_capture_stats_t b; audio_capture_stats(&b);
     audio_capture_stop();

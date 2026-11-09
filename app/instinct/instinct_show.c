@@ -65,8 +65,9 @@ void show_stop(const char *why)
     int ph = atomic_exchange(&s_phase, SHOW_OFF);
     if (ph == SHOW_OFF || ph == SHOW_ASKED) return;
     LOGI("show stopped: %s", why);
-    store_event("show stopped: %s", why);
-    stage_down();
+    stage_down();                                                  // the song silenced before the event goes to flash
+    if (ph == SHOW_SING) store_event("show stopped: %s, in %s", why, audio_song_title());
+    else store_event("show stopped: %s", why);
 }
 
 bool show_tap(void)
@@ -101,14 +102,14 @@ void show_tick(int64_t now)
             snprintf(s_last_song, sizeof s_last_song, "%s", song);
             atomic_store(&s_phase, SHOW_SING);
             if (audio_song_play(song, on_beat, NULL) != ESP_OK) { show_stop("the song would not start"); return; }
-            store_event("show: %s%s", audio_song_title(), s_night ? " (a lullaby, after dark)" : "");
             ui_set_emotion(s_night ? UI_EMO_PUFF : UI_EMO_HAPPY);
         }
         break;
     case SHOW_SING:                                                // 3. the beak sings along; the lights follow on_beat
         ui_set_mouth(audio_play_level());
         if (audio_song_playing()) return;
-        ui_set_mouth(0);
+        store_event("show: %s%s", audio_song_title(), s_night ? " (a lullaby, after dark)" : "");   // to flash once sung: a write
+        ui_set_mouth(0);                                           // mid-song stops the speaker (sdkconfig.defaults, I2S)
         ui_pose(UI_POSE_REACH_R);                                  // 4. a bow, and applause
         audio_sfx_play(s_night ? "coo" : "clap");
         s_phase_until = now + BOW_US;
