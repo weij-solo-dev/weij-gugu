@@ -101,12 +101,31 @@ static char *stories_list(const char *dir)
     return json ? json : strdup("[]");
 }
 
-int parent_api_handle(const char *method, const char *path, const char *query, const char *body, size_t body_len,
+// The routes that read or write the Wi-Fi password and the keys (2026-11-11: anyone on the home network could read them all,
+// and write them). They open only to a phone on the hotspot in pairing mode: the hotspot's password is on the device's
+// screen and new every time, so being on it means having Gugu in hand. The rest of the page stays open on the home network.
+static bool secret_route(bool get, bool post, const char *path)
+{
+    return (get && !strcmp(path, "/api/secrets")) || (post && (!strcmp(path, "/api/secret") || !strcmp(path, "/api/wifi/join")));
+}
+
+static bool secret_declared(const char *k)
+{
+    for (int i = 0; store_secret_name(i); i++) if (!strcmp(store_secret_name(i), k)) return true;
+    return false;
+}
+
+int parent_api_handle(const char *method, const char *path, const char *query, const char *body, size_t body_len, bool hotspot,
                       char **out, size_t *out_len, const char **ctype, const char **disposition)
 {
     *ctype = CT_JSON; *disposition = NULL; *out = NULL; *out_len = 0;
     bool get = !strcmp(method, "GET"), post = !strcmp(method, "POST");
-    if (parent_is_active()) pair_page();                  // the page is open on a phone: the screen moves on from the codes
+    bool open = hotspot && parent_is_active();
+    if (open) pair_page();                                // the page is open on a phone on the hotspot: the screen moves on from the codes
+    if (secret_route(get, post, path) && !open) {
+        LOGW("%s %s refused: the Wi-Fi password and the keys open only to a phone on the hotspot, in pairing mode", method, path);
+        return reply(out, out_len, "{\"error\":\"locked\",\"why\":\"pairing mode, from a phone on the hotspot\"}"), 403;
+    }
     char p[200];
     if (get && (!strcmp(path, "/") || !strcmp(path, "/index.html"))) {
         snprintf(p, sizeof p, "%s/web/index.html", store_content_dir());
@@ -127,6 +146,8 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         store_secret_get("wifi_ssid", ssid, sizeof ssid);
         cJSON_DeleteItemFromObject(j, "wifi_configured");
         cJSON_AddBoolToObject(j, "wifi_configured", ssid[0] != '\0');
+        cJSON_AddBoolToObject(j, "pairing", parent_is_active());
+        cJSON_AddBoolToObject(j, "secrets_open", open);  // may this page see and change the Wi-Fi password and the keys
         if (s_hooks.problem) {                            // can a call start, and if not, what to fix: the page's banner
             parent_problem_t pr = { .ready = true };
             s_hooks.problem(&pr, s_hooks.user);
@@ -311,6 +332,7 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         cJSON *j = body ? cJSON_ParseWithLength(body, body_len) : NULL;
         const char *k = cJSON_GetStringValue(cJSON_GetObjectItem(j, "key")), *v = cJSON_GetStringValue(cJSON_GetObjectItem(j, "value"));
         if (!k || !v) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"key and value required\"}"), 400; }
+        if (!secret_declared(k)) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"no such secret\"}"), 400; }   // Wi-Fi and the presets' keys, nothing else
         esp_err_t err = store_secret_set(k, v);
         cJSON_Delete(j);
         return reply(out, out_len, err == ESP_OK ? "{\"ok\":true}" : "{\"error\":\"store failed\"}");

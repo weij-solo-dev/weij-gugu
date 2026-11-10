@@ -20,7 +20,7 @@ static httpd_handle_t s_httpd;
 static bool s_active;
 static char s_ssid[32], s_pass[12], s_url[40];
 static esp_netif_t *s_ap_netif;             // created once; enter/exit only switch the Wi-Fi mode
-static uint8_t s_ap_ip[4];
+static uint8_t s_ap_ip[4], s_ap_mask[4];
 static atomic_bool s_dns_on, s_dns_alive;
 
 static void dns_task(void *arg)             // UDP 53 on the hotspot; ends within a second of pairing mode
@@ -54,6 +54,34 @@ static void on_ap_event(void *arg, esp_event_base_t base, int32_t id, void *data
     pair_phone(joined);
 }
 
+static bool v4_of(const struct sockaddr_storage *a, uint8_t out[4])
+{
+    if (a->ss_family == AF_INET) { memcpy(out, &((const struct sockaddr_in *)a)->sin_addr.s_addr, 4); return true; }
+    if (a->ss_family != AF_INET6) return false;
+    static const uint8_t MAPPED[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };   // the server's socket is IPv6: a phone shows as ::ffff:a.b.c.d
+    const uint8_t *b = ((const struct sockaddr_in6 *)a)->sin6_addr.s6_addr;
+    if (memcmp(b, MAPPED, sizeof MAPPED)) return false;
+    memcpy(out, b + 12, 4);
+    return true;
+}
+
+// A phone on the hotspot: it asked the hotspot's own address, from the hotspot's subnet. lwIP takes a packet for any of its
+// addresses on any interface (ip4_input), so the address asked is not enough alone; IDF sends each reply out of the
+// interface that owns its source address (ip4_route_src_hook), so a connection begun from the wrong side never completes
+// anyway (2026-11-11: the hotspot's phone asking the station address got no answer). Both checks hold without that.
+static bool from_hotspot(httpd_req_t *req)
+{
+    if (!s_active) return false;
+    int fd = httpd_req_to_sockfd(req);
+    struct sockaddr_storage peer = { 0 }, me = { 0 };
+    socklen_t pl = sizeof peer, ml = sizeof me;
+    uint8_t p[4], m[4];
+    if (fd < 0 || getpeername(fd, (struct sockaddr *)&peer, &pl) || getsockname(fd, (struct sockaddr *)&me, &ml) || !v4_of(&peer, p) || !v4_of(&me, m)) return false;
+    if (memcmp(m, s_ap_ip, 4)) return false;
+    for (int i = 0; i < 4; i++) if ((p[i] & s_ap_mask[i]) != (s_ap_ip[i] & s_ap_mask[i])) return false;
+    return true;
+}
+
 static esp_err_t any_handler(httpd_req_t *req)
 {
     if (s_active) {                         // asked for by name: a phone testing the hotspot. To the page, which it then shows
@@ -78,10 +106,9 @@ static esp_err_t any_handler(httpd_req_t *req)
     snprintf(path, sizeof path, "%.*s", (int)(q ? q - req->uri : (long)strlen(req->uri)), req->uri);
     if (q) snprintf(query, sizeof query, "%s", q + 1);
     char *out = NULL; size_t out_len = 0; const char *ctype, *disp;
-    int status = parent_api_handle(req->method == HTTP_POST ? "POST" : "GET", path, query, body, blen, &out, &out_len, &ctype, &disp);
+    int status = parent_api_handle(req->method == HTTP_POST ? "POST" : "GET", path, query, body, blen, from_hotspot(req), &out, &out_len, &ctype, &disp);
     free(body);
-    char st[16]; snprintf(st, sizeof st, "%d", status);
-    httpd_resp_set_status(req, status == 200 ? "200 OK" : status == 404 ? "404 Not Found" : "400 Bad Request");
+    httpd_resp_set_status(req, status == 200 ? "200 OK" : status == 404 ? "404 Not Found" : status == 403 ? "403 Forbidden" : "400 Bad Request");
     httpd_resp_set_type(req, ctype);
     if (disp) httpd_resp_set_hdr(req, "Content-Disposition", disp);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -126,6 +153,7 @@ esp_err_t parent_enter(void)
     if (esp_netif_get_ip_info(s_ap_netif, &ip) != ESP_OK) return ESP_FAIL;
     snprintf(s_url, sizeof s_url, "http://" IPSTR, IP2STR(&ip.ip));
     memcpy(s_ap_ip, &ip.ip.addr, 4);
+    memcpy(s_ap_mask, &ip.netmask.addr, 4);
     // RFC 8910: newer phones are told the page outright, older ones find it by probing. The server keeps the pointer, and s_url lives on.
     esp_netif_dhcps_stop(s_ap_netif);
     esp_err_t opt = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, s_url, strlen(s_url));

@@ -23,13 +23,15 @@ input[type=range]{padding:0;border:0;accent-color:#d9413b}
 .alert h3{font-size:19px;margin:0 0 8px;line-height:1.35}.alert p{margin:0;font-size:14px;line-height:1.55}
 .alert .why{font-size:11px;opacity:.8;margin-top:10px;word-break:break-all}.alert a{color:#fff}
 .alert button{background:#fff;color:#d9413b;font-weight:600;font-size:15px;padding:10px 18px;margin-top:12px}
+.lock{background:#fff6e0;border:1px solid #f1d38a;border-radius:8px;padding:9px 11px;font-size:13px;line-height:1.55;color:#6b4b10;margin:8px 0}
 .flash{animation:flash 1.2s ease 2}@keyframes flash{50%{box-shadow:0 0 0 4px #f6d27a}}
 </style></head><body>
-<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-10</span></header>
+<header>咕咕 · 匹配模式 <span class="muted" id="status" style="color:#ccc"></span><span class="muted" style="float:right;color:#aaa">v1.1 · 2026-11-11</span></header>
 <main>
 <div id="alert" class="alert" style="display:none"><h3 id="alertTitle"></h3><p id="alertText"></p><div class="why" id="alertWhy"></div><button id="alertGo" onclick="alertGo()"></button></div>
 <section id="secWifi"><h2>Wi-Fi</h2>
-<div id="wifiNow" style="display:none;align-items:center;justify-content:space-between;gap:8px"><span id="wifiNowText"></span><button class="secondary" style="margin:0;padding:5px 12px;flex:none" onclick="wifiEdit(true)">换一个</button></div>
+<p id="lockWifi" class="lock" style="display:none"></p>
+<div id="wifiNow" style="display:none;align-items:center;justify-content:space-between;gap:8px"><span id="wifiNowText"></span><button class="secondary" style="margin:0;padding:5px 12px;flex:none" id="wifiChange" onclick="wifiEdit(true)">换一个</button></div>
 <div id="wifiForm">
 <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><label style="margin:0">附近的 Wi-Fi <span id="scanState" class="muted">（正在找…）</span></label><button class="secondary" style="margin:0;padding:5px 12px" onclick="wifiPoll(true)">刷新</button></div>
 <div id="wifi_list" class="aps" style="margin-top:6px" onclick="wifiPick(event)"></div>
@@ -69,8 +71,8 @@ input[type=range]{padding:0;border:0;accent-color:#d9413b}
 <p class="muted">咕咕听、想、说、画分别交给哪一家；每家用它自己的 Key，只存在这台设备里。</p>
 <div class="row"><div><label>听（语音识别）</label><select id="prov_asr" onchange="renderProviderDetails()"></select></div><div><label>想（对话）</label><select id="prov_chat" onchange="renderProviderDetails()"></select></div></div>
 <div class="row"><div><label>说（语音合成）</label><select id="prov_tts" onchange="renderProviderDetails()"></select></div><div><label>画（旅行图片）</label><select id="prov_image" onchange="renderProviderDetails()"></select></div></div>
-<div id="provRegions"></div><div id="provKeys"></div>
-<label><input type="checkbox" id="showKeys" onchange="toggleKeys()" style="width:auto"> 显示密钥</label>
+<div id="provRegions"></div><p id="lockProv" class="lock" style="display:none"></p><div id="provKeys"></div>
+<label id="showKeysRow"><input type="checkbox" id="showKeys" onchange="toggleKeys()" style="width:auto"> 显示密钥</label>
 <button onclick="saveProviders()">保存并测试</button> <span id="provMsg" class="muted"></span>
 <p class="muted">测试会让每家各答一下（一句话、一个字的语音、半秒安静的识别），几秒到十几秒。</p></section>
 <section><h2>事件记录</h2><pre id="events" class="muted" style="white-space:pre-wrap;font-size:12px;max-height:240px;overflow:auto">加载中…</pre></section>
@@ -79,12 +81,13 @@ input[type=range]{padding:0;border:0;accent-color:#d9413b}
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 async function load(){
-  try{const s=await j('/api/status');devStatus=s;$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
+  try{const s=await j('/api/status');devStatus=s;secretsOpen=!!s.secrets_open;$('status').textContent=`电量 ${(s.battery_mv/1000).toFixed(2)}V${s.charging?'（充电中）':''}`;
     const ok=v=>v?'<b style="color:#2a7">✓</b>':'<b style="color:#d33">✗</b>';
     $('devstatus').innerHTML=`固件 ${s.version||'?'} · 上次启动：${s.reset_reason||'?'} · 音频 ${ok(s.audio)} · Wi-Fi 已配置 ${ok(s.wifi_configured)} · 已联网 ${ok(s.online)} · 密钥已配置 ${ok(s.key_configured)}`}catch(e){$('devstatus').textContent='读取失败'}
   try{presets=await j('/api/providers')}catch(e){presets=[]}
-  try{secrets=await j('/api/secrets');loadedSecrets=secrets;for(const k of ['wifi_ssid','wifi_pass'])if(secrets[k]!==undefined)$(k).value=secrets[k]}catch(e){}
-  showProblem(devStatus);
+  secrets={};loadedSecrets={};
+  if(secretsOpen)try{const r=await j('/api/secrets');if(!r.error){secrets=loadedSecrets=r;for(const k of ['wifi_ssid','wifi_pass'])if(r[k]!==undefined)$(k).value=r[k]}else secretsOpen=false}catch(e){}
+  applyLock();showProblem(devStatus);
   wifiEdit(!(devStatus.online&&loadedSecrets.wifi_ssid));
   try{const r=await fetch('/api/events');$('events').textContent=(await r.text())||'还没有记录。'}catch(e){}
   try{settings=await j('/api/settings');for(const k of ['child_name','child_age_months','lang'])if(settings[k]!==undefined)$(k).value=settings[k];if(settings.max_call_ms)$('max_call_min').value=Math.round(settings.max_call_ms/60000)}catch(e){}
@@ -122,11 +125,13 @@ function showProblem(s){const a=$('alert');if(!s||s.ready===undefined)return;
   if(s.ready){if(!hadProblem){a.style.display='none';return}
     a.className='alert ok';$('alertTitle').textContent='✓ 好了，咕咕可以打电话了';$('alertText').textContent='想退出匹配模式，就在咕咕身上按住黄键 3 秒。';$('alertWhy').textContent='';$('alertGo').style.display='none';a.style.display='block';return}
   hadProblem=true;const p=s.problem||{};const[t,x,target,go]=problemText(p);
-  a.className='alert';$('alertTitle').innerHTML='⚠️ '+t;$('alertText').innerHTML=x;$('alertWhy').textContent=p.why?'咕咕的原话：'+p.why:'';
+  const locked=!secretsOpen&&['no_wifi','offline','no_key','auth'].includes(p.cause);
+  a.className='alert';$('alertTitle').innerHTML='⚠️ '+t;$('alertText').innerHTML=x+(locked?'<br><b>'+esc(lockSays())+'</b>':'');$('alertWhy').textContent=p.why?'咕咕的原话：'+p.why:'';
   alertTarget=target;$('alertGo').textContent=go;$('alertGo').style.display='inline-block';a.style.display='block'}
 function alertGo(){const el=$(alertTarget);if(!el)return;if(alertTarget==='secWifi')wifiEdit(true);
   el.scrollIntoView({behavior:'smooth',block:'start'});el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash')}
-async function statusPoll(){try{const s=await j('/api/status');devStatus=s;showProblem(s)}catch(e){}setTimeout(statusPoll,4000)}
+async function statusPoll(){try{const s=await j('/api/status'),was=secretsOpen,wasPairing=devStatus.pairing;devStatus=s;secretsOpen=!!s.secrets_open;
+  if(secretsOpen!==was)await load();else{if(s.pairing!==wasPairing)applyLock();showProblem(s)}}catch(e){}setTimeout(statusPoll,4000)}
 async function showCall(file,id){const turns=await j('/api/call?file='+encodeURIComponent(file));$('detail').style.display='block';$('detailTitle').textContent='聊天 '+id;
   $('turns').innerHTML=turns.map(t=>`<div style="margin:8px 0"><div><b>孩子</b>（${t.lang}）：${t.transcript}</div><div><b>咕咕</b>：${t.reply}</div><div class="muted">首次出声 ${t.ms.first_play} ms · 识别 ${t.ms.asr} ms · 首字 ${t.ms.first_token} ms · 结束 ${t.ms.done} ms</div></div>`).join('')||'<span class="muted">空</span>';
   $('detail').scrollIntoView()}
@@ -153,7 +158,11 @@ async function copyLogs(){$('logMsg').textContent='读取中…';try{const r=awa
 async function deleteTrip(){if(!confirm('删除后咕咕会取消这趟出门，下一次夜里重新计划。确定？'))return;await j('/api/trip/delete',{method:'POST'});$('tripDel').style.display='none';load()}
 async function saveSettings(){const b={};for(const k of ['child_name','lang'])b[k]=$(k).value;for(const k of ['child_age_months'])if($(k).value!=='')b[k]=+$(k).value;if($('max_call_min').value)b.max_call_ms=+$('max_call_min').value*60000;{const v=$('bedtime').value;if(v){const[h,m]=v.split(':').map(Number);b.bedtime_min=h*60+m}else b.bedtime_min=-1}
   const r=await j('/api/settings',{method:'POST',body:JSON.stringify(b)});await j('/api/apply',{method:'POST'});$('saveMsg').textContent=r.ok?'已保存并生效':'失败'}
-let loadedSecrets={},presets=[],settings={},secrets={},devStatus={};
+let loadedSecrets={},presets=[],settings={},secrets={},devStatus={},secretsOpen=false;
+// The Wi-Fi password and the keys: only to a phone on Gugu's hotspot, in pairing mode (the device answers 403 otherwise).
+const lockSays=()=>devStatus.pairing?'🔒 Wi-Fi 密码和 Key 只能从咕咕的热点上看和改：手机先连上咕咕的 Wi-Fi（用相机扫咕咕屏幕上的码），再打开这一页。'
+  :'🔒 Wi-Fi 密码和 Key 只能在匹配模式下看和改：在咕咕身上按住黄键 3 秒，用手机相机扫屏幕上的码。';
+function applyLock(){for(const id of ['lockWifi','lockProv']){$(id).textContent=lockSays();$(id).style.display=secretsOpen?'none':'block'}$('showKeysRow').style.display=secretsOpen?'':'none'}
 function toggleSecrets(){$('wifi_pass').type=$('showSecrets').checked?'text':'password'}
 // ---- the vendors: everything below comes from the presets (content/providers/*.json); no vendor is named here ----
 const ROLES=['asr','chat','tts','image'],REGION_NAME={domestic:'中国大陆',overseas:'海外',global:'全球'},LANG_NAME={zh:'普通话',yue:'粤语',en:'English'};
@@ -169,14 +178,14 @@ function renderProviderDetails(){const vs=selectedVendors();
     return `<label>${esc(p.name)} 的服务区域</label><select id="region_${esc(p.id)}">${p.regions.map(g=>`<option value="${esc(g)}"${g===cur?' selected':''}>${esc(REGION_NAME[g]||g)}</option>`).join('')}</select>`}).join('');
   const seen=new Set(),show=$('showKeys').checked?'text':'password';let h='';
   for(const p of vs){let first=true;for(const c of (p.credentials||[])){const k=c.store||`${p.id}_${c.key}`;if(seen.has(k))continue;seen.add(k);
-    h+=`<label>${esc(c.label||p.name+' '+c.key)}${p.console_url?` <a class="muted" href="${esc(p.console_url)}" target="_blank">（去哪里申请）</a>`:''}</label><input class="key" data-key="${esc(k)}" type="${show}" value="${esc(secrets[k]||'')}">`;
+    h+=`<label>${esc(c.label||p.name+' '+c.key)}${p.console_url?` <a class="muted" href="${esc(p.console_url)}" target="_blank">（去哪里申请）</a>`:''}</label><input class="key" data-key="${esc(k)}" type="${show}" value="${esc(secrets[k]||'')}"${secretsOpen?'':' disabled placeholder="🔒 匹配模式下、连着咕咕的热点才能看和改"'}>`;
     if(first&&p.availability)h+=`<div class="muted" style="margin-top:3px">${esc(p.availability)}</div>`;first=false}}
   $('provKeys').innerHTML=h}
 function toggleKeys(){for(const el of document.querySelectorAll('#provKeys input.key'))el.type=$('showKeys').checked?'text':'password'}
 async function saveProviders(){const b={};for(const r of ROLES)b['provider_'+r]=$('prov_'+r).value;
   for(const p of selectedVendors())if($('region_'+p.id))b['region_'+p.id]=$('region_'+p.id).value;
   await j('/api/settings',{method:'POST',body:JSON.stringify(b)});Object.assign(settings,b);
-  let n=0;for(const el of document.querySelectorAll('#provKeys input.key')){const v=el.value.trim();if(v===(secrets[el.dataset.key]||''))continue;
+  let n=0;if(secretsOpen)for(const el of document.querySelectorAll('#provKeys input.key')){const v=el.value.trim();if(v===(secrets[el.dataset.key]||''))continue;
     const r=await j('/api/secret',{method:'POST',body:JSON.stringify({key:el.dataset.key,value:v})});if(r.ok){n++;secrets[el.dataset.key]=v}}
   await j('/api/apply',{method:'POST'});renderVoice();
   $('provMsg').textContent=`已保存${n?'（'+n+' 个密钥）':''}，正在测试…`;
@@ -212,8 +221,9 @@ function wifiPick(e){const b=e.target.closest('.ap');if(!b)return;const s=b.data
   for(const x of document.querySelectorAll('.ap'))x.classList.toggle('on',x===b);wifiShown=null;
   if(b.dataset.secure&&!$('wifi_pass').value)$('wifi_pass').focus()}
 // Connected: one line. Sweeping takes the radio off the hotspot's channel, so it runs only while a network is being chosen.
-function wifiEdit(on){$('wifiForm').style.display=on?'':'none';$('wifiNow').style.display=on?'none':'flex';clearTimeout(wifiTimer);
-  $('wifiNowText').innerHTML=`<b style="color:#2a7">✓</b> 已连上 ${esc(loadedSecrets.wifi_ssid||'')}`;
+function wifiEdit(on){if(!secretsOpen)on=false;$('wifiForm').style.display=on?'':'none';$('wifiNow').style.display=on?'none':'flex';clearTimeout(wifiTimer);
+  $('wifiChange').style.display=secretsOpen?'':'none';
+  $('wifiNowText').innerHTML=secretsOpen?`<b style="color:#2a7">✓</b> 已连上 ${esc(loadedSecrets.wifi_ssid||'')}`:devStatus.online?'<b style="color:#2a7">✓</b> 已连上 Wi-Fi':'<b style="color:#d33">✗</b> 没连上 Wi-Fi';
   if(on)wifiPoll(true)}
 function wifiMsg(t){$('secretMsg').textContent=t}
 async function wifiJoin(){const ssid=$('wifi_ssid').value,pass=$('wifi_pass').value,bytes=t=>new TextEncoder().encode(t).length;

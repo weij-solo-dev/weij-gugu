@@ -31,7 +31,7 @@ static void serve(int fd)
         if (sscanf(buf, "%7s %511s", method, uri) != 2) break;
         char *q = strchr(uri, '?'); if (q) *q++ = '\0';
         char *out = NULL; size_t out_len = 0; const char *ctype, *disp;
-        int status = parent_api_handle(method, uri, q, hdr_end + 4, clen, &out, &out_len, &ctype, &disp);
+        int status = parent_api_handle(method, uri, q, hdr_end + 4, clen, s_active, &out, &out_len, &ctype, &disp);   // no hotspot here: in pairing mode this Mac's browser is the phone on it
         char head[512];
         int hl = snprintf(head, sizeof head, "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nCache-Control: no-store\r\n%s%s%sConnection: close\r\n\r\n",
                           status, status == 200 ? "OK" : "Error", ctype, out_len, disp ? "Content-Disposition: " : "", disp ? disp : "", disp ? "\r\n" : "");
