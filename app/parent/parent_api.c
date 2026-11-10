@@ -21,7 +21,9 @@ static const char *CT_JSON = "application/json; charset=utf-8", *CT_HTML = "text
 static int reply(char **out, size_t *len, const char *s) { *out = strdup(s); *len = strlen(s); return 200; }
 
 static parent_hooks_t s_hooks;
-void parent_set_hooks(const parent_hooks_t *h) { s_hooks = h ? *h : (parent_hooks_t){ 0 }; }
+void parent_set_hooks(const parent_hooks_t *h) { s_hooks = h ? *h : (parent_hooks_t){ 0 }; pair_set_card(s_hooks.card, s_hooks.user); }
+
+static void on_join(const char *state, void *user) { pair_join(state); if (s_hooks.wifi_result) s_hooks.wifi_result(state, user); }   // the screen, then app
 
 static void query_get(const char *query, const char *key, char *val, size_t cap)
 {
@@ -104,6 +106,7 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
 {
     *ctype = CT_JSON; *disposition = NULL; *out = NULL; *out_len = 0;
     bool get = !strcmp(method, "GET"), post = !strcmp(method, "POST");
+    if (parent_is_active()) pair_page();                  // the page is open on a phone: the screen moves on from the codes
     char p[200];
     if (get && (!strcmp(path, "/") || !strcmp(path, "/index.html"))) {
         snprintf(p, sizeof p, "%s/web/index.html", store_content_dir());
@@ -245,7 +248,7 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(j, "ssid")), *pass = cJSON_GetStringValue(cJSON_GetObjectItem(j, "pass"));
         size_t sl = ssid ? strlen(ssid) : 0, pl = pass ? strlen(pass) : 0;
         if (sl < 1 || sl > 32 || (pl && (pl < 8 || pl > 63))) { cJSON_Delete(j); return reply(out, out_len, "{\"error\":\"a name of 1 to 32 bytes; no password, or 8 to 63\"}"), 400; }
-        bool started = parent_join_start(ssid, pass ? pass : "", s_hooks.wifi_result, s_hooks.user);
+        bool started = parent_join_start(ssid, pass ? pass : "", on_join, s_hooks.user);
         cJSON_Delete(j);
         return reply(out, out_len, started ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"busy\"}");
     }

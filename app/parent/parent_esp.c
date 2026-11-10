@@ -1,11 +1,12 @@
 // parent_esp.c — esp_http_server on the station interface (and the hotspot when entered), and while the hotspot is up the
-// sockets of its captive portal (parent_portal.c says what they answer).
+// sockets of its captive portal (parent_portal.c says what they answer) and the phones that join it (parent_pair.c: the screen).
 #define LOG_TAG "parent"
 #include "parent_internal.h"
 #include "foundation/log.h"
 #include "foundation/task.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
+#include "esp_event.h"
 #include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_check.h"
@@ -42,6 +43,15 @@ static void dns_task(void *arg)             // UDP 53 on the hotspot; ends withi
     }
     if (fd >= 0) close(fd);
     atomic_store(&s_dns_alive, false);
+}
+
+static void on_ap_event(void *arg, esp_event_base_t base, int32_t id, void *data)   // the default event loop's task: a small stack
+{
+    (void)arg; (void)base; (void)data;
+    if (!s_active) return;
+    bool joined = id == WIFI_EVENT_AP_STACONNECTED;
+    LOGI("a phone %s the hotspot", joined ? "joined" : "left");
+    pair_phone(joined);
 }
 
 static esp_err_t any_handler(httpd_req_t *req)
@@ -92,6 +102,8 @@ esp_err_t parent_init(void)
     httpd_uri_t post = { .uri = "/*", .method = HTTP_POST, .handler = any_handler };
     httpd_register_uri_handler(s_httpd, &get);
     httpd_register_uri_handler(s_httpd, &post);
+    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, on_ap_event, NULL, NULL);
+    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, on_ap_event, NULL, NULL);
     uint8_t mac[6]; esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     snprintf(s_ssid, sizeof s_ssid, "gugu-%02X%02X", mac[4], mac[5]);
     LOGI("parent web ready on port %d (hotspot name %s)", cfg.server_port, s_ssid);
@@ -126,6 +138,7 @@ esp_err_t parent_enter(void)
     }
     s_active = true;
     LOGI("pairing mode: hotspot %s up (password shown on the device only)", s_ssid);
+    pair_begin();
     return ESP_OK;
 }
 
@@ -135,6 +148,7 @@ void parent_exit(void)
     atomic_store(&s_dns_on, false);
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;
+    pair_end();
     s_pass[0] = '\0';
     LOGI("hotspot down");
 }

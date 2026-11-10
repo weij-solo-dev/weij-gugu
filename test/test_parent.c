@@ -1,6 +1,7 @@
 // test_parent.c — the pairing page's speaker volume: saved, in use at once (not after a reboot), 0–100 only. Its Wi-Fi
 // list: one sweep misses networks, so what the sweeps find is remembered until three in a row have not seen it. Its
 // "connect": a network is tried first and kept only if it works. Its captive portal: every name answered with the device.
+// The device's screen in pairing mode: the codes for the phone's camera, a step at a time.
 #include "minitest.h"
 #include "parent/parent_internal.h"
 #include "store/store.h"
@@ -267,6 +268,107 @@ TEST(test_parent_host_is_name)
     CHECK(!parent_host_is_name(""));
 }
 
+// The screen in pairing mode, a step at a time (2026-11-10, the owner: "比如手机扫码直接连接到配置网页"): a Wi-Fi code the
+// phone's camera joins with, the page's address once a phone is on, "carry on" once the page is open, then how a try went.
+static char s_qr[160], s_text[200], s_seen[400];
+static int s_cards;
+static bool s_card_gone;
+static void on_card(const char *qr, const char *text, void *user)
+{
+    (void)user;
+    s_cards++;
+    s_card_gone = !text;
+    snprintf(s_qr, sizeof s_qr, "%s", qr ? qr : "");
+    snprintf(s_text, sizeof s_text, "%s", text ? text : "");
+    strlcat(s_seen, text ? text : "(gone)", sizeof s_seen); strlcat(s_seen, "|", sizeof s_seen);
+}
+
+static void page_asks(const char *path)
+{
+    char *out = NULL; size_t n = 0; const char *ct = NULL, *disp = NULL;
+    parent_api_handle("GET", path, "", NULL, 0, &out, &n, &ct, &disp);
+    free(out);
+}
+
+#define WIFI_CODE "WIFI:T:WPA;S:gugu-7A3F;P:40917263;;"
+
+TEST(test_parent_pairing_card)
+{
+    store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    parent_hooks_t h = { .card = on_card };
+    parent_set_hooks(&h);
+    s_cards = 0; s_seen[0] = '\0';
+    page_asks("/api/status");                                          // not in pairing mode: the page on the home network
+    CHECK_EQ_INT(s_cards, 0);                                          // puts nothing on the screen
+
+    CHECK_EQ_INT(parent_enter(), ESP_OK);                              // 1. no phone yet: the code the camera joins with
+    CHECK_EQ_STR(s_qr, WIFI_CODE);
+    CHECK(strstr(s_text, "gugu-7A3F") && strstr(s_text, "40917263"));  // and the name and password, for a phone that cannot scan
+    CHECK(strstr(s_text, "hold yellow 3 s to leave"));
+
+    pair_phone(true);                                                  // 2. a phone is on, the page not open: its address
+    CHECK_EQ_STR(s_qr, "http://192.168.4.1");
+    CHECK(strstr(s_text, "open 192.168.4.1"));                         // and to type, for a camera that cannot scan
+    CHECK(!strstr(s_text, "40917263"));
+
+    page_asks("/");                                                    // 3. the page is open: no code, carry on there
+    CHECK_EQ_STR(s_qr, "");
+    CHECK(strstr(s_text, "on the phone"));
+    int n = s_cards;
+    page_asks("/api/wifi/scan"); page_asks("/api/status");             // its polls change nothing
+    CHECK_EQ_INT(s_cards, n);
+    pair_phone(true); pair_phone(false);                               // a second phone comes and goes: the page stays
+    CHECK(strstr(s_text, "on the phone"));
+
+    setenv("GUGU_WIFI_JOIN", "bad_password", 1);                       // 4. connect: trying, then how it went
+    s_seen[0] = '\0';
+    CHECK_EQ_INT(join("{\"ssid\":\"NewNet\",\"pass\":\"newpass12\"}"), 200);
+    CHECK(join_says("bad_password"));
+    CHECK(strstr(s_seen, "Connecting...|") == s_seen);                 // first "Connecting...", then the reason
+    CHECK(strstr(s_text, "Wrong password?") && strstr(s_text, "Try again on the phone"));
+    CHECK_EQ_STR(s_qr, "");
+
+    pair_phone(false);                                                 // the last phone left: the Wi-Fi code again
+    CHECK_EQ_STR(s_qr, WIFI_CODE);
+    pair_phone(false);                                                 // a leave too many does not go below none
+    pair_phone(true);
+    CHECK_EQ_STR(s_qr, "http://192.168.4.1");                          // and one phone back is a phone on
+
+    setenv("GUGU_WIFI_JOIN", "ok", 1);                                 // 5. it worked: "Connected!" stays
+    CHECK_EQ_INT(join("{\"ssid\":\"NewNet\",\"pass\":\"newpass12\"}"), 200);
+    CHECK(join_says("ok"));
+    CHECK(strstr(s_text, "Connected!") && strstr(s_text, "hold yellow 3 s to leave"));
+    CHECK_EQ_STR(s_qr, "");
+    pair_phone(false);                                                 // whatever the phones do (the hotspot may move channel)
+    CHECK(strstr(s_text, "Connected!"));
+
+    parent_exit();                                                     // 6. out of pairing mode: the card goes
+    CHECK(s_card_gone);
+    n = s_cards;
+    pair_phone(true); page_asks("/"); pair_join("ok");                 // and nothing after brings it back
+    CHECK_EQ_INT(s_cards, n);
+
+    CHECK_EQ_INT(parent_enter(), ESP_OK);                              // 7. the next time starts from the first step
+    CHECK_EQ_STR(s_qr, WIFI_CODE);
+    parent_exit();
+
+    unsetenv("GUGU_WIFI_JOIN");
+    store_secret_set("wifi_ssid", ""); store_secret_set("wifi_pass", "");
+    parent_set_hooks(NULL);
+}
+
+// The camera's format: \ ; , : " in a name or a password are escaped, or the phone reads a different network.
+TEST(test_parent_wifi_code)
+{
+    char c[64];
+    CHECK(parent_wifi_code(c, sizeof c, "a;b\\c", "p:\"q,1") > 0);
+    CHECK_EQ_STR(c, "WIFI:T:WPA;S:a\\;b\\\\c;P:p\\:\\\"q\\,1;;");
+    CHECK_EQ_INT(parent_wifi_code(c, sizeof c, "gugu-7A3F", "40917263"), (int)strlen(WIFI_CODE));
+    CHECK_EQ_STR(c, WIFI_CODE);
+    CHECK_EQ_INT(parent_wifi_code(c, 20, "gugu-7A3F", "40917263"), 0);   // too long for the room: none, not a cut one
+    CHECK_EQ_STR(c, "");
+}
+
 void test_parent(void)
 {
     RUN(test_parent_volume);
@@ -276,4 +378,6 @@ void test_parent(void)
     RUN(test_parent_wifi_join);
     RUN(test_parent_dns);
     RUN(test_parent_host_is_name);
+    RUN(test_parent_pairing_card);
+    RUN(test_parent_wifi_code);
 }

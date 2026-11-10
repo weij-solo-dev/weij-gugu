@@ -37,8 +37,8 @@ warm, slightly husky voice.
   Gugu may only retell what the card says. Parents can read and delete the card.
 - **It remembers the child.** Names, friends, fears, new skills, brought up naturally days later.
 - **Parents see everything, without an account.** Every call transcript, postcard and memory is on
-  the device; holding the yellow gift key for three seconds enters pairing mode: a hotspot whose name and password
-  show on the screen, and a web page, opening by itself once the phone has joined, where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
+  the device; holding the yellow gift key for three seconds enters pairing mode: the screen shows a code the phone's camera
+  joins the device's hotspot with, and a web page opens by itself once the phone is on, where a parent picks the Wi-Fi, enters the keys, reads, exports or deletes everything.
 
 ## How it is built
 

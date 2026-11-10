@@ -51,30 +51,26 @@ static instinct_ready_t readiness(char *why, size_t cap);
 static void on_story_wanted(const char *request, bool bedtime, void *user) { (void)user; call_story(request, bedtime); }
 static void on_story_over(bool bedtime, void *user) { (void)user; if (bedtime) instinct_goodnight(); }
 
-static void pairing_card(const char *line)    // line: how the Wi-Fi the page asked for went, "" before it has
+// The card: parent says what it shows, step by step (a Wi-Fi code, the page's address, "carry on on the phone").
+static void on_pairing_card(const char *qr, const char *text, void *user)
 {
-    char body[200];
-    snprintf(body, sizeof body, "Wi-Fi  %s\nPassword  %s\n%s\n%s\nhold yellow 3 s to leave", parent_hotspot_ssid(), parent_hotspot_password(), parent_hotspot_url(), line);
-    ui_show_notice("PAIRING MODE", body);
+    (void)user;
+    if (text) ui_show_notice("PAIRING MODE", qr, text); else ui_hide_notice();
 }
 
 static void toggle_pairing_mode(void)
 {
-    if (parent_is_active()) { parent_exit(); ui_hide_notice(); LOGI("pairing mode off"); store_event("pairing off"); return; }
+    if (parent_is_active()) { parent_exit(); LOGI("pairing mode off"); store_event("pairing off"); return; }
     if (parent_enter() != ESP_OK) { store_event("pairing failed"); return; }
     store_event("pairing on: %s", parent_hotspot_ssid());
-    pairing_card("");
 }
 
-// "Connect" on the page. Joining can move the hotspot to the router's channel and the phone off it for a moment: the screen tells too.
+// "Connect" on the page (the card says how it went too). Joining can move the hotspot to the router's channel.
 static void on_wifi_result(const char *state, void *user)
 {
     (void)user;
-    bool ok = !strcmp(state, "ok");
     store_event("wifi join from the page: %s", state);
-    if (parent_is_active()) pairing_card(!strcmp(state, "trying") ? "Connecting..." : ok ? "Connected!" : !strcmp(state, "bad_password") ? "Wrong password?"
-                                         : !strcmp(state, "not_found") ? "Network not found" : "Could not connect");
-    if (ok) { audio_sfx_play("coo"); atomic_store(&s_check_due, true); }
+    if (!strcmp(state, "ok")) { audio_sfx_play("coo"); atomic_store(&s_check_due, true); }
 }
 
 static void on_board_event(const board_event_t *ev, void *user)
@@ -392,7 +388,7 @@ void app_main(void)
                          .on_story_over = on_story_over };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply, .wifi_result = on_wifi_result,
+    parent_hooks_t ph = { .card = on_pairing_card, .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply, .wifi_result = on_wifi_result,
                           .check = on_page_check, .voice_test = on_voice_test, .user = NULL };
     parent_set_hooks(&ph);
     life_init();

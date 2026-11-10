@@ -55,8 +55,15 @@ static void server_task(void *arg)
 }
 
 esp_err_t parent_init(void) { return task_spawn("gugu_parent", server_task, NULL, 65536, 1, 0) ? ESP_OK : ESP_FAIL; }
-esp_err_t parent_enter(void) { s_active = true; LOGI("hotspot simulated: gugu-HOST / 12345678"); return ESP_OK; }
-void parent_exit(void) { s_active = false; }
+esp_err_t parent_enter(void)
+{
+    s_active = true;
+    LOGI("hotspot simulated: gugu-HOST");
+    pair_begin();
+    if (getenv("GUGU_PAIR_PHONE")) pair_phone(true);   // screenshots: a phone on the hotspot (any request to the page then opens it)
+    return ESP_OK;
+}
+void parent_exit(void) { if (s_active) { s_active = false; pair_end(); } }
 bool parent_is_active(void) { return s_active; }
 const char *parent_hotspot_ssid(void) { return "gugu-HOST"; }
 const char *parent_hotspot_password(void) { return s_active ? "12345678" : ""; }

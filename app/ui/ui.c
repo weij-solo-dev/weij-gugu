@@ -12,6 +12,7 @@
 #include "foundation/task.h"
 #include "src/misc/cache/instance/lv_image_cache.h"   // lv_image_cache_drop is not re-exported by lvgl.h
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 // Draw buffers are internal DMA memory: esp_lcd's SPI transport can only DMA from internal RAM, and a
@@ -21,7 +22,8 @@
 #define UI_BUF_LINES 8
 
 static lv_display_t *s_disp;
-static mutex_t s_mutex;
+static mutex_t s_mutex, s_notice_mutex;   // the notice card is asked for under its own lock (ui_show_notice)
+static void notice_draw(void);
 lv_obj_t *ui_gugu_img;                                   // shared with ui_anim.c
 static lv_obj_t *s_scene_img, *s_case_img, *s_beak_img, *s_eyes_img, *s_grip_img;
 static ui_emotion_t s_emotion = UI_EMO_NEUTRAL;
@@ -87,6 +89,7 @@ static void ui_task(void *arg)
     (void)arg;
     for (;;) {
         ui_lock();
+        notice_draw();
         int64_t t0 = clock_us();
         unsigned f0 = atomic_load(&s_flushes);
         uint32_t next = lv_timer_handler();
@@ -285,6 +288,7 @@ ui_emotion_t ui_get_emotion(void) { return s_emotion; }
 esp_err_t ui_init(void)
 {
     s_mutex = mutex_create();
+    s_notice_mutex = mutex_create();
     s_flush_sig = signal_create();
     lv_init();
     lv_tick_set_cb(tick_cb);
@@ -340,43 +344,89 @@ esp_err_t ui_init(void)
 }
 
 // ---- notice card ----
-static lv_obj_t *s_notice, *s_notice_title, *s_notice_body;
+// Asked for from any task (pairing mode's Wi-Fi event task among them, on a small stack) and drawn by the ui task on its next
+// frame: the caller only copies. A code is drawn for the phone's camera: dark on white, 8 px a module at the usual 29
+// (a Wi-Fi code) with a white quiet zone round it; the lines under it are small. With no code the words are large.
+#define NOTICE_QR_PX     232                       // 29 modules × 8; the page's address (25) gets 9 a module
+#define NOTICE_QR_QUIET  16                        // two modules of white: the card round it is dark
+static struct { bool show; char title[32], qr[160], body[240]; } s_notice_want;
+static atomic_uint s_notice_asked;
+static unsigned s_notice_drawn;
+static lv_obj_t *s_notice, *s_notice_title, *s_notice_body, *s_notice_qr;
 
-void ui_show_notice(const char *title, const char *body)
+static void notice_build(void)
 {
-    ui_lock();
-    if (!s_notice) {
-        s_notice = lv_obj_create(lv_screen_active());
-        lv_obj_set_size(s_notice, BOARD_DISPLAY_W, BOARD_DISPLAY_H);
-        lv_obj_center(s_notice);
-        lv_obj_set_style_radius(s_notice, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(s_notice, lv_color_hex(0x1B2430), 0);
-        lv_obj_set_style_bg_opa(s_notice, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(s_notice, 0, 0);
-        lv_obj_set_style_pad_all(s_notice, 0, 0);
-        lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-        s_notice_title = lv_label_create(s_notice);
-        lv_obj_set_style_text_color(s_notice_title, lv_color_hex(0xF6D27A), 0);
-        lv_obj_set_style_text_font(s_notice_title, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_align(s_notice_title, LV_TEXT_ALIGN_CENTER, 0);
-        s_notice_body = lv_label_create(s_notice);
-        lv_obj_set_style_text_color(s_notice_body, lv_color_white(), 0);
+    s_notice = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(s_notice, BOARD_DISPLAY_W, BOARD_DISPLAY_H);
+    lv_obj_center(s_notice);
+    lv_obj_set_style_radius(s_notice, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_notice, lv_color_hex(0x1B2430), 0);
+    lv_obj_set_style_bg_opa(s_notice, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_notice, 0, 0);
+    lv_obj_set_style_pad_all(s_notice, 0, 0);
+    lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    s_notice_title = lv_label_create(s_notice);
+    lv_obj_set_style_text_color(s_notice_title, lv_color_hex(0xF6D27A), 0);
+    lv_obj_set_style_text_font(s_notice_title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(s_notice_title, LV_TEXT_ALIGN_CENTER, 0);
+    s_notice_body = lv_label_create(s_notice);
+    lv_obj_set_style_text_color(s_notice_body, lv_color_white(), 0);
+    lv_obj_set_style_text_align(s_notice_body, LV_TEXT_ALIGN_CENTER, 0);
+    s_notice_qr = lv_qrcode_create(s_notice);
+    lv_qrcode_set_size(s_notice_qr, NOTICE_QR_PX);
+    lv_qrcode_set_dark_color(s_notice_qr, lv_color_black());
+    lv_qrcode_set_light_color(s_notice_qr, lv_color_white());
+    lv_obj_set_style_border_color(s_notice_qr, lv_color_white(), 0);
+    lv_obj_set_style_border_width(s_notice_qr, NOTICE_QR_QUIET, 0);
+    lv_obj_add_flag(s_notice_qr, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void notice_draw(void)                      // the ui task, ui_lock held
+{
+    unsigned asked = atomic_load(&s_notice_asked);
+    if (asked == s_notice_drawn) return;
+    static char title[32], qr[160], body[240];
+    mutex_lock(s_notice_mutex);
+    bool show = s_notice_want.show;
+    memcpy(title, s_notice_want.title, sizeof title); memcpy(qr, s_notice_want.qr, sizeof qr); memcpy(body, s_notice_want.body, sizeof body);
+    asked = atomic_load(&s_notice_asked);          // what was copied is this or newer
+    memset(s_notice_want.qr, 0, sizeof s_notice_want.qr);   // the code may hold a password: it lives on the screen only
+    mutex_unlock(s_notice_mutex);
+    s_notice_drawn = asked;
+    if (!show) { if (s_notice) lv_obj_add_flag(s_notice, LV_OBJ_FLAG_HIDDEN); return; }
+    if (!s_notice) notice_build();
+    bool code = qr[0] && lv_qrcode_update(s_notice_qr, qr, (uint32_t)strlen(qr)) == LV_RESULT_OK;
+    memset(qr, 0, sizeof qr);
+    lv_label_set_text(s_notice_title, title);
+    lv_label_set_text(s_notice_body, body);
+    if (code) {
+        lv_obj_remove_flag(s_notice_qr, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(s_notice_qr, LV_ALIGN_CENTER, 0, -22);
+        lv_obj_align(s_notice_title, LV_ALIGN_CENTER, 0, -186);
+        lv_obj_set_style_text_font(s_notice_body, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_line_space(s_notice_body, 4, 0);
+        lv_obj_align(s_notice_body, LV_ALIGN_TOP_MID, 0, BOARD_DISPLAY_H / 2 - 22 + NOTICE_QR_PX / 2 + NOTICE_QR_QUIET + 10);
+    } else {
+        lv_obj_add_flag(s_notice_qr, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(s_notice_title, LV_ALIGN_CENTER, 0, -130);
         lv_obj_set_style_text_font(s_notice_body, &lv_font_montserrat_28, 0);
-        lv_obj_set_style_text_align(s_notice_body, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_line_space(s_notice_body, 12, 0);
+        lv_obj_center(s_notice_body);
     }
-    lv_label_set_text(s_notice_title, title ? title : "");
-    lv_label_set_text(s_notice_body, body ? body : "");
-    lv_obj_align(s_notice_title, LV_ALIGN_CENTER, 0, -130);
-    lv_obj_center(s_notice_body);
     lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_notice);
-    ui_unlock();
 }
 
-void ui_hide_notice(void)
+static void notice_ask(bool show, const char *title, const char *qr, const char *body)
 {
-    ui_lock();
-    if (s_notice) lv_obj_add_flag(s_notice, LV_OBJ_FLAG_HIDDEN);
-    ui_unlock();
+    mutex_lock(s_notice_mutex);
+    s_notice_want.show = show;
+    snprintf(s_notice_want.title, sizeof s_notice_want.title, "%s", title ? title : "");
+    snprintf(s_notice_want.qr, sizeof s_notice_want.qr, "%s", qr ? qr : "");
+    snprintf(s_notice_want.body, sizeof s_notice_want.body, "%s", body ? body : "");
+    atomic_fetch_add(&s_notice_asked, 1);
+    mutex_unlock(s_notice_mutex);
 }
+
+void ui_show_notice(const char *title, const char *qr, const char *body) { notice_ask(true, title, qr, body); }
+void ui_hide_notice(void) { notice_ask(false, NULL, NULL, NULL); }

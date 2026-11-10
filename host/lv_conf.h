@@ -20,6 +20,7 @@
 #define LV_FS_STDIO_PATH ""
 #define LV_FS_STDIO_CACHE_SIZE 0
 #define LV_USE_SNAPSHOT 1
+#define LV_USE_QRCODE 1
 #define LV_USE_DEMO_WIDGETS 0
 #define LV_BUILD_EXAMPLES 0
 #endif

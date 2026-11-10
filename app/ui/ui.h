@@ -95,6 +95,8 @@ void ui_home_lamp(bool on);                     // the room's lamp (a touch on i
 bool ui_home_lamp_is_on(void);
 void ui_set_accessory(const char *id);          // "sun_hat" | "sunglasses" | "camera" | NULL: an overlay that follows the face
 
-// ---- notice card (parent mode shows the hotspot name and password; nothing else puts text on screen) ----
-void ui_show_notice(const char *title, const char *body);   // a full-screen card over the scene; body may have newlines
+// ---- notice card (pairing mode: how to reach the page, a step at a time; nothing else puts text on screen) ----
+// A full-screen card over the scene. qr: what a code for the phone's camera says (body: small lines under it), or NULL
+// (body: large words); body may have newlines. Any task, on any stack: copied, drawn on the next frame, never logged.
+void ui_show_notice(const char *title, const char *qr, const char *body);
 void ui_hide_notice(void);
