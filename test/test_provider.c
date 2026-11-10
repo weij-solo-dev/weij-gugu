@@ -296,6 +296,24 @@ TEST(test_http_tts_worker)
     signal_free(s_hold);
 }
 
+// The pairing page names what to fix from these words: they are part of /api/status, so they do not drift.
+TEST(test_provider_names)
+{
+    CHECK_EQ_STR(provider_role_name(PROVIDER_ROLE_CHAT), "chat");
+    CHECK_EQ_STR(provider_role_name(PROVIDER_ROLE_ASR), "asr");
+    CHECK_EQ_STR(provider_role_name(PROVIDER_ROLE_TTS), "tts");
+    CHECK_EQ_STR(provider_role_name((provider_role_t)0), "");
+    CHECK_EQ_STR(provider_role_name(PROVIDER_ROLE_CHAT | PROVIDER_ROLE_TTS), "");     // not one role
+    CHECK_EQ_STR(provider_error_kind_name(PERR_NONE), "");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_AUTH), "auth");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_QUOTA), "quota");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_NETWORK), "network");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_TIMEOUT), "timeout");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_VOICE_NOT_FOUND), "voice");
+    CHECK_EQ_STR(provider_error_kind_name(PERR_OTHER), "other");
+    CHECK_EQ_STR(provider_error_kind_name((provider_error_kind_t)99), "other");
+}
+
 void test_provider(void)
 {
     RUN(test_volc_frames);
@@ -307,4 +325,5 @@ void test_provider(void)
     RUN(test_vendors_openai_gemini);
     RUN(test_http_tts_worker);
     RUN(test_fake_vendor_roundtrip);
+    RUN(test_provider_names);
 }

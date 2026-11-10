@@ -344,19 +344,22 @@ esp_err_t ui_init(void)
 }
 
 // ---- notice card ----
-// Asked for from any task (pairing mode's Wi-Fi event task among them, on a small stack) and drawn by the ui task on its next
-// frame: the caller only copies. A code is drawn for the phone's camera: dark on white, 8 px a module at the usual 29
+// On LVGL's top layer, which is drawn over the whole scene: the thought bubble, the food and the newspaper each move
+// themselves to the front of the scene when they come, and on the scene the card was under them (2026-11-10, the owner:
+// "气泡有些时候会出现在这个扫码页面"). Asked for from any task (pairing mode's Wi-Fi event task among them, on a small
+// stack) and drawn by the ui task on its next frame: the caller only copies. A code is drawn for the phone's camera: dark on white, 8 px a module at the usual 29
 // (a Wi-Fi code) with a white quiet zone round it; the lines under it are small. With no code the words are large.
 #define NOTICE_QR_PX     232                       // 29 modules × 8; the page's address (25) gets 9 a module
 #define NOTICE_QR_QUIET  16                        // two modules of white: the card round it is dark
 static struct { bool show; char title[32], qr[160], body[240]; } s_notice_want;
 static atomic_uint s_notice_asked;
+static atomic_bool s_notice_on;                    // as asked: touches stop at the card from the moment it is
 static unsigned s_notice_drawn;
 static lv_obj_t *s_notice, *s_notice_title, *s_notice_body, *s_notice_qr;
 
 static void notice_build(void)
 {
-    s_notice = lv_obj_create(lv_screen_active());
+    s_notice = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_notice, BOARD_DISPLAY_W, BOARD_DISPLAY_H);
     lv_obj_center(s_notice);
     lv_obj_set_style_radius(s_notice, LV_RADIUS_CIRCLE, 0);
@@ -414,7 +417,6 @@ static void notice_draw(void)                      // the ui task, ui_lock held
         lv_obj_center(s_notice_body);
     }
     lv_obj_remove_flag(s_notice, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_notice);
 }
 
 static void notice_ask(bool show, const char *title, const char *qr, const char *body)
@@ -424,9 +426,11 @@ static void notice_ask(bool show, const char *title, const char *qr, const char 
     snprintf(s_notice_want.title, sizeof s_notice_want.title, "%s", title ? title : "");
     snprintf(s_notice_want.qr, sizeof s_notice_want.qr, "%s", qr ? qr : "");
     snprintf(s_notice_want.body, sizeof s_notice_want.body, "%s", body ? body : "");
+    atomic_store(&s_notice_on, show);
     atomic_fetch_add(&s_notice_asked, 1);
     mutex_unlock(s_notice_mutex);
 }
+bool ui_notice_shown(void) { return atomic_load(&s_notice_on); }
 
 void ui_show_notice(const char *title, const char *qr, const char *body) { notice_ask(true, title, qr, body); }
 void ui_hide_notice(void) { notice_ask(false, NULL, NULL, NULL); }

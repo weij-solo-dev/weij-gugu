@@ -8,6 +8,7 @@
 #include "foundation/clock.h"
 #include "net/net_wifi_seen.h"
 #include "net/net_wifi_join.h"
+#include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -357,6 +358,48 @@ TEST(test_parent_pairing_card)
     parent_set_hooks(NULL);
 }
 
+// The page's banner (2026-11-10, the owner: "出现匹配页面后，应该给强提醒告诉用户遇到什么问题"): /api/status says whether a
+// call can start and, if not, what is wrong and whose it is.
+static parent_problem_t s_problem;
+static void on_problem(parent_problem_t *p, void *user) { (void)user; *p = s_problem; }
+static cJSON *status_json(void)
+{
+    char *out = NULL; size_t n = 0; const char *ct = NULL, *disp = NULL;
+    parent_api_handle("GET", "/api/status", "", NULL, 0, &out, &n, &ct, &disp);
+    cJSON *j = out ? cJSON_Parse(out) : NULL;
+    free(out);
+    return j;
+}
+
+TEST(test_parent_status_problem)
+{
+    store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    parent_set_hooks(NULL);
+    cJSON *j = status_json();                                          // nobody to ask: the page shows no banner
+    CHECK(j && !cJSON_GetObjectItem(j, "ready") && !cJSON_GetObjectItem(j, "problem"));
+    cJSON_Delete(j);
+
+    parent_hooks_t h = { .problem = on_problem };
+    parent_set_hooks(&h);
+    s_problem = (parent_problem_t){ .ready = false, .cause = "auth", .role = "chat", .vendor = "minimax" };
+    snprintf(s_problem.why, sizeof s_problem.why, "service: chat: invalid api key \"x\" (http 401, code 1004)");
+    j = status_json();
+    CHECK(j && cJSON_IsFalse(cJSON_GetObjectItem(j, "ready")));
+    cJSON *p = cJSON_GetObjectItem(j, "problem");
+    CHECK_EQ_STR(cJSON_GetStringValue(cJSON_GetObjectItem(p, "cause")), "auth");
+    CHECK_EQ_STR(cJSON_GetStringValue(cJSON_GetObjectItem(p, "role")), "chat");
+    CHECK_EQ_STR(cJSON_GetStringValue(cJSON_GetObjectItem(p, "vendor")), "minimax");
+    CHECK_EQ_STR(cJSON_GetStringValue(cJSON_GetObjectItem(p, "why")), s_problem.why);   // quotes and all, as JSON
+    CHECK(cJSON_GetObjectItem(j, "battery_mv") != NULL);               // and the rest of the status as before
+    cJSON_Delete(j);
+
+    s_problem = (parent_problem_t){ .ready = true };
+    j = status_json();
+    CHECK(j && cJSON_IsTrue(cJSON_GetObjectItem(j, "ready")) && !cJSON_GetObjectItem(j, "problem"));
+    cJSON_Delete(j);
+    parent_set_hooks(NULL);
+}
+
 // The camera's format: \ ; , : " in a name or a password are escaped, or the phone reads a different network.
 TEST(test_parent_wifi_code)
 {
@@ -380,4 +423,5 @@ void test_parent(void)
     RUN(test_parent_host_is_name);
     RUN(test_parent_pairing_card);
     RUN(test_parent_wifi_code);
+    RUN(test_parent_status_problem);
 }

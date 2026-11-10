@@ -221,6 +221,14 @@ void provider_configure(void)
          s_role[2] ? s_role[2]->id : "-", s_role[4] ? s_role[4]->id : "-");
 }
 
+const char *provider_role_name(provider_role_t role) { int s = role_slot(role); return s < 0 ? "" : ROLE_NAME[s]; }
+
+const char *provider_error_kind_name(provider_error_kind_t kind)
+{
+    static const char *const N[] = { "", "network", "auth", "quota", "rejected", "voice", "timeout", "protocol", "cancelled", "other" };
+    return (unsigned)kind < sizeof N / sizeof N[0] ? N[kind] : "other";
+}
+
 bool provider_role_ready(provider_role_t role, char *why, size_t cap)
 {
     int s = role_slot(role);

@@ -16,9 +16,15 @@ const char *parent_hotspot_url(void);       // the page address on the hotspot, 
 // with no code the card's words; both NULL: pairing mode is over, the card goes. Any task may call it, the Wi-Fi event
 // task included, with parent's lock held: copy and return. It carries the hotspot password: never log it.
 typedef void (*parent_card_fn)(const char *qr, const char *text, void *user);
+// Why Gugu cannot take a call now: the thought bubble's reason, which the page puts at its top in large (2026-11-10, the
+// owner: "扫码之后，出现匹配页面后，应该给强提醒告诉用户遇到什么问题"). cause: no_wifi (none saved) | offline (the saved one is
+// not there) | no_vendor | no_key | a provider error kind (auth | quota | network | timeout | voice | …: the vendors' check
+// failed); role and vendor: whose it is (a role name and a preset id), when one is. why: the device's own line for it.
+typedef struct { bool ready; char cause[16], role[8], vendor[24], why[160]; } parent_problem_t;
 // Upward hooks app.c wires at init: actions the page triggers in modules parent may not include.
 typedef struct {
     parent_card_fn card;                                                   // the screen in pairing mode (above)
+    void (*problem)(parent_problem_t *p, void *user);                      // fill it in: /api/status carries it
     void (*trip_delete)(void *user);
     void (*memory_forget)(const char *book, const char *key, void *user);   // book: journey (key = trip id) | about_child | canon_grown (key = index)
     void (*test_sound)(void *user);                                        // the page's "test the speaker" button

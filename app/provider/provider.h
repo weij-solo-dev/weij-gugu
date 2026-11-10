@@ -171,6 +171,11 @@ esp_err_t provider_assign(provider_role_t role, const char *vendor_id);
 void provider_configure(void);
 // Can the vendor assigned to this role sign its requests? False with why ("no chat key for volc (ark_api_key)").
 bool provider_role_ready(provider_role_t role, char *why, size_t cap);
+// Names for what went wrong, for the pairing page (it says what to fix): a role ("asr" | "chat" | "tts" | "s2s" | "image",
+// "" for anything else) and an error kind ("network" | "auth" | "quota" | "rejected" | "voice" | "timeout" | "protocol" |
+// "cancelled" | "other"; "" for none).
+const char *provider_role_name(provider_role_t role);
+const char *provider_error_kind_name(provider_error_kind_t kind);
 // Credentials and endpoints are read by vendor files through these; never logged.
 const char *provider_credential(const char *vendor_id, const char *field);   // "api_key", "appid" …
 esp_err_t provider_set_credential(const char *vendor_id, const char *field, const char *value);

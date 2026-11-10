@@ -42,6 +42,7 @@ static lang_t s_lang = LANG_ZH;                               // the interaction
 static enum { HELLO_IDLE, HELLO_MAKING, HELLO_OFFERED } s_hello_state;
 static int64_t s_hello_retry;
 static char s_service_why[120];
+static atomic_int s_service_kind;                             // the failed check's provider_error_kind_t (the page names the fix)
 static int64_t s_last_check;
 static bool can_dial(char *why, size_t cap);
 static instinct_ready_t readiness(char *why, size_t cap);
@@ -141,8 +142,9 @@ static void on_bubble_tap(void *user) { (void)user; if (!parent_is_active()) { s
 // minute while down.
 static void on_service_checked(bool ok, int kind, const char *why, void *user)
 {
-    (void)user; (void)kind;
+    (void)user;
     snprintf(s_service_why, sizeof s_service_why, "%s", why);
+    atomic_store(&s_service_kind, ok ? PERR_NONE : kind);
     if (ok) atomic_store(&s_check_roles, LIFE_CHECK_CHAT);   // what a failed turn added was asked and answered
     if (atomic_exchange(&s_service_ok, ok) != ok) store_event("service %s: %s", ok ? "back" : "trouble", why);
 }
@@ -291,6 +293,31 @@ static instinct_ready_t readiness(char *why, size_t cap)
 
 static bool can_dial(char *why, size_t cap) { return readiness(why, cap) == INSTINCT_READY; }
 
+// The same reason for the pairing page, with whose it is, so the page can say what to fix (parent.h, parent_problem_t).
+static void on_page_problem(parent_problem_t *p, void *user)
+{
+    (void)user;
+    instinct_ready_t r = readiness(p->why, sizeof p->why);
+    p->ready = r == INSTINCT_READY;
+    provider_role_t role = 0;
+    const char *cause = "";
+    if (r == INSTINCT_NEED_SETUP) {
+        char why[96];
+        static const provider_role_t ROLES[] = { PROVIDER_ROLE_CHAT, PROVIDER_ROLE_ASR, PROVIDER_ROLE_TTS };   // keys_ok's order
+        for (int i = 0; i < 3 && !role; i++) if (!provider_role_ready(ROLES[i], why, sizeof why)) role = ROLES[i];
+        cause = !role ? "no_wifi" : provider_for(role) ? "no_key" : "no_vendor";
+    } else if (r == INSTINCT_WIFI_DOWN) cause = "offline";
+    else if (r == INSTINCT_SERVICE_DOWN) {
+        cause = provider_error_kind_name((provider_error_kind_t)atomic_load(&s_service_kind));
+        if (!cause[0]) cause = "other";
+        const char *w = s_service_why;                            // life's check names the role first: "chat: …", "tts: …"
+        role = !strncmp(w, "chat", 4) ? PROVIDER_ROLE_CHAT : !strncmp(w, "tts", 3) ? PROVIDER_ROLE_TTS : !strncmp(w, "asr", 3) ? PROVIDER_ROLE_ASR : 0;
+    }
+    snprintf(p->cause, sizeof p->cause, "%s", cause);
+    snprintf(p->role, sizeof p->role, "%s", role ? provider_role_name(role) : "");
+    snprintf(p->vendor, sizeof p->vendor, "%s", role && provider_for(role) ? provider_for(role)->id : "");
+}
+
 static void service_tick(void)   // once a second from the main loop: start a check when one is due
 {
     char why[96];
@@ -388,7 +415,7 @@ void app_main(void)
                          .on_story_over = on_story_over };
     ESP_ERROR_CHECK(call_init(s_engine, &cc));
     parent_init();
-    parent_hooks_t ph = { .card = on_pairing_card, .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply, .wifi_result = on_wifi_result,
+    parent_hooks_t ph = { .card = on_pairing_card, .problem = on_page_problem, .trip_delete = on_trip_delete, .memory_forget = on_memory_forget, .test_sound = on_test_sound, .volume = on_volume, .test_audio = on_test_audio, .apply = on_apply, .wifi_result = on_wifi_result,
                           .check = on_page_check, .voice_test = on_voice_test, .user = NULL };
     parent_set_hooks(&ph);
     life_init();

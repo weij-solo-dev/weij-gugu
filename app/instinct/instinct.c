@@ -474,6 +474,7 @@ static bool bubble_tap(int64_t now)
 void instinct_yellow_tap(void)
 {
     wake_up();
+    if (ui_notice_shown()) { LOGI("yellow: not now (the pairing card is up)"); return; }   // no food (and no show) behind it
     if (atomic_load(&s_busy) || s_speaking) { LOGI("yellow: not now (%s)", s_speaking ? "a line is playing" : "a turn is on"); return; }
     int64_t now = clock_us();
     s_last_interaction = now;
@@ -722,7 +723,7 @@ bool instinct_night(void) { world_state_t st; world_state(&st); return tod_of(&s
 void instinct_touched(int x, int y)
 {
     wake_up();
-    if (atomic_load(&s_busy)) return;
+    if (atomic_load(&s_busy) || ui_notice_shown()) return;   // the pairing card covers the scene: a touch on it is on nothing
     if (show_tap()) return;                                   // the show: a tap is applause
     int64_t now = clock_us();
     if (now - s_last_touch < 600000) return;

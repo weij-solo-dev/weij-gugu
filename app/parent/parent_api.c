@@ -127,6 +127,16 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         store_secret_get("wifi_ssid", ssid, sizeof ssid);
         cJSON_DeleteItemFromObject(j, "wifi_configured");
         cJSON_AddBoolToObject(j, "wifi_configured", ssid[0] != '\0');
+        if (s_hooks.problem) {                            // can a call start, and if not, what to fix: the page's banner
+            parent_problem_t pr = { .ready = true };
+            s_hooks.problem(&pr, s_hooks.user);
+            cJSON_AddBoolToObject(j, "ready", pr.ready);
+            if (!pr.ready) {
+                cJSON *o = cJSON_AddObjectToObject(j, "problem");
+                cJSON_AddStringToObject(o, "cause", pr.cause); cJSON_AddStringToObject(o, "role", pr.role);
+                cJSON_AddStringToObject(o, "vendor", pr.vendor); cJSON_AddStringToObject(o, "why", pr.why);
+            }
+        }
         cJSON_AddNumberToObject(j, "internal_free", (double)mem_avail_internal());
         cJSON_AddNumberToObject(j, "big_free", (double)mem_avail_big());
         char *txt = cJSON_PrintUnformatted(j); cJSON_Delete(j);

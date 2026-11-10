@@ -100,3 +100,4 @@ void ui_set_accessory(const char *id);          // "sun_hat" | "sunglasses" | "c
 // (body: large words); body may have newlines. Any task, on any stack: copied, drawn on the next frame, never logged.
 void ui_show_notice(const char *title, const char *qr, const char *body);
 void ui_hide_notice(void);
+bool ui_notice_shown(void);                     // the card is up: it covers the scene, which then takes no touches or food
