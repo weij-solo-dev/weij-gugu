@@ -101,12 +101,24 @@ static char *stories_list(const char *dir)
     return json ? json : strdup("[]");
 }
 
-// The routes that read or write the Wi-Fi password and the keys (2026-11-11: anyone on the home network could read them all,
-// and write them). They open only to a phone on the hotspot in pairing mode: the hotspot's password is on the device's
-// screen and new every time, so being on it means having Gugu in hand. The rest of the page stays open on the home network.
-static bool secret_route(bool get, bool post, const char *path)
+// The page and everything behind it open only to a phone on the hotspot in pairing mode (2026-11-11: anyone on the home
+// network could read the keys, the calls, what Gugu remembers about the child, and change any of it). The hotspot's password
+// is on the device's screen and new every time, so being on it means having Gugu in hand. Anyone else gets 403: from the
+// API a word, for the page one that says how to get in. Logged once a minute at most: a tab left open polls every 4 s.
+static int locked(const char *method, const char *path, char **out, size_t *out_len, const char **ctype)
 {
-    return (get && !strcmp(path, "/api/secrets")) || (post && (!strcmp(path, "/api/secret") || !strcmp(path, "/api/wifi/join")));
+    static bool said; static uint32_t said_ms;
+    if (!said || clock_ms() - said_ms >= 60000) {
+        LOGW("%s %s refused: the page opens only to a phone on the hotspot, in pairing mode", method, path);
+        said = true; said_ms = clock_ms();
+    }
+    if (!strncmp(path, "/api/", 5)) return reply(out, out_len, "{\"error\":\"locked\",\"why\":\"pairing mode, from a phone on the hotspot\"}"), 403;
+    char p[200]; snprintf(p, sizeof p, "%s/web/locked.html", store_content_dir());
+    size_t n; char *s = file_read_all(p, &n);
+    *ctype = CT_HTML;
+    if (!s) return reply(out, out_len, "<h1>gugu</h1><p>Pairing mode, from a phone on Gugu's hotspot.</p>"), 403;
+    *out = strdup(s); *out_len = n; mem_release(s);
+    return 403;
 }
 
 static bool secret_declared(const char *k)
@@ -120,12 +132,8 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
 {
     *ctype = CT_JSON; *disposition = NULL; *out = NULL; *out_len = 0;
     bool get = !strcmp(method, "GET"), post = !strcmp(method, "POST");
-    bool open = hotspot && parent_is_active();
-    if (open) pair_page();                                // the page is open on a phone on the hotspot: the screen moves on from the codes
-    if (secret_route(get, post, path) && !open) {
-        LOGW("%s %s refused: the Wi-Fi password and the keys open only to a phone on the hotspot, in pairing mode", method, path);
-        return reply(out, out_len, "{\"error\":\"locked\",\"why\":\"pairing mode, from a phone on the hotspot\"}"), 403;
-    }
+    if (!hotspot || !parent_is_active()) return locked(method, path, out, out_len, ctype);
+    pair_page();                                          // the page is open on a phone on the hotspot: the screen moves on from the codes
     char p[200];
     if (get && (!strcmp(path, "/") || !strcmp(path, "/index.html"))) {
         snprintf(p, sizeof p, "%s/web/index.html", store_content_dir());
@@ -147,7 +155,6 @@ int parent_api_handle(const char *method, const char *path, const char *query, c
         cJSON_DeleteItemFromObject(j, "wifi_configured");
         cJSON_AddBoolToObject(j, "wifi_configured", ssid[0] != '\0');
         cJSON_AddBoolToObject(j, "pairing", parent_is_active());
-        cJSON_AddBoolToObject(j, "secrets_open", open);  // may this page see and change the Wi-Fi password and the keys
         if (s_hooks.problem) {                            // can a call start, and if not, what to fix: the page's banner
             parent_problem_t pr = { .ready = true };
             s_hooks.problem(&pr, s_hooks.user);

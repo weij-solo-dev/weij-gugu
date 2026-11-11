@@ -4,9 +4,9 @@
 #include <stdint.h>
 
 // The platform-independent request handler. `body` may be NULL. `hotspot`: the request came from a phone on the hotspot
-// (the platform knows by the addresses; the simulator says so in pairing mode). Only such a request, in pairing mode, reads
-// or writes the Wi-Fi password and the keys; anyone else gets 403. On return, *out is a malloc'd buffer the platform sends
-// and frees; *ctype is a static string. Returns the HTTP status.
+// (the platform knows by the addresses; the simulator says so in pairing mode). Only such a request, in pairing mode, is
+// answered; anyone else gets 403 (from the API a word, for the page content/web/locked.html: how to get in). On return,
+// *out is a malloc'd buffer the platform sends and frees; *ctype is a static string. Returns the HTTP status.
 int parent_api_handle(const char *method, const char *path, const char *query, const char *body, size_t body_len, bool hotspot,
                       char **out, size_t *out_len, const char **ctype, const char **disposition);
 

@@ -2,7 +2,7 @@
 // list: one sweep misses networks, so what the sweeps find is remembered until three in a row have not seen it. Its
 // "connect": a network is tried first and kept only if it works. Its captive portal: every name answered with the device.
 // The device's screen in pairing mode: the codes for the phone's camera, a step at a time.
-// Its lock: the Wi-Fi password and the keys only to a phone on the hotspot, in pairing mode.
+// Its lock: the page and everything behind it only to a phone on the hotspot, in pairing mode.
 #include "minitest.h"
 #include "parent/parent_internal.h"
 #include "store/store.h"
@@ -34,6 +34,7 @@ TEST(test_parent_volume)
     int keep = store_setting_int("volume", -1);
     parent_hooks_t h = { .volume = on_volume };
     parent_set_hooks(&h);
+    CHECK_EQ_INT(parent_enter(), ESP_OK);                       // the page answers a phone on the hotspot, in pairing mode
     CHECK_EQ_INT(post("/api/volume", "{\"volume\":40}"), 200);
     CHECK_EQ_INT(s_heard, 40);                                   // the speaker has it now
     CHECK_EQ_INT(store_setting_int("volume", -1), 40);           // and it is kept for the next boot
@@ -46,6 +47,7 @@ TEST(test_parent_volume)
     CHECK_EQ_INT(post("/api/volume", NULL), 400);
     CHECK_EQ_INT(store_setting_int("volume", -1), 40);           // nothing bad was kept
     if (keep >= 0) store_setting_set_int("volume", keep);
+    parent_exit();
     parent_set_hooks(NULL);
 }
 
@@ -90,6 +92,7 @@ TEST(test_wifi_seen)
 TEST(test_parent_wifi_list)
 {
     store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
+    CHECK_EQ_INT(parent_enter(), ESP_OK);
     char *out = NULL; size_t n = 0; const char *ct = NULL, *disp = NULL;
     CHECK_EQ_INT(parent_api_handle("GET", "/api/wifi/scan", "sweep=1", NULL, 0, true, &out, &n, &ct, &disp), 200);
     CHECK(out && strstr(out, "\"sweeping\":") && strstr(out, "\"aps\":[{\"ssid\":\"") && strstr(out, "\"secure\":"));
@@ -97,6 +100,7 @@ TEST(test_parent_wifi_list)
     CHECK_EQ_INT(parent_api_handle("GET", "/api/wifi/scan", "", NULL, 0, true, &out, &n, &ct, &disp), 200);
     CHECK(out && strstr(out, "\"aps\":["));
     free(out);
+    parent_exit();
 }
 
 // What the radio says when an attempt ends → the verdict: one bad handshake can be a weak signal, so it takes two.
@@ -162,7 +166,7 @@ TEST(test_parent_wifi_join)
     store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
     parent_hooks_t h = { .wifi_result = on_wifi_result };
     parent_set_hooks(&h);
-    CHECK_EQ_INT(parent_enter(), ESP_OK);                                 // the page's "connect" works from the hotspot only
+    CHECK_EQ_INT(parent_enter(), ESP_OK);                                 // the page answers a phone on the hotspot, in pairing mode
     const char *body = "{\"ssid\":\"NewNet\",\"pass\":\"newpass12\"}";
 
     store_secret_set("wifi_ssid", "OldNet"); store_secret_set("wifi_pass", "oldpass12");
@@ -384,6 +388,7 @@ TEST(test_parent_status_problem)
 {
     store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
     parent_set_hooks(NULL);
+    CHECK_EQ_INT(parent_enter(), ESP_OK);
     cJSON *j = status_json();                                          // nobody to ask: the page shows no banner
     CHECK(j && !cJSON_GetObjectItem(j, "ready") && !cJSON_GetObjectItem(j, "problem"));
     cJSON_Delete(j);
@@ -406,6 +411,7 @@ TEST(test_parent_status_problem)
     j = status_json();
     CHECK(j && cJSON_IsTrue(cJSON_GetObjectItem(j, "ready")) && !cJSON_GetObjectItem(j, "problem"));
     cJSON_Delete(j);
+    parent_exit();
     parent_set_hooks(NULL);
 }
 
@@ -423,44 +429,60 @@ TEST(test_parent_wifi_code)
 
 static bool has(const char *out, const char *what) { return out && strstr(out, what); }
 
-// The Wi-Fi password and the keys open only to a phone on the hotspot in pairing mode (2026-11-11: anyone on the home
-// network could read them all, and write them). The hotspot's password is on the device's screen, so being on it means
-// having Gugu in hand. The rest of the page stays open on the home network.
-TEST(test_parent_secrets_locked)
+static int s_forgot, s_trip_gone, s_applied;
+static void on_forget(const char *book, const char *key, void *user) { (void)book; (void)key; (void)user; s_forgot++; }
+static void on_trip_delete(void *user) { (void)user; s_trip_gone++; }
+static void on_apply(void *user) { (void)user; s_applied++; }
+
+// The page and everything behind it open only to a phone on the hotspot in pairing mode (2026-11-11: anyone on the home
+// network could read the keys, the calls and what Gugu remembers about the child, and change any of it). The hotspot's
+// password is on the device's screen, so being on it means having Gugu in hand. Anyone else: 403, and a page saying how.
+TEST(test_parent_locked)
 {
     store_init(TEST_DATA, GUGU_REPO_ROOT "/content");
-    parent_set_hooks(NULL);
+    parent_hooks_t h = { .volume = on_volume, .memory_forget = on_forget, .trip_delete = on_trip_delete, .apply = on_apply };
+    parent_set_hooks(&h);
+    s_heard = -1; s_forgot = s_trip_gone = s_applied = 0;
     store_secret_set("wifi_ssid", "HomeNet"); store_secret_set("wifi_pass", "home-pass-9");
+    char name[40]; snprintf(name, sizeof name, "%s", store_setting_str("child_name", ""));
+    store_setting_set_str("child_name", "Mia");
     char last_join[40]; snprintf(last_join, sizeof last_join, "%s", net_host_last_join());
-    const char *method[] = { "GET", "POST", "POST" }, *path[] = { "/api/secrets", "/api/secret", "/api/wifi/join" };
-    const char *body[] = { NULL, "{\"key\":\"wifi_pass\",\"value\":\"stolen-pass\"}", "{\"ssid\":\"EvilNet\",\"pass\":\"evilpass1\"}" };
+    static const struct { const char *method, *path, *body; } R[] = {
+        { "GET", "/api/status", NULL }, { "GET", "/api/secrets", NULL }, { "GET", "/api/settings", NULL }, { "GET", "/api/calls", NULL },
+        { "GET", "/api/stories", NULL }, { "GET", "/api/trip", NULL }, { "GET", "/api/trips", NULL }, { "GET", "/api/events", NULL },
+        { "GET", "/api/logs", NULL }, { "GET", "/api/export", NULL }, { "GET", "/api/providers", NULL }, { "GET", "/api/wifi/scan", NULL },
+        { "GET", "/api/memory", NULL }, { "GET", "/api/wifi/join", NULL },
+        { "POST", "/api/secret", "{\"key\":\"wifi_pass\",\"value\":\"stolen-pass\"}" },
+        { "POST", "/api/wifi/join", "{\"ssid\":\"EvilNet\",\"pass\":\"evilpass1\"}" },
+        { "POST", "/api/settings", "{\"child_name\":\"Eve\"}" }, { "POST", "/api/apply", NULL }, { "POST", "/api/volume", "{\"volume\":5}" },
+        { "POST", "/api/memory/forget", "{\"book\":\"journey\",\"key\":\"x\"}" }, { "POST", "/api/trip/delete", NULL },
+    };
     char *out = NULL;
-    for (int from_ap = 0; from_ap < 2; from_ap++)                      // pairing mode off: locked, from anywhere
-        for (int r = 0; r < 3; r++) {
-            CHECK_EQ_INT(call(method[r], path[r], body[r], from_ap, &out), 403);
-            CHECK(has(out, "\"locked\"") && !has(out, "home-pass-9"));
+    for (int round = 0; round < 3; round++) {                          // off from home, off from the hotspot's side, on from home
+        bool from_ap = round == 1;
+        if (round == 2) CHECK_EQ_INT(parent_enter(), ESP_OK);
+        for (size_t r = 0; r < sizeof R / sizeof R[0]; r++) {
+            CHECK_EQ_INT(call(R[r].method, R[r].path, R[r].body, from_ap, &out), 403);
+            CHECK(has(out, "\"locked\"") && !has(out, "home-pass-9") && !has(out, "HomeNet") && !has(out, "Mia"));
             free(out);
         }
-    CHECK_EQ_INT(call("GET", "/api/status", NULL, false, &out), 200);
-    CHECK(has(out, "\"secrets_open\":false") && has(out, "\"pairing\":false"));
-    free(out);
-
-    CHECK_EQ_INT(parent_enter(), ESP_OK);                              // pairing mode on, but from the home network: locked
-    for (int r = 0; r < 3; r++) {
-        CHECK_EQ_INT(call(method[r], path[r], body[r], false, &out), 403);
-        CHECK(!has(out, "home-pass-9"));
+        CHECK_EQ_INT(call("GET", "/", NULL, from_ap, &out), 403);      // the page: how to get in, and nothing else
+        CHECK(has(out, "黄键 3 秒") && !has(out, "/api/"));
         free(out);
     }
     CHECK(secret_is("wifi_pass", "home-pass-9") && secret_is("wifi_ssid", "HomeNet"));   // nothing written
+    CHECK_EQ_STR(store_setting_str("child_name", ""), "Mia");
     CHECK_EQ_STR(net_host_last_join(), last_join);                                      // nothing tried
-    CHECK_EQ_INT(call("GET", "/api/status", NULL, false, &out), 200);
-    CHECK(has(out, "\"secrets_open\":false") && has(out, "\"pairing\":true"));
-    free(out);
-    CHECK_EQ_INT(call("GET", "/api/settings", NULL, false, NULL), 200);  // the rest of the page works at home
-    CHECK_EQ_INT(call("GET", "/api/events", NULL, false, NULL), 200);
+    CHECK(s_heard == -1 && !s_forgot && !s_trip_gone && !s_applied);                    // nothing done
 
-    CHECK_EQ_INT(call("GET", "/api/status", NULL, true, &out), 200);     // from the hotspot: open
-    CHECK(has(out, "\"secrets_open\":true"));
+    CHECK_EQ_INT(call("GET", "/", NULL, true, &out), 200);             // a phone on the hotspot: the page
+    CHECK(has(out, "/api/status"));
+    free(out);
+    CHECK_EQ_INT(call("GET", "/api/status", NULL, true, &out), 200);
+    CHECK(has(out, "\"pairing\":true"));
+    free(out);
+    CHECK_EQ_INT(call("GET", "/api/settings", NULL, true, &out), 200);
+    CHECK(has(out, "Mia"));
     free(out);
     CHECK_EQ_INT(call("GET", "/api/secrets", NULL, true, &out), 200);
     CHECK(has(out, "\"wifi_pass\":\"home-pass-9\""));
@@ -470,9 +492,12 @@ TEST(test_parent_secrets_locked)
     CHECK_EQ_INT(call("POST", "/api/secret", "{\"key\":\"made_up\",\"value\":\"x\"}", true, NULL), 400);   // only the secrets declared
     CHECK(!secret_is("made_up", "x"));
 
-    parent_exit();
-    CHECK_EQ_INT(call("GET", "/api/secrets", NULL, true, NULL), 403);   // and shut again when pairing mode ends
+    parent_exit();                                                     // and shut again when pairing mode ends
+    CHECK_EQ_INT(call("GET", "/api/secrets", NULL, true, NULL), 403);
+    CHECK_EQ_INT(call("GET", "/", NULL, true, NULL), 403);
     store_secret_set("wifi_ssid", ""); store_secret_set("wifi_pass", "");
+    store_setting_set_str("child_name", name);
+    parent_set_hooks(NULL);
 }
 
 void test_parent(void)
@@ -487,5 +512,5 @@ void test_parent(void)
     RUN(test_parent_pairing_card);
     RUN(test_parent_wifi_code);
     RUN(test_parent_status_problem);
-    RUN(test_parent_secrets_locked);
+    RUN(test_parent_locked);
 }

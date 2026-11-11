@@ -66,6 +66,7 @@ const char *board_reset_reason(void);    // why the chip last started: "power-on
 // False when there is none.
 bool board_crash_report(char *what, size_t what_cap, char *bt, size_t bt_cap);
 void board_firmware_id(char *out, size_t cap);   // the running firmware's ELF SHA-256 (hex, the first 8): which ELF decodes a backtrace
+void board_firmware_version(char *out, size_t cap);   // the commit it was built from (git describe, "-dirty" with local changes; "host")
 int  board_battery_mv(void);             // -1 on error
 bool board_is_charging(void);
 void board_vibrate(uint16_t ms);

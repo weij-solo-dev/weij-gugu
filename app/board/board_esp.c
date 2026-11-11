@@ -93,6 +93,8 @@ void board_firmware_id(char *out, size_t cap)
     snprintf(out, cap, "%.8s", sha);
 }
 
+void board_firmware_version(char *out, size_t cap) { snprintf(out, cap, "%s", esp_app_get_description()->version); }   // IDF stamps it at build
+
 void board_vibrate(uint16_t ms)
 {
     if (!s_motor_timer) {

@@ -452,15 +452,16 @@ void app_main(void)
          provider_for(PROVIDER_ROLE_TTS)->id, provider_for(PROVIDER_ROLE_IMAGE)->id);
     {   // what the pairing page and a report need to know about this boot
         char v[256]; bool have_key = keys_ok(v, sizeof v), have_wifi = store_secret_get("wifi_ssid", v, sizeof v) == ESP_OK && v[0];   // keys: every vendor a call needs has one
-        char boot[720], path[200], fw[16], crash[200] = "", bt[200] = "";
+        char boot[760], path[200], fw[16], ver[40], crash[200] = "", bt[200] = "";
         board_firmware_id(fw, sizeof fw);
+        board_firmware_version(ver, sizeof ver);   // the page shows it: the commit, never a date someone forgot to change
         bool crashed = board_crash_report(crash, sizeof crash, bt, sizeof bt);   // the last run's crash, if a core dump says so
-        snprintf(boot, sizeof boot, "{\"version\":\"v1.1 2026-11-05\",\"firmware\":\"%s\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d%s%s%s%s%s}",
-                 fw, board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", AUDIO_VOLUME_DEFAULT),
+        snprintf(boot, sizeof boot, "{\"version\":\"%s\",\"firmware\":\"%s\",\"reset_reason\":\"%s\",\"audio\":%s,\"wifi_configured\":%s,\"key_configured\":%s,\"volume\":%d%s%s%s%s%s}",
+                 ver, fw, board_reset_reason(), audio_err == ESP_OK ? "true" : "false", have_wifi ? "true" : "false", have_key ? "true" : "false", store_setting_int("volume", AUDIO_VOLUME_DEFAULT),
                  crashed ? ",\"crash\":\"" : "", crashed ? crash : "", crashed ? "\",\"backtrace\":\"" : "", crashed ? bt : "", crashed ? "\"" : "");
         snprintf(path, sizeof path, "%s/logs/boot.json", DATA_DIR);
         atomic_file_write(path, boot, strlen(boot));
-        store_event("boot (%s): firmware %s, audio %s, wifi %s, key %s, online %s", board_reset_reason(), fw, audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
+        store_event("boot (%s): firmware %s (elf %s), audio %s, wifi %s, key %s, online %s", board_reset_reason(), ver, fw, audio_err == ESP_OK ? "ok" : "FAILED", have_wifi ? "set" : "unset", have_key ? "set" : "unset", net_is_online() ? "yes" : "no");
         if (crashed) { store_event("crash: %s", crash); store_event("crash backtrace: %s", bt); LOGE("the last run crashed: %s | %s", crash, bt); }
         store_logs_flush();                      // the boot's log reaches flash at once: a crash a minute later must not take it along
     }
