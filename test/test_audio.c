@@ -184,6 +184,51 @@ TEST(test_audio_song)
     audio_set_volume(AUDIO_VOLUME_DEFAULT);
 }
 
+// A tap during the show (2026-11-12, the owner: "音乐会中断并出现奇怪异响"): the applause is mixed over the song at once,
+// not queued 1.2 s behind it. The lullaby (no drums, so no noise) is pulled twice, once with a clap: before the clap the
+// two are the same sample for sample, during it they differ by the clap lifted to MIX_PEAK, and after it they are the same
+// again: not one sample of the song moved. Out of a song an effect stays in line.
+#define SONG_FRAMES 250                                  // 5 s
+static void pull_lullaby(int16_t *dst, int clap_at)     // the song's first 5 s; a clap after frame clap_at (-1: none)
+{
+    audio_play_flush();
+    CHECK(audio_song_play("lullaby", NULL, NULL) == ESP_OK);
+    for (int f = 0; f < SONG_FRAMES;) {
+        if (audio_play_queued_ms() < 40) { usleep(500); continue; }   // the song renders ahead; pull whole frames of it
+        if (f == clap_at) CHECK_EQ_INT(audio_sfx_play("clap"), ESP_OK);
+        audio_pull(dst + f * 320, 320); f++;
+    }
+    audio_song_stop();
+}
+TEST(test_audio_effect_over_a_song)
+{
+    audio_once(); audio_set_volume(100);
+    bool loud = audio_loudness(false);                  // the samples as mixed, not as levelled
+    int16_t *a = malloc(SONG_FRAMES * 320 * 2), *b = malloc(SONG_FRAMES * 320 * 2);
+    pull_lullaby(a, -1);
+    pull_lullaby(b, 50);                                 // at 1 s
+    int at = 50 * 320, first = -1, peak = 0, before = 0, after = 0;
+    for (int i = 0; i < SONG_FRAMES * 320; i++) {
+        int d = b[i] - a[i];
+        if (i < at) before += d != 0;
+        else if (i >= at + 20800) after += d != 0;
+        else { if (d && first < 0) first = i - at; if (abs(d) > peak) peak = abs(d); }
+    }
+    CHECK_EQ_INT(before, 0);
+    CHECK(first >= 0 && first < 320);                    // heard in the very next frame
+    CHECK(peak > 11000 && peak <= 14100);                // lifted to about MIX_PEAK (a clamp at a song's peak takes a little)
+    CHECK_EQ_INT(after, 0);                              // and the song is where it was
+    free(a); free(b);
+
+    audio_play_flush();                                  // no song: in line, after what is queued
+    uint64_t w = audio_written_samples();
+    CHECK_EQ_INT(audio_sfx_play("coo"), ESP_OK);
+    CHECK_EQ_INT((int)(audio_written_samples() - w), 7040);
+    audio_play_flush();
+    audio_loudness(loud);
+    audio_set_volume(AUDIO_VOLUME_DEFAULT);
+}
+
 // ---- the speaker's loudness (2026-11-09, the owner: "现在 gugu 说话太小声了，即使10格也很小声") ----
 static int16_t *voice_fixture(size_t *n)   // MiniMax's voice as it arrives: about −25 dBFS while it sounds, peaks at −9 dBFS
 {
@@ -311,5 +356,6 @@ void test_audio(void)
     RUN(test_audio_selftest_keeps_its_own_level);
     RUN(test_audio_level_is_the_voice_not_the_volume);
     RUN(test_audio_song);
+    RUN(test_audio_effect_over_a_song);
     RUN(test_audio_capture_stop_waits_for_a_frame);
 }

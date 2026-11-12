@@ -43,6 +43,20 @@ static audio_capture_cb s_cap_cb; static void *s_cap_user;
 static atomic_bool s_cap_active;
 static char s_sfx_dir[128] = "content/sfx";
 
+// Effects over a song (2026-11-12, the owner: "触发它唱歌的时候，如果我再屏幕点击触发它交互……音乐会中断并出现奇怪异响").
+// The song renders 1.2 s ahead into the one playback ring, so a tap's applause went in behind it: heard 1.2 s late, the
+// song stopped for its 1.3 s, every beat after it late by as much, and the leveller lifting the quiet clap like a quiet
+// voice until the song slammed back in. While a song plays, an effect is mixed over it as the output pulls instead: heard
+// at once, every sample of the song where it was. It is lifted so its peak reaches MIX_PEAK (the clap is quiet on file;
+// alone, the leveller lifts it). Everywhere else an effect stays in line: a [coo] in a sentence is heard where it was said.
+#define MIX_SAMPLES   (AUDIO_SAMPLE_RATE * 2)
+#define MIX_PEAK      14000
+#define MIX_MAX_LIFT  6
+static int16_t *s_mix;                               // PSRAM ring: s_mix_n samples still to be heard, from s_mix_at
+static size_t s_mix_at, s_mix_n;
+static atomic_bool s_mix_on;
+static int16_t clamp16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+
 esp_err_t audio_common_init(const char *sfx_dir)
 {
     s_lock = mutex_create();
@@ -51,6 +65,8 @@ esp_err_t audio_common_init(const char *sfx_dir)
     s_ring_mem = mem_alloc_big(AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
     if (!s_ring_mem) return ESP_ERR_NO_MEM;
     ringbuf_init(&s_ring, s_ring_mem, AUDIO_SAMPLE_RATE * 2 * PLAY_RING_SECONDS);
+    s_mix = mem_alloc_big(MIX_SAMPLES * 2);
+    if (!s_mix) return ESP_ERR_NO_MEM;
     if (sfx_dir) snprintf(s_sfx_dir, sizeof s_sfx_dir, "%s", sfx_dir);
     if (sfx_dir) {                                                 // the songs sit beside the sound effects: …/sfx → …/songs
         char songs[140]; snprintf(songs, sizeof songs, "%s", sfx_dir);
@@ -84,7 +100,25 @@ void audio_play_flush(void)
     ringbuf_clear(&s_ring);
     atomic_store(&s_played, atomic_load(&s_written));
     s_marker_n = 0;
+    s_mix_n = 0; atomic_store(&s_mix_on, false);
     mutex_unlock(s_lock);
+}
+
+static esp_err_t mix_pcm(const int16_t *pcm, size_t n)        // over what is playing, from the next pull on
+{
+    if (n > MIX_SAMPLES) n = MIX_SAMPLES;
+    int peak = 1;
+    for (size_t i = 0; i < n; i++) { int a = pcm[i] < 0 ? -pcm[i] : pcm[i]; if (a > peak) peak = a; }
+    int lift = MIX_PEAK * 256 / peak; if (lift > MIX_MAX_LIFT * 256) lift = MIX_MAX_LIFT * 256;   // Q8
+    mutex_lock(s_lock);
+    for (size_t i = 0; i < n; i++) {                           // a second tap's applause joins the first's
+        size_t k = (s_mix_at + i) % MIX_SAMPLES;
+        s_mix[k] = clamp16((int32_t)pcm[i] * lift / 256 + (i < s_mix_n ? s_mix[k] : 0));
+    }
+    if (n > s_mix_n) s_mix_n = n;
+    atomic_store(&s_mix_on, true);
+    mutex_unlock(s_lock);
+    return ESP_OK;
 }
 
 uint8_t audio_play_level(void) { return (uint8_t)atomic_load(&s_level); }
@@ -117,6 +151,14 @@ size_t audio_pull(int16_t *out, size_t samples)
     int rms = got ? (int)(__builtin_sqrt((double)(acc / got)) / 32.0) : 0;    // RMS / 32: Gugu's voice reads about 30, 8160 and up 255
     atomic_store(&s_level, rms > 255 ? 255 : rms);
     if (got < samples) memset(out + got, 0, (samples - got) * 2);
+    if (atomic_load(&s_mix_on)) {                      // the effects over the song: after the beak's level, which is Gugu's alone
+        mutex_lock(s_lock);
+        size_t k = s_mix_n < samples ? s_mix_n : samples;
+        for (size_t i = 0; i < k; i++) out[i] = clamp16((int32_t)out[i] + s_mix[(s_mix_at + i) % MIX_SAMPLES]);
+        s_mix_at = (s_mix_at + k) % MIX_SAMPLES; s_mix_n -= k;
+        if (!s_mix_n) atomic_store(&s_mix_on, false);
+        mutex_unlock(s_lock);
+    }
     if (atomic_load(&s_loud_on)) audio_loud_run(&s_loud, out, samples);   // the padding too: the look-ahead drains through it
     int g = atomic_load(&s_gain);
     if (g < 32768) for (size_t i = 0; i < samples; i++) out[i] = (int16_t)((int32_t)out[i] * g / 32768);
@@ -205,13 +247,7 @@ esp_err_t audio_capture_inject_wav(const char *path, bool realtime)
 }
 
 // ---- sfx ----
-esp_err_t audio_sfx_play(const char *name)
-{
-    char path[200]; snprintf(path, sizeof path, "%s/%s.wav", s_sfx_dir, name);
-    return audio_play_file(path);
-}
-
-esp_err_t audio_play_file(const char *path)
+static esp_err_t play_wav(const char *path, bool over)
 {
     size_t n; char *buf = file_read_all(path, &n);
     if (!buf) { LOGW("sound %s missing", path); return ESP_ERR_NOT_FOUND; }
@@ -219,11 +255,19 @@ esp_err_t audio_play_file(const char *path)
     esp_err_t err = ESP_ERR_INVALID_ARG;
     if (wav_parse_header((uint8_t *)buf, n, &sr, &ch, &bytes, &off) && sr == AUDIO_SAMPLE_RATE && ch == 1) {
         size_t total = bytes / 2; if (off + bytes > n) total = (n - off) / 2;
-        err = audio_play_pcm((const int16_t *)(buf + off), total);
+        err = over ? mix_pcm((const int16_t *)(buf + off), total) : audio_play_pcm((const int16_t *)(buf + off), total);
     }
     mem_release(buf);
     return err;
 }
+
+esp_err_t audio_sfx_play(const char *name)                     // over a song, in line with anything else
+{
+    char path[200]; snprintf(path, sizeof path, "%s/%s.wav", s_sfx_dir, name);
+    return play_wav(path, audio_song_playing());
+}
+
+esp_err_t audio_play_file(const char *path) { return play_wav(path, false); }
 
 // ---- self-test ----
 static void selftest_cb(const int16_t *pcm, size_t n, void *user) { (void)pcm; (void)n; (void)user; }
